@@ -44,7 +44,7 @@ const keysFor = (type: string, legend: boolean): string[] => {
 
 /** True when `text` ends inside an unclosed `legend ... {` block (braces in strings and comments are ignored). */
 export function insideLegendBlock(text: string): boolean {
-  const re = /\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|[{}]|\blegend\b/g;
+  const re = /\/\/[^\n]*|"(?:[^"\\\n]|\\.)*"|[{}]|(?<![\w-])legend(?![\w-])/g;
   let depth = 0;
   let legendDepth = -1;
   let pendingLegend = false;
@@ -67,17 +67,18 @@ export type AttrCompletion = { from: number; options: Completion[] };
 
 /**
  * Completions for the cursor at the end of `before` (the current line up to the cursor).
- * `above` is the document text before the current line; with it, item lines inside a multi-line
+ * `above` is the document text before the current line (or a function giving it, called only when the cursor is
+ * at the start of an item line, so typing elsewhere never copies the document); with it, item lines inside a multi-line
  * `legend { ... }` get the legend keys. Returns null outside a `[ ... ]` list or inside a quoted string.
  * `from` is relative to the line start. BPMN has no attribute list in the DSL, so nothing is offered.
  */
-export function attributeCompletions(type: string, before: string, above = ''): AttrCompletion | null {
+export function attributeCompletions(type: string, before: string, above: string | (() => string) = ''): AttrCompletion | null {
   if (type === 'bpmn') return null;
   const open = before.lastIndexOf('[');
   if (open < 0 || before.indexOf(']', open) >= 0) return null;
   const inner = before.slice(open + 1);
   if (((inner.match(/"/g) ?? []).length & 1) === 1) return null;
-  const legend = /^\s*legend\b/.test(before) || (open >= 0 && /^\s*$/.test(before.slice(0, open)) && insideLegendBlock(above));
+  const legend = /^\s*legend(?![\w-])/.test(before) || (/^\s*$/.test(before.slice(0, open)) && insideLegendBlock(typeof above === 'function' ? above() : above));
   const segStart = inner.lastIndexOf(',') + 1;
   const seg = inner.slice(segStart);
   const colon = seg.indexOf(':');
@@ -100,7 +101,7 @@ export function attributeCompletions(type: string, before: string, above = ''): 
 export function dslCompletionSource(getType: () => string) {
   return (cx: CompletionContext): CompletionResult | null => {
     const line = cx.state.doc.lineAt(cx.pos);
-    const r = attributeCompletions(getType(), line.text.slice(0, cx.pos - line.from), cx.state.doc.sliceString(0, line.from));
+    const r = attributeCompletions(getType(), line.text.slice(0, cx.pos - line.from), () => cx.state.doc.sliceString(0, line.from));
     if (!r) return null;
     // Open on typing; Ctrl+Space (explicit) also opens right after `[`, `,` or `:`.
     const typed = cx.pos - (line.from + r.from);
