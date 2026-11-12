@@ -7,6 +7,7 @@ import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalid
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
+import { BlockProps } from '../BlockProps';
 import { CanvasInsertMenu } from './CanvasInsertMenu';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram } from '../dsl/adapter';
@@ -384,6 +385,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
               닫기
             </button>
           </div>
+          <BlockProps type={block.type} code={block.code} onChange={(code) => patchBlock({ code })} />
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>

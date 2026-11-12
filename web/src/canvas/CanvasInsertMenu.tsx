@@ -114,8 +114,13 @@ export function CanvasInsertMenu({ api, wrap, onBlock }: Props) {
       ref={box}
       className="doc-slash canvas-insert absolute z-20"
       style={{ left: spot.left, top: spot.top, width: MENU_W, maxHeight: MENU_H }}
+      onBlur={(e) => {
+        // Tabbing out leaves the menu: close it so keys don't go somewhere unseen.
+        if (!box.current?.contains(e.relatedTarget as Node | null)) close();
+      }}
       onKeyDown={(e) => {
-        if (e.nativeEvent.isComposing) return;
+        // Korean IME: the Enter that commits a syllable is not a pick (Chrome marks it composing, Safari sends keyCode 229).
+        if (e.nativeEvent.isComposing || e.keyCode === 229) return;
         if (e.key === 'Escape') close();
         else if (e.key === 'ArrowDown' && items.length) setActive((i) => (i + 1) % items.length);
         else if (e.key === 'ArrowUp' && items.length) setActive((i) => (i - 1 + items.length) % items.length);
@@ -127,6 +132,10 @@ export function CanvasInsertMenu({ api, wrap, onBlock }: Props) {
     >
       <input
         autoFocus
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="canvas-insert-list"
+        aria-activedescendant={items[active] ? `canvas-insert-${items[active].id}` : undefined}
         aria-label="넣을 것 찾기"
         placeholder="찾기…"
         value={query}
@@ -135,17 +144,21 @@ export function CanvasInsertMenu({ api, wrap, onBlock }: Props) {
           setActive(0);
         }}
       />
-      <div ref={list} role="listbox" aria-label="캔버스에 넣기">
+      <div ref={list} id="canvas-insert-list" role="listbox" aria-label="캔버스에 넣기">
         {items.length === 0 ? (
           <p className="doc-slash-empty">맞는 항목이 없어요</p>
         ) : (
           items.map((it, i) => (
             <button
               key={it.id}
+              id={`canvas-insert-${it.id}`}
               type="button"
+              tabIndex={-1}
               role="option"
               aria-selected={i === active}
               onMouseEnter={() => setActive(i)}
+              // Keep focus in the search box so the blur-to-close above doesn't fire on a click.
+              onMouseDown={(e) => e.preventDefault()}
               onClick={() => insert(it)}
             >
               <span>{it.title}</span>
