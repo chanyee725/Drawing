@@ -1,7 +1,7 @@
 // Version history of the open file: the saved versions, a read-only preview, and "restore".
 // Restoring is a normal save of that version's content over the current file (App does it).
 import { useEffect, useRef, useState } from 'react';
-import { api, type HistoryEntry, type HistoryVersion } from './api';
+import { api, ApiError, type HistoryEntry, type HistoryVersion } from './api';
 import { documentToMarkdown } from './export/markdown';
 
 type Props = {
@@ -13,7 +13,13 @@ type Props = {
 };
 
 const when = (t: number) => new Date(t).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
-const errText = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+// Server messages are English; show Korean copy by status, never the raw message.
+const errText = (e: unknown, fallback: string) => {
+  const status = e instanceof ApiError ? e.status : 0;
+  if (status === 404) return '이 버전을 찾지 못했어요';
+  if (status === 422) return '이 버전을 읽을 수 없어요';
+  return fallback;
+};
 
 /** Block diagrams and free-form drawings of a version, drawn with the same renderers as the app (loaded on use). */
 function Pictures({ v, dark }: { v: HistoryVersion; dark: boolean }) {
