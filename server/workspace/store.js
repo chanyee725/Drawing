@@ -49,6 +49,10 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     parseRelPath(rel);
     return isDpx(rel) ? rel : rel + FILE_EXT;
   };
+  // A folder named like a file (`x.dpx.json/`) would be confused with a file, so no path may contain one.
+  const checkFolderNames = (segs) => {
+    if (segs.some(isDpx)) throw new StoreError(400, `folder names cannot end with ${FILE_EXT}`);
+  };
   const checkedFileRel = (rel) => {
     try {
       return fileRel(rel);
@@ -147,6 +151,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   // ---- file operations ----
   async function createFile(rel, { title } = {}) {
     rel = checkedFileRel(rel);
+    checkFolderNames(rel.split('/').slice(0, -1));
     const abs = await wrapPath(rel);
     const fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
     return serial(async () => {
@@ -214,7 +219,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
 
   async function createFolder(rel) {
     parseOrThrow(rel);
-    if (rel.split('/').some(isDpx)) throw new StoreError(400, `folder names cannot end with ${FILE_EXT}`);
+    checkFolderNames(rel.split('/'));
     const abs = await wrapPath(rel);
     return serial(async () => {
       if (await statOrNull(abs)) throw new StoreError(409, 'already exists');
@@ -258,6 +263,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   }
 
   async function moveFile(from, fromAbs, toRel) {
+    checkFolderNames(toRel.split('/').slice(0, -1));
     const toAbs = await wrapPath(toRel);
     if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
     await mkdir(dirname(toAbs), { recursive: true });
@@ -268,6 +274,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   }
 
   async function moveFolder(from, fromAbs, toRel) {
+    checkFolderNames(toRel.split('/'));
     if (toRel === from || toRel.startsWith(from + '/')) throw new StoreError(400, 'cannot move a folder into itself');
     const toAbs = await wrapPath(toRel);
     if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
