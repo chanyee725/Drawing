@@ -235,13 +235,13 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const id = selRef.current;
     const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
     if (!xapi || !id || !b) return;
-    const s = await openLayoutSession(b);
-    if ('reason' in s) return setNotice({ blockId: id, text: s.reason.replace('노드를 옮길', '자유 도형으로 바꿀').replace('옮길 수', '바꿀 수').replace('옮길 노드가', '바꿀 노드가') });
+    const s = await openLayoutSession(b, 'freeform');
+    if ('reason' in s) return setNotice({ blockId: id, text: s.reason });
     const els = xapi.getSceneElementsIncludingDeleted();
     const img = imageOf(els, id);
     if (!img) return;
     const { scene } = s.compose(b.layout);
-    const { skeletons, bindings } = sceneToFreeform(scene, { x: img.x, y: img.y, width: img.width }, () => Math.random().toString(36).slice(2, 12));
+    const { skeletons, bindings } = sceneToFreeform(scene, { x: img.x, y: img.y, width: img.width, height: img.height }, () => Math.random().toString(36).slice(2, 12));
     const made = bindArrows(convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as ExcalidrawElement[], bindings);
     const fresh = made.filter((e) => !(e as { containerId?: string }).containerId).map((e) => e.id);
     xapi.updateScene({
@@ -614,7 +614,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         state: () => {
           const id = editRef.current?.blockId ?? selRef.current;
           const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
-          return { block: !!b, editing: !!editRef.current, moved: !!b?.layout };
+          return { block: !!b, graph: isGraphType(b?.type), editing: !!editRef.current, moved: !!b?.layout };
         },
         edit: () => void tryEdit(),
         freeform: () => void toFreeform(),
