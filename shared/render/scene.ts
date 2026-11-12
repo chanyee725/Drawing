@@ -108,10 +108,28 @@ export interface SceneLine {
 
 export type SceneItem = SceneBox | SceneText | SceneIcon | SceneEdge | SceneLine;
 
+/** Hit box of a draggable diagram element (graph types), in scene coordinates. Not painted. */
+export interface SceneHandle {
+  id: string;
+  kind: 'node' | 'group';
+  /** Parent group id, `""` at the root. */
+  parent: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** The element's box differs from the automatic layout (moved, or a group refitted around moved children). */
+  moved: boolean;
+}
+
 export interface Scene {
   type: DiagramType;
   width: number;
   height: number;
   /** Paint order: first item is at the back. */
   items: SceneItem[];
+  /** Translation `finishScene` applied: scene = layout + origin. */
+  origin?: Point;
+  /** Hit boxes for draggable elements (graph types only), in scene coordinates, paint order. */
+  handles?: SceneHandle[];
 }
