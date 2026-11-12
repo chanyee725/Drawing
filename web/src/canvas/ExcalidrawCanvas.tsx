@@ -493,16 +493,19 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   }, [sessId, sessFor]);
 
   // Edit mode ends when its block goes away or its code can no longer be laid out by hand (an error, another kind).
+  // While that block's code panel is open an error is judged later: typing passes through broken code, so the last
+  // picture stays (not editable) and the verdict comes when the panel closes.
   const editBlock = edit ? blocks.find((b) => b.id === edit.blockId) : undefined;
   const editSess = ready(sess, editBlock);
   useEffect(() => {
     if (!edit) return;
     if (!editBlock) return exitEdit(false);
     if (sess && sess.blockId === edit.blockId && sess.key === sessionKey(editBlock) && 'reason' in sess.s) {
+      if (editing === edit.blockId) return;
       setNotice({ blockId: edit.blockId, text: sess.s.reason });
       exitEdit(true);
     }
-  }, [edit, editBlock, sess, exitEdit]);
+  }, [edit, editBlock, sess, exitEdit, editing]);
   // While the code changes, the new session and picture come a moment later; the overlay keeps the last picture it
   // placed (not editable) instead of leaving the hidden block blank.
   const lastShown = useRef<{ blockId: string; sess: LayoutSession; frame: LayoutFrame } | null>(null);
