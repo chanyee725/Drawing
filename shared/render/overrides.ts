@@ -8,28 +8,9 @@ export const RESET_DROP_RATIO = 0.5;
 /** Drop the whole layout when node+group count moves more than this share away from `basis.count`. */
 export const RESET_COUNT_RATIO = 0.5;
 
-// NOTE: shape follows design §2.1. The compose step (D2) and the server (D1) use the same JSON shape.
-export interface LayoutItem {
-  /** Centre point in layout coordinates. */
-  cx: number;
-  cy: number;
-  /** Parent group name when the override was made; root is "". */
-  parent: string;
-}
-
-export interface LayoutBasis {
-  type: string;
-  direction: string;
-  /** Node + group count at the last save. */
-  count: number;
-}
-
-export interface BlockLayout {
-  v: number;
-  basis?: LayoutBasis;
-  /** Optional per design §2.1; missing means no overrides yet. */
-  items?: Record<string, LayoutItem>;
-}
+// The JSON shape lives in block-layout.ts, shared with the compose step (D2) and mirrored by the server (D1).
+import { BLOCK_LAYOUT_VERSION, type BlockLayout, type LayoutBasis, type LayoutItem } from './block-layout.ts';
+export type { BlockLayout, LayoutBasis, LayoutItem };
 
 /** What the layout depends on: diagram type, direction, and every node/group id with its parent group. */
 export interface Structure {
@@ -77,7 +58,7 @@ export interface ReconcileResult {
  * An unknown version is left untouched (§2.1: ignored for drawing, never wiped on save).
  */
 export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | undefined): ReconcileResult {
-  if (!layout || layout.v !== 1) return { layout, dropped: [], changed: false };
+  if (!layout || layout.v !== BLOCK_LAYOUT_VERSION) return { layout, dropped: [], changed: false };
   const old = layout.items ?? {};
   const keys = Object.keys(old);
   if (keys.length === 0) return { layout, dropped: [], changed: false };
