@@ -6,10 +6,12 @@ import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from '@
 import { PluginKey } from '@tiptap/pm/state';
 import { filterSlash, type SlashItem } from './model';
 
-type ListProps = { items: SlashItem[]; command: (item: SlashItem) => void };
+/** What the list needs from an entry; the `/` menu and the `+` menu both use it. */
+export type MenuItem = { id: string; title: string; hint: string };
+type ListProps = { items: MenuItem[]; command: (item: MenuItem) => void; label?: string };
 type ListHandle = { onKeyDown: (e: KeyboardEvent) => boolean };
 
-const SlashList = forwardRef<ListHandle, ListProps>(function SlashList({ items, command }, ref) {
+export const SlashList = forwardRef<ListHandle, ListProps>(function SlashList({ items, command, label = '넣을 블록' }, ref) {
   const [active, setActive] = useState(0);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => setActive(0), [items]);
@@ -27,7 +29,7 @@ const SlashList = forwardRef<ListHandle, ListProps>(function SlashList({ items, 
     },
   }));
   return (
-    <div ref={list} role="listbox" aria-label="넣을 블록" className="doc-slash">
+    <div ref={list} role="listbox" aria-label={label} className="doc-slash">
       {items.length === 0 ? (
         <p className="doc-slash-empty">맞는 항목이 없어요</p>
       ) : (
@@ -53,6 +55,28 @@ const SlashList = forwardRef<ListHandle, ListProps>(function SlashList({ items, 
   );
 });
 
+/** The suggestion popup renderer shared by the `/` and `+` menus. */
+export function menuRender<T extends MenuItem>(label: string) {
+  return () => {
+    let comp: ReactRenderer<ListHandle, ListProps> | null = null;
+    let unmount: (() => void) | undefined;
+    const props = (p: SuggestionProps<T, T>): ListProps => ({ items: p.items, label, command: (it) => p.command(it as T) });
+    return {
+      onStart: (p: SuggestionProps<T, T>) => {
+        comp = new ReactRenderer(SlashList, { props: props(p), editor: p.editor });
+        unmount = p.mount(comp.element as HTMLElement);
+      },
+      onUpdate: (p: SuggestionProps<T, T>) => comp?.updateProps(props(p)),
+      onKeyDown: (p: SuggestionKeyDownProps) => (p.event.key === 'Escape' ? false : (comp?.ref?.onKeyDown(p.event) ?? false)),
+      onExit: () => {
+        unmount?.();
+        comp?.destroy();
+        comp = null;
+      },
+    };
+  };
+}
+
 export type SlashOptions = {
   getItems: () => SlashItem[];
   run: (editor: Editor, range: Range, item: SlashItem) => void;
@@ -73,24 +97,7 @@ export const SlashCommands = Extension.create<SlashOptions>({
         allow: ({ state, range }) => !state.doc.resolve(range.from).parent.type.spec.code,
         items: ({ query }) => filterSlash(this.options.getItems(), query),
         command: ({ editor, range, props }) => this.options.run(editor, range, props),
-        render: () => {
-          let comp: ReactRenderer<ListHandle, ListProps> | null = null;
-          let unmount: (() => void) | undefined;
-          const props = (p: SuggestionProps<SlashItem, SlashItem>): ListProps => ({ items: p.items, command: (it) => p.command(it) });
-          return {
-            onStart: (p) => {
-              comp = new ReactRenderer(SlashList, { props: props(p), editor: p.editor });
-              unmount = p.mount(comp.element as HTMLElement);
-            },
-            onUpdate: (p) => comp?.updateProps(props(p)),
-            onKeyDown: (p: SuggestionKeyDownProps) => (p.event.key === 'Escape' ? false : (comp?.ref?.onKeyDown(p.event) ?? false)),
-            onExit: () => {
-              unmount?.();
-              comp?.destroy();
-              comp = null;
-            },
-          };
-        },
+        render: menuRender<SlashItem>('넣을 블록'),
       }),
     ];
   },

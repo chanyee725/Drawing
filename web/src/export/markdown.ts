@@ -53,6 +53,12 @@ function inline(nodes: N[] | undefined, lineStart = true): string {
       start = true;
       continue;
     }
+    if (n.type === 'wikilink') {
+      // A link to a file, heading or diagram has no address outside the app: keep its label as [[label]].
+      out += `[[${String(n.attrs?.label ?? n.attrs?.target ?? '').replace(/[[\]\n]/g, ' ')}]]`;
+      start = false;
+      continue;
+    }
     if (n.type !== 'text' || typeof n.text !== 'string') {
       out += inline(n.content as N[] | undefined, start);
       start = false;
