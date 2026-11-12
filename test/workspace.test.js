@@ -498,3 +498,16 @@ test('a file reads back with the version it was written with; a write stores the
   assert.equal(normalizeContent({ version: 1 }).version, FORMAT_VERSION);
   assert.equal(FORMAT_VERSION, 2);
 });
+
+test('a file written with a newer format version is not overwritten as version 2', async () => {
+  await withApp(async ({ ws, call }) => {
+    const text = JSON.stringify({ version: 3, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1, extra: 'keep' });
+    await writeFile(join(ws, 'f.dpx.json'), text);
+    const r = await call('GET', `/api/file?path=${q('f')}`);
+    assert.equal(r.body.version, 3);
+    const w = await call('PUT', `/api/file?path=${q('f')}`, { title: 'x', revision: r.body.revision });
+    assert.equal(w.status, 422);
+    assert.match(w.body.error ?? JSON.stringify(w.body), /newer format/);
+    assert.equal(await readFile(join(ws, 'f.dpx.json'), 'utf8'), text);
+  });
+});

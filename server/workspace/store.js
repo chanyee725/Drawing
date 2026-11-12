@@ -5,7 +5,7 @@ import { link, mkdir, readdir, readFile, rename, rm, stat, lstat, unlink, writeF
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { createResolver, parseRelPath, PathError } from './paths.js';
-import { FILE_EXT, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
+import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
 
 export class StoreError extends Error {
   constructor(status, message, extra = {}) {
@@ -208,6 +208,10 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       const { file: current } = await syncExternal(rel, await loadStored(abs), abs);
       if (current.revision !== base) {
         throw new StoreError(409, 'stale write', { revision: current.revision });
+      }
+      // A newer format than this server knows: writing would store it back as ours and drop what it added.
+      if (current.version > FORMAT_VERSION) {
+        throw new StoreError(422, `file was written with a newer format (version ${current.version}); this app writes version ${FORMAT_VERSION}`);
       }
       const next = { ...content, revision: current.revision + 1 };
       const text = serialize(next);
