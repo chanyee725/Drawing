@@ -3,11 +3,15 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react';
 import { getSchema, type Range } from '@tiptap/core';
 import { Placeholder } from '@tiptap/extensions';
-import type { Block } from './api';
+import type { Block, TreeNode } from './api';
 import { TEMPLATES } from './dsl/templates';
 import { docExtensions, documentError } from './doc/extensions';
 import { DiagramEmbedView, DocContext, typeLabel } from './doc/DiagramView';
 import { SlashCommands } from './doc/SlashMenu';
+import { WikiLinks } from './doc/WikiMenu';
+import { HeadingLinks } from './doc/HeadingLinks';
+import { buildHash, fileItems, figureItems, headingItems, outlineOf, type WikiKind } from './doc/outline';
+import { copyText } from './doc/clipboard';
 import { renderBlock } from './canvas/render';
 import type { ImageKind } from './export/actions';
 import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
@@ -21,6 +25,15 @@ type Props = {
   /** The latest canvas drawings, so a new diagram is placed clear of them. */
   getCanvas: () => unknown;
   dark: boolean;
+  /** Workspace path of this file, and the workspace tree (for `+` links to other files). */
+  path: string;
+  tree: TreeNode[];
+  /** Open another file of the workspace. */
+  onOpenFile: (path: string) => void;
+  /** Scroll to this heading id whenever `n` changes (a heading link was opened). */
+  jump: { id: string; n: number } | null;
+  /** Tell the user something short (a copied link). */
+  onNotice: (message: string) => void;
   onDocument: (doc: unknown) => void;
   onBlocks: (b: Block[]) => void;
   /** Show a diagram block on the canvas. */
@@ -29,13 +42,40 @@ type Props = {
   onExportBlock: (block: Block, kind: ImageKind) => void;
 };
 
+/** Scroll to a heading by its link id (or by its place in the outline) and flash it. */
+function scrollToHeading(editor: Editor | null, target: { id: string } | string | { index: number }, tries = 0) {
+  if (!editor) return;
+  const id = typeof target === 'string' ? target : 'id' in target ? target.id : null;
+  const index = typeof target === 'object' && 'index' in target ? target.index : -1;
+  let at = -1;
+  let i = 0;
+  editor.state.doc.descendants((n, pos) => {
+    if (at >= 0 || n.type.name !== 'heading') return;
+    if ((id && n.attrs.id === id) || i === index) at = pos;
+    i += 1;
+  });
+  if (at < 0) return;
+  let el: Node | null = null;
+  try {
+    el = editor.view.nodeDOM(at);
+  } catch {
+    // The editor view is not mounted yet.
+    if (tries < 30) requestAnimationFrame(() => scrollToHeading(editor, target, tries + 1));
+    return;
+  }
+  if (!(el instanceof HTMLElement)) return;
+  el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  el.classList.add('doc-h-flash');
+  setTimeout(() => el.classList.remove('doc-h-flash'), 1500);
+}
+
 const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
 
 /**
  * Remounted per file (App keys it), so it reads `document` only when it starts. A document the
  * editor cannot read is never saved over: the pane shows an error and stays read-only.
  */
-export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, onDocument, onBlocks, onShow, onExportBlock }: Props) {
+export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, path, tree, onOpenFile, jump, onNotice, onDocument, onBlocks, onShow, onExportBlock }: Props) {
   const getBlocksRef = useRef(getBlocks);
   getBlocksRef.current = getBlocks;
   const onDocumentRef = useRef(onDocument);
@@ -46,6 +86,17 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
   const created = useRef(new Map<string, Block>());
   const getCanvasRef = useRef(getCanvas);
   getCanvasRef.current = getCanvas;
+  const treeRef = useRef(tree);
+  treeRef.current = tree;
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const onOpenFileRef = useRef(onOpenFile);
+  onOpenFileRef.current = onOpenFile;
+  const onNoticeRef = useRef(onNotice);
+  onNoticeRef.current = onNotice;
+  const onShowRef = useRef(onShow);
+  onShowRef.current = onShow;
+  const editorRef = useRef<Editor | null>(null);
   // Size of a new diagram's picture (the template), drawn ahead so `/새 다이어그램` can place it at once.
   const templateSize = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
@@ -105,6 +156,24 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
     return [
       ...docExtensions(DiagramEmbedView),
       Placeholder.configure({ placeholder: ({ editor }) => (editor.isEmpty ? '여기에 적어 보세요. /를 누르면 제목, 표, 다이어그램을 넣을 수 있어요' : '') }),
+      HeadingLinks.configure({
+        copy: (id) => {
+          const url = `${window.location.origin}${window.location.pathname}${buildHash(pathRef.current, id)}`;
+          void copyText(url).then((ok) => onNoticeRef.current(ok ? '제목 링크를 복사했어요' : '링크를 복사하지 못했어요'));
+        },
+      }),
+      WikiLinks.configure({
+        getItems: () => {
+          // Headings get their id on every edit (typing "+" is one), so each one here can be linked.
+          const outline = outlineOf(editorRef.current?.getJSON());
+          return [...headingItems(outline), ...figureItems(getBlocksRef.current(), typeLabel), ...fileItems(treeRef.current).filter((f) => f.target !== pathRef.current)];
+        },
+        onOpen: (kind: WikiKind, target: string) => {
+          if (kind === 'file') onOpenFileRef.current(target);
+          else if (kind === 'figure') onShowRef.current(target);
+          else scrollToHeading(editorRef.current, target);
+        },
+      }),
       SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(getBlocksRef.current(), typeLabel)], run }),
     ];
   }, []);
@@ -141,6 +210,12 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
     },
   });
 
+  editorRef.current = editor;
+  useEffect(() => {
+    if (jump) scrollToHeading(editor, jump.id);
+  }, [editor, jump]);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const outline = useEditorState({ editor, selector: (s) => (s.editor ? outlineOf(s.editor.getJSON()) : []) });
   const inTable = useEditorState({ editor, selector: (s) => !!s.editor?.isActive('table') });
   const ctx = useMemo(() => ({ blocks, dark, onShow, onExport: onExportBlock }), [blocks, dark, onShow, onExportBlock]);
 
@@ -152,8 +227,34 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
     ['표 지우기', () => editor.chain().focus().deleteTable().run()],
   ];
 
+  const outlineMenu = (
+    <div className="doc-outline-wrap">
+      <button type="button" className="doc-outline-btn" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
+        목차
+      </button>
+      {outlineOpen && (
+        <nav id="doc-outline" className="doc-outline" aria-label="목차">
+          {outline.length === 0 ? (
+            <p className="doc-outline-empty">제목이 없어요. 제목 1~3을 쓰면 여기에 나와요</p>
+          ) : (
+            <ul>
+              {outline.map((h, i) => (
+                <li key={`${h.id ?? 'x'}-${i}`} style={{ paddingLeft: `${(h.level - 1) * 14}px` }}>
+                  <button type="button" onClick={() => scrollToHeading(editor, { index: i })}>
+                    {h.text || '(제목 없음)'}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </nav>
+      )}
+    </div>
+  );
+
   return (
     <section className="mx-auto flex max-w-3xl flex-col gap-2 px-6 py-6" aria-label="문서">
+      {!broken && outlineMenu}
       {inTable && (
         <div role="toolbar" aria-label="표" className="doc-table-bar">
           {tableActions.map(([label, act]) => (
