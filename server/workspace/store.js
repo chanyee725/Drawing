@@ -328,7 +328,7 @@ export function createStore(
       throw err;
     }
     return serial(async () => {
-      const { file: current } = await syncExternal(rel, await loadStored(abs), abs);
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
       // A newer format than this server knows: writing would store it back as ours and drop what it added.
       if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
       if (current.revision !== base) {
@@ -336,9 +336,10 @@ export function createStore(
       }
       const next = { ...content, revision: current.revision + 1 };
       const text = serialize(next);
+      // Keep what is on disk before overwriting it, so the end state of an edit session stays reachable.
+      await snapshotQuietly(rel, before);
       await atomicWrite(abs, text);
       known.set(rel, { hash: sha(text), revision: next.revision });
-      await snapshotQuietly(rel, text);
       return { path: rel, revision: next.revision };
     });
   }

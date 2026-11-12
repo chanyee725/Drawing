@@ -35,17 +35,19 @@ const titles = async (store, path) => {
 test('history: at most one snapshot per file per 5 minutes', async () => {
   await withStore({}, async ({ store, clock }) => {
     await store.createFile('a');
-    await save(store, 'a', 'one'); // first save always snapshots
+    const t0 = (await store.readFile('a')).title;
+    await save(store, 'a', 'one'); // first save keeps the file as it was
     clock.advance(4 * MIN);
     await save(store, 'a', 'two'); // too soon
-    assert.deepEqual(await titles(store, 'a'), ['one']);
+    assert.deepEqual(await titles(store, 'a'), [t0]);
     clock.advance(1 * MIN + 1);
-    await save(store, 'a', 'three');
-    assert.deepEqual(await titles(store, 'a'), ['three', 'one']); // newest first
+    await save(store, 'a', 'three'); // keeps what was on disk before: 'two'
+    assert.deepEqual(await titles(store, 'a'), ['two', t0]); // newest first
     // another file has its own clock
     await store.createFile('b');
+    const b0 = (await store.readFile('b')).title;
     await save(store, 'b', 'bee');
-    assert.deepEqual(await titles(store, 'b'), ['bee']);
+    assert.deepEqual(await titles(store, 'b'), [b0]);
   });
 });
 
@@ -58,8 +60,8 @@ test('history: keeps the newest 50 and drops the oldest', async () => {
     }
     const t = await titles(store, 'a');
     assert.equal(t.length, 50);
-    assert.equal(t[0], 'v55');
-    assert.equal(t[49], 'v6');
+    assert.equal(t[0], 'v54');
+    assert.equal(t[49], 'v5');
     assert.equal((await readdir(join(ws, '.drawing/history/a.dpx.json'))).length, 50);
   });
 });
@@ -67,10 +69,11 @@ test('history: keeps the newest 50 and drops the oldest', async () => {
 test('history: forced snapshot ignores the interval and skips identical content', async () => {
   await withStore({}, async ({ store }) => {
     await store.createFile('a');
+    const t0 = (await store.readFile('a')).title;
     await save(store, 'a', 'one');
     await save(store, 'a', 'two'); // throttled
     const s1 = await store.historySnapshotNow('a');
-    assert.deepEqual(await titles(store, 'a'), ['two', 'one']);
+    assert.deepEqual(await titles(store, 'a'), ['two', t0]);
     const s2 = await store.historySnapshotNow('a'); // same content: no new snapshot
     assert.equal(s2.id, s1.id);
     assert.equal((await store.history('a')).versions.length, 2);
@@ -81,13 +84,14 @@ test('history: hidden folder is not in the tree; move carries it, delete removes
   await withStore({}, async ({ store, ws }) => {
     await store.createFolder('p');
     await store.createFile('p/a');
+    const t0 = (await store.readFile('p/a')).title;
     await save(store, 'p/a', 'one');
     assert.deepEqual((await store.tree()).map((n) => n.name), ['p']); // no .drawing
     await store.move('p/a', 'p/b', 'file');
     assert.equal((await store.history('p/a')).versions.length, 0);
-    assert.deepEqual(await titles(store, 'p/b'), ['one']);
+    assert.deepEqual(await titles(store, 'p/b'), [t0]);
     await store.move('p', 'q', 'folder');
-    assert.deepEqual(await titles(store, 'q/b'), ['one']);
+    assert.deepEqual(await titles(store, 'q/b'), [t0]);
     await store.removeFile('q/b');
     assert.equal((await store.history('q/b')).versions.length, 0);
     await save(store, 'q/b', 'x').catch(() => {});
@@ -128,7 +132,7 @@ test('history API: list, read, snapshot, traversal and bad ids are refused', asy
     assert.equal(list.body.versions.length, 1);
     const { id } = list.body.versions[0];
     const v = await call('GET', `/api/history/version?path=a&id=${id}`);
-    assert.equal(v.body.title, 'A2');
+    assert.equal(v.body.title, 'A'); // the file as it was before the save
     assert.equal((await call('POST', '/api/history?path=a', {})).status, 200);
     assert.equal((await call('GET', '/api/history/version?path=a&id=../../x')).status, 400);
     assert.equal((await call('GET', '/api/history/version?path=a&id=1234567890123')).status, 404);
@@ -148,4 +152,18 @@ test('history API: list, read, snapshot, traversal and bad ids are refused', asy
     await rm(ws, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test('history: the state at the end of an edit session is kept (snapshot the file before it is overwritten)', async () => {
+  await withStore({}, async ({ store, clock }) => {
+    await store.createFile('a');
+    await save(store, 'a', 'C1');
+    clock.advance(1 * MIN);
+    await save(store, 'a', 'C2');
+    clock.advance(1 * MIN);
+    await save(store, 'a', 'C4-session-end');
+    clock.advance(24 * 60 * MIN);
+    await save(store, 'a', 'C5-next-day');
+    assert.ok((await titles(store, 'a')).includes('C4-session-end'));
+  });
 });
