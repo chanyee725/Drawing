@@ -154,3 +154,25 @@ test('edge ends touch the outline of diamonds and ellipses, not the bounding box
     assert.ok(curved >= 4, `${connector}: found ${curved} ends on curved shapes`);
   }
 });
+
+test('typeface rough embeds the bundled Shantell Sans and nothing external', async () => {
+  const rough = await renderDiagram('typeface rough\nA > B', { type: 'flowchart' });
+  assert.match(rough.svg, /<style>@font-face\{font-family:'Shantell Sans'[^}]*src:url\(data:font\/woff2;base64,[A-Za-z0-9+/=]+\)/);
+  assert.match(rough.svg, /font-family="&#39;Shantell Sans&#39;/);
+  assert.doesNotMatch(rough.svg, /https?:\/\/(?!www\.w3\.org)/);
+  assert.ok(rough.svg.length < 60_000, `rough svg is ${rough.svg.length} bytes`);
+
+  const clean = await renderDiagram('typeface clean\nA > B', { type: 'flowchart' });
+  assert.doesNotMatch(clean.svg, /@font-face|Shantell/);
+});
+
+test('the embedded rough font is the bundled OFL file', async () => {
+  const { SHANTELL_SANS_WOFF2_BASE64 } = await import('../../shared/render/font-rough.ts');
+  const dir = new URL('../../shared/render/fonts/', import.meta.url);
+  const bytes = readFileSync(fileURLToPath(new URL('shantell-sans-latin-400.woff2', dir)));
+  assert.equal(SHANTELL_SANS_WOFF2_BASE64, bytes.toString('base64'));
+  assert.equal(bytes.subarray(0, 4).toString('latin1'), 'wOF2');
+  assert.ok(bytes.length < 40_000);
+  const license = readFileSync(fileURLToPath(new URL('shantell-sans-OFL.txt', dir)), 'utf8');
+  assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/i);
+});
