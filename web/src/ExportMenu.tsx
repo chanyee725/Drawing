@@ -14,10 +14,13 @@ type Props = {
   onOptions: (o: ExportOptions) => void;
   onImage: (kind: ImageKind) => void;
   onMarkdown: () => void;
+  /** Where the PDF comes from: the selected canvas shapes, the document, or the whole canvas. */
+  pdfScope: 'selection' | 'document' | 'canvas';
+  onPdf: () => void;
   disabled?: boolean;
 };
 
-export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, disabled }: Props) {
+export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled }: Props) {
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -37,6 +40,13 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
     { id: 'png', label: 'PNG로 내보내기', hint: `${scope} · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('png') },
     { id: 'copy', label: '이미지로 복사', hint: `Shift+Alt+C · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('copy') },
+    {
+      id: 'pdf',
+      label: 'PDF로 저장(인쇄)',
+      hint: `${pdfScope === 'document' ? '문서' : pdfScope === 'selection' ? '선택한 것' : '캔버스 전체'} · 인쇄 창에서 'PDF로 저장'을 골라요`,
+      off: pdfScope !== 'document' && !canvasReady,
+      run: onPdf,
+    },
     { id: 'md', label: '문서를 Markdown으로', hint: '다이어그램은 코드 블록', off: false, run: onMarkdown },
   ];
   return (

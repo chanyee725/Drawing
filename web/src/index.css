@@ -198,3 +198,15 @@ body {
 }
 .canvas-insert input:focus { border-color: var(--accent); }
 .doc-frame .doc-diagram-pic img { background: #fff; }
+
+/* PDF export (print dialog): only the document column is printed while <html> has .print-doc. */
+@media print {
+  html.print-doc body * { visibility: hidden !important; }
+  html.print-doc section[aria-label='문서'], html.print-doc section[aria-label='문서'] * { visibility: visible !important; }
+  html.print-doc, html.print-doc body, html.print-doc #root, html.print-doc #root div { height: auto !important; overflow: visible !important; position: static !important; }
+  html.print-doc section[aria-label='문서'] { position: absolute !important; left: 0; top: 0; width: 100%; max-width: none; padding: 0; }
+  html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions { display: none !important; }
+  html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
+  html.print-doc { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; }
+  html.print-doc body { background: #fff !important; color: #1b1b1f !important; }
+}

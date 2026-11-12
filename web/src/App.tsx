@@ -23,7 +23,7 @@ import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
 import { HistoryDialog } from './HistoryDialog';
 import { TrashDialog } from './TrashDialog';
 import { CommandPalette, type Command } from './CommandPalette';
-import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
+import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
@@ -452,6 +452,8 @@ export function App() {
     const f = session.getState().file;
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
   };
+  const pdfScope = exportSelected ? 'selection' : showDoc ? 'document' : 'canvas';
+  const pdfExport = () => void report(pdfScope === 'document' ? Promise.resolve().then(exportDocumentPdf) : exportCanvas(canvasHandle.current, 'pdf', session.getState().file?.title ?? '', exportOptions));
   const openExport = useCallback((o: boolean) => {
     if (o) setExportSelected(canvasHandle.current?.scope().selected ?? false);
     setExportOpen(o);
@@ -610,6 +612,8 @@ export function App() {
               onOptions={setExportOptions}
               onImage={imageExport}
               onMarkdown={markdownExport}
+              pdfScope={pdfScope}
+              onPdf={pdfExport}
             />
           }
         />
