@@ -1,0 +1,142 @@
+// Pure helpers for the document pane (no DOM, no editor): the stored document shape and the `/` menu list.
+import type { Block } from '../api.ts';
+import { findFreeSpot, isUnplaced, rectOf, type BlockGeom, type Rect } from '../canvas/sync.ts';
+
+export type DocJSON = { type: 'doc'; content?: DocNode[] };
+export type DocNode = { type: string; attrs?: Record<string, unknown>; content?: DocNode[]; [k: string]: unknown };
+
+/** Node name of an embedded canvas diagram in the document JSON. */
+export const DIAGRAM_NODE = 'diagram';
+
+const isDoc = (d: unknown): d is DocJSON => !!d && typeof d === 'object' && (d as { type?: unknown }).type === 'doc';
+
+export const diagramNode = (blockId: string): DocNode => ({ type: DIAGRAM_NODE, attrs: { blockId } });
+
+/** Files written with this format version or later already have their own document (see server/workspace/model.js). */
+export const DOC_FORMAT_VERSION = 2;
+
+/** Why a stored document cannot be opened as is, or null when its outer shape is fine. Nodes are checked against the schema separately. */
+export function docShapeProblem(document: unknown): string | null {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return 'not an object';
+  const d = document as { type?: unknown; content?: unknown };
+  if (d.type !== 'doc') return 'type is not "doc"';
+  if (d.content !== undefined && !Array.isArray(d.content)) return 'content is not an array';
+  return null;
+}
+
+/** A document with no content at all (new files start like this). */
+export const isEmptyDoc = (document: unknown) => !docShapeProblem(document) && !(document as DocJSON).content?.length;
+
+/**
+ * The document of a file written before the document editor existed (version < 2). Back then the
+ * document pane listed every diagram block, so an empty document gets one embed per block. This
+ * happens once: the next save stores version 2 and the document as it is then. Anything else,
+ * including a broken document, comes back unchanged.
+ */
+export function migrateDocument(file: { version?: number; document: unknown; blocks: readonly Pick<Block, 'id'>[] }): unknown {
+  if ((file.version ?? 1) >= DOC_FORMAT_VERSION || docShapeProblem(file.document) || !file.blocks.length) return file.document;
+  if ((file.document as DocJSON).content?.length) return file.document;
+  return { type: 'doc', content: file.blocks.map((b) => diagramNode(b.id)) };
+}
+
+/** Block ids embedded anywhere in the document, in document order. */
+export function embeddedBlockIds(document: unknown): string[] {
+  const out: string[] = [];
+  const walk = (n: DocNode) => {
+    if (n.type === DIAGRAM_NODE && typeof n.attrs?.blockId === 'string') out.push(n.attrs.blockId);
+    n.content?.forEach(walk);
+  };
+  if (isDoc(document)) document.content?.forEach(walk);
+  return out;
+}
+
+export type SlashCommand = 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'task' | 'code' | 'table' | 'quote' | 'rule' | 'link' | 'diagram';
+export type SlashItem = { id: string; command: SlashCommand; title: string; hint: string; keywords: string[]; blockId?: string };
+
+export const SLASH_ITEMS: SlashItem[] = [
+  { id: 'h1', command: 'h1', title: '제목 1', hint: '# 공백', keywords: ['h1', 'heading', 'title', '제목', '헤딩'] },
+  { id: 'h2', command: 'h2', title: '제목 2', hint: '## 공백', keywords: ['h2', 'heading', '제목', '헤딩'] },
+  { id: 'h3', command: 'h3', title: '제목 3', hint: '### 공백', keywords: ['h3', 'heading', '제목', '헤딩'] },
+  { id: 'bullet', command: 'bullet', title: '글머리 목록', hint: '- 공백', keywords: ['ul', 'list', 'bullet', '목록', '리스트'] },
+  { id: 'ordered', command: 'ordered', title: '번호 목록', hint: '1. 공백', keywords: ['ol', 'list', 'number', 'ordered', '목록', '번호'] },
+  { id: 'task', command: 'task', title: '체크리스트', hint: '[ ] 공백', keywords: ['todo', 'task', 'check', '체크', '할 일'] },
+  { id: 'code', command: 'code', title: '코드 블록', hint: '``` 공백', keywords: ['code', 'pre', '코드'] },
+  { id: 'table', command: 'table', title: '표', hint: '3 × 3', keywords: ['table', 'grid', '표', '테이블'] },
+  { id: 'quote', command: 'quote', title: '인용', hint: '> 공백', keywords: ['quote', 'blockquote', '인용'] },
+  { id: 'rule', command: 'rule', title: '구분선', hint: '---', keywords: ['hr', 'divider', 'rule', '구분선', '선'] },
+  { id: 'link', command: 'link', title: '링크', hint: '주소 넣기', keywords: ['link', 'url', '링크'] },
+  { id: 'diagram', command: 'diagram', title: '새 다이어그램', hint: '캔버스에도 생겨요', keywords: ['diagram', 'embed', 'figure', '다이어그램', '그림', '도표'] },
+];
+
+/** `/` menu entries for diagrams already on the canvas, so one can be embedded (again). */
+export function blockItems(blocks: readonly Pick<Block, 'id' | 'type'>[], typeLabel: (type: string) => string): SlashItem[] {
+  return blocks.map((b, i) => ({
+    id: `embed:${b.id}`,
+    command: 'diagram',
+    title: `다이어그램 넣기: ${typeLabel(b.type)} ${i + 1}`,
+    hint: '캔버스에 있는 것',
+    keywords: ['diagram', 'embed', '다이어그램', b.type],
+    blockId: b.id,
+  }));
+}
+
+/** Items whose title or a keyword contains the typed query (case-insensitive); an empty query keeps all. */
+export function filterSlash(items: readonly SlashItem[], query: string): SlashItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return [...items];
+  return items.filter((it) => it.title.toLowerCase().includes(q) || it.keywords.some((k) => k.toLowerCase().includes(q)));
+}
+
+/** A typed link address made safe to store: web and mail links only; a bare host gets https://. */
+export function normalizeLink(input: string): string | null {
+  const s = input.trim();
+  if (!s || /\s/.test(s)) return null;
+  if (/^(https?:\/\/|mailto:)/i.test(s)) return s;
+  // Any other scheme (javascript:, data:, file:...) is refused.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^[^:/]+:\d+(\/|$)/.test(s)) return null;
+  return `https://${s}`;
+}
+
+/**
+ * After an undo or redo in the document: blocks the document itself created (`created`, by id)
+ * follow their embed. An undo that takes the embed away removes the block from the canvas too
+ * (its latest state is kept in `created`); a redo that brings the embed back restores it.
+ * Returns the new block list, or null when nothing changes.
+ */
+export function blocksAfterHistory(before: readonly string[], after: readonly string[], created: Map<string, Block>, blocks: readonly Block[]): Block[] | null {
+  const was = new Set(before);
+  const now = new Set(after);
+  let next = [...blocks];
+  let changed = false;
+  for (const id of was) {
+    if (now.has(id) || !created.has(id)) continue;
+    const b = next.find((x) => x.id === id);
+    if (!b) continue;
+    created.set(id, b);
+    next = next.filter((x) => x.id !== id);
+    changed = true;
+  }
+  for (const id of now) {
+    if (was.has(id) || !created.has(id) || next.some((x) => x.id === id)) continue;
+    next.push(created.get(id)!);
+    changed = true;
+  }
+  return changed ? next : null;
+}
+
+/**
+ * Where a diagram made in the document goes on the canvas: the picture's size at a spot clear of
+ * every placed block and drawing, decided right away so it never sits on top of another block,
+ * even while the canvas is closed. Without a size yet it stays unplaced (w = 0) and the canvas places it.
+ */
+export function newBlockGeometry(size: { width: number; height: number } | null, blocks: readonly BlockGeom[], canvas: unknown): BlockGeom {
+  if (!size) return { x: 0, y: 0, w: 0, h: 0 };
+  const els = (canvas as { elements?: unknown } | null)?.elements;
+  const taken: Rect[] = blocks.filter((b) => !isUnplaced(b)).map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+  if (Array.isArray(els))
+    for (const e of els as { x?: unknown; y?: unknown; width?: unknown; height?: unknown; isDeleted?: unknown }[]) {
+      if (!e || e.isDeleted || ![e.x, e.y, e.width, e.height].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
+      taken.push(rectOf(e as { x: number; y: number; width: number; height: number }));
+    }
+  return { ...findFreeSpot(size.width, size.height, taken), w: size.width, h: size.height };
+}

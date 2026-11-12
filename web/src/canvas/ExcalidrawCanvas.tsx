@@ -7,15 +7,19 @@ import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalid
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
-import { DIAGRAM_TYPES, isDiagramType } from '../dsl/templates';
+import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
+import { analyzeDiagram } from '../dsl/adapter';
 import { renderBlock, type BlockPicture } from './render';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
+/** Show (scroll to and select) this block's image; a new `n` is a new request. */
+export type CanvasFocus = { blockId: string; n: number };
 
 type Props = {
   canvas: CanvasData;
   blocks: Block[];
+  focus: CanvasFocus | null;
   dark: boolean;
   onChange: (patch: { canvas?: CanvasData; blocks?: Block[] }) => void;
 };
@@ -47,7 +51,7 @@ const UI_OPTIONS = {
 // Web embeds load third-party pages in iframes; the canvas makes no outbound requests.
 const NO_EMBEDS = () => false;
 
-export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Props) {
+export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
@@ -68,6 +72,24 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
   const owners = useRef(new Map<string, string>());
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   apiRef.current = api;
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+  const focusDone = useRef(0);
+
+  // Show the requested block once its image is on the canvas (a new block's image arrives after its picture is drawn).
+  const tryFocus = useCallback(() => {
+    const f = focusRef.current;
+    const xapi = apiRef.current;
+    if (!f || !xapi || focusDone.current === f.n) return;
+    const el = xapi.getSceneElements().find((e) => blockIdOf(e as unknown as SceneEl) === f.blockId);
+    if (!el) return;
+    focusDone.current = f.n;
+    xapi.updateScene({ appState: { selectedElementIds: { [el.id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
+    xapi.scrollToContent(el, { fitToViewport: true, viewportZoomFactor: 0.7, animate: true });
+    // Move focus to the canvas, so Enter opens the block's code right away.
+    wrap.current?.querySelector<HTMLElement>('.excalidraw')?.focus({ preventScroll: true });
+  }, []);
+  useEffect(tryFocus, [api, focus, tryFocus]);
 
   // Built once per mount (CanvasPane remounts on file switch/reload).
   const initialData = useMemo(
@@ -131,11 +153,12 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
         next.push(...restoreElements(skeletons, null));
       }
       if (changed) api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+      tryFocus();
     });
     return () => {
       live = false;
     };
-  }, [api, blocks]);
+  }, [api, blocks, tryFocus]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
@@ -265,6 +288,19 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
                 </option>
               ))}
             </select>
+            {isDiagramType(block.type) && (
+              <button
+                type="button"
+                className="h-8 rounded-md border px-3"
+                style={{ borderColor: 'var(--border)' }}
+                onClick={() => {
+                  const t = TEMPLATES[block.type as DiagramType];
+                  if (!block.code.trim() || block.code === t || window.confirm('지금 코드를 예시로 바꿀까요?')) patchBlock({ code: t });
+                }}
+              >
+                예시 넣기
+              </button>
+            )}
             <button type="button" className="ml-auto h-8 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => setEditing(null)}>
               닫기
             </button>
@@ -272,6 +308,11 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>
+          {!analyzeDiagram(block.type, block.code).parsed && (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              이 종류는 아직 문법 검사를 지원하지 않아요.
+            </p>
+          )}
         </aside>
       )}
     </div>
