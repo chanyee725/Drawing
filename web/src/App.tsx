@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
@@ -73,13 +73,14 @@ const inFrames = (blocks: Block[], els: CanvasEl[]): Block[] => {
   return blocks.filter((b) => frames.some((f) => blocksInFrame({ x: f.x ?? 0, y: f.y ?? 0, width: f.width ?? 0, height: f.height ?? 0 }, [b]).length));
 };
 const sameFrameBlocks = (a: Block[], b: Block[]) => sameDrawing(a, b) && a.every((x, i) => x.x === b[i].x && x.y === b[i].y && x.w === b[i].w && x.h === b[i].h);
-function useSettled<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
+/** `value` once it has stopped changing for `ms`; a new `reset` key (another file) takes the live value at once. */
+function useSettled<T>(value: T, ms: number, reset: string): T {
+  const [v, setV] = useState({ value, reset });
   useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
+    const t = setTimeout(() => setV({ value, reset }), ms);
     return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
+  }, [value, ms, reset]);
+  return v.reset === reset ? v.value : value;
 }
 const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onShowFrame, onExportBlock, onFail }: DocSlotProps) {
   const path = useSession(session, (s) => s.path ?? '');
@@ -87,11 +88,13 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
   // Blocks as drawn: a new array only when a block's id, type or code changes, not when it moves.
   const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS, sameDrawing);
   // Frames and their contents: a new array only when one of those changes (not when a block or other drawing does).
-  const frameScene = useSession(session, (s) => sceneOf(elementsOf(s.file?.canvas)), (a, b) => frameSceneSig(a) === frameSceneSig(b));
+  const liveFrameScene = useSession(session, (s) => sceneOf(elementsOf(s.file?.canvas)), (a, b) => frameSceneSig(a) === frameSceneSig(b));
   // Blocks inside a frame, with where they sit: the frame preview draws them (they are not canvas elements).
   const liveFrameBlocks = useSession(session, (s) => inFrames(s.file?.blocks ?? NO_BLOCKS, elementsOf(s.file?.canvas)), sameFrameBlocks);
   // A block dragged inside a frame changes this many times a second; the preview (and the pane's context) follows once it settles.
-  const frameBlocks = useSettled(liveFrameBlocks, 250);
+  // Frames and their blocks settle together, so a moved frame and its blocks never draw out of step.
+  const framePair = useMemo(() => ({ scene: liveFrameScene, blocks: liveFrameBlocks }), [liveFrameScene, liveFrameBlocks]);
+  const { scene: frameScene, blocks: frameBlocks } = useSettled(framePair, 250, key);
   const getBlocks = useCallback(() => session.getState().file?.blocks ?? NO_BLOCKS, [session]);
   const getCanvas = useCallback(() => session.getState().file?.canvas, [session]);
   const onDocument = useCallback((d: unknown) => session.edit({ document: d }), [session]);
