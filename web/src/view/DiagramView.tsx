@@ -27,10 +27,18 @@ export interface DiagramApi {
   getCellsRect(ids: string[]): Rect | null;
   /** Diagram (model) coordinates → container px, e.g. for a change bbox. */
   graphToScreen(r: Rect): Rect;
+  /** Container px → diagram (model) coordinates. */
+  screenToGraph(r: Rect): Rect;
+  /** Pan (keeping the zoom) so this diagram-coordinate rect sits in the middle, with a short glide. */
+  centerOn(r: Rect): void;
   /** Called after every pan, zoom, resize or model update. Returns an unsubscribe. */
   onViewChange(cb: () => void): () => void;
+  /** `resetKey` of the page currently drawn, or null before the first page. Rects belong to this page. */
+  shownKey(): string | null;
   /** The container element the rects are relative to. */
   readonly container: HTMLElement;
+  /** Pan (zoom unchanged) to centre a container-px rect, unless it is already fully in view. */
+  reveal(r: Rect): void;
 }
 
 type FlashKind = 'added' | 'changed' | 'removed';
@@ -221,9 +229,20 @@ export function DiagramView({ xml, resetKey, flashKey, onApi, children }: Diagra
       getCellRect: cellRect,
       getCellsRect: (ids) => unionRects(ids.map(cellRect).filter((r): r is Rect => r !== null)),
       graphToScreen: (r) => (graphRef.current ? graphToScreen(r, viewOf(graphRef.current)) : r),
+      screenToGraph: (r) => (graphRef.current ? screenToGraph(r, viewOf(graphRef.current)) : r),
+      centerOn: (r) => glideTo(r),
+      shownKey: () => shown.current?.resetKey ?? null,
       onViewChange(cb) {
         listeners.current.add(cb);
         return () => listeners.current.delete(cb);
+      },
+      reveal(r) {
+        const g = graphRef.current;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (!g || (r.x >= 0 && r.y >= 0 && r.x + r.width <= w && r.y + r.height <= h)) return;
+        const v = viewOf(g);
+        setView(g, { ...v, tx: v.tx + (w / 2 - (r.x + r.width / 2)) / v.scale, ty: v.ty + (h / 2 - (r.y + r.height / 2)) / v.scale });
       },
     };
     onApiRef.current?.(api);
@@ -294,6 +313,29 @@ export function DiagramView({ xml, resetKey, flashKey, onApi, children }: Diagra
     setView(g, fitTransform(b, el.clientWidth, el.clientHeight));
   }
 
+  const glide = useRef(0);
+  function glideTo(r: Rect) {
+    const g = graphRef.current;
+    const el = wrapRef.current;
+    if (!g || !el) return;
+    cancelAnimationFrame(glide.current);
+    const from = viewOf(g);
+    const to = {
+      scale: from.scale,
+      tx: el.clientWidth / (2 * from.scale) - (r.x + r.width / 2),
+      ty: el.clientHeight / (2 * from.scale) - (r.y + r.height / 2),
+    };
+    const start = performance.now();
+    const tick = () => {
+      const t = Math.min(1, (performance.now() - start) / 350);
+      const e = 1 - (1 - t) ** 3;
+      if (!graphRef.current) return;
+      setView(graphRef.current, { scale: to.scale, tx: from.tx + (to.tx - from.tx) * e, ty: from.ty + (to.ty - from.ty) * e });
+      if (t < 1) glide.current = requestAnimationFrame(tick);
+    };
+    glide.current = requestAnimationFrame(tick);
+  }
+
   function zoomBy(factor: number, px?: number, py?: number) {
     const g = graphRef.current;
     const el = wrapRef.current;
@@ -322,6 +364,7 @@ export function DiagramView({ xml, resetKey, flashKey, onApi, children }: Diagra
       const g = graphRef.current;
       if (!g || skip(e)) return;
       e.preventDefault();
+      cancelAnimationFrame(glide.current);
       const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? el.clientHeight : 1;
       if (e.ctrlKey || e.metaKey) {
         const [px, py] = local(e);
@@ -333,6 +376,7 @@ export function DiagramView({ xml, resetKey, flashKey, onApi, children }: Diagra
     };
     const onDown = (e: PointerEvent) => {
       if ((e.button !== 0 && e.button !== 1) || skip(e)) return;
+      cancelAnimationFrame(glide.current);
       drag = { x: e.clientX, y: e.clientY, id: e.pointerId };
       el.setPointerCapture(e.pointerId);
       if (graphElRef.current) graphElRef.current.style.cursor = 'grabbing';

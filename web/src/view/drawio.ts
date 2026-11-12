@@ -1,5 +1,6 @@
 // Loads the vendored diagrams.net viewer (web/static/vendor/drawio, Apache-2.0) once.
-// Every path the viewer could fetch lazily points at this server, never a CDN.
+// Every path the viewer could fetch lazily points at this server, never a CDN
+// (the server's CSP blocks any other origin as a backstop).
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export type Drawio = {
@@ -22,7 +23,12 @@ export function loadDrawio(): Promise<Drawio> {
     w.GRAPH_IMAGE_PATH = `${BASE}/img`;
     w.IMAGE_PATH = `${BASE}/images`;
     w.RESOURCES_PATH = `${BASE}/resources`;
-    w.PROXY_URL = '';
+    w.mxBasePath = `${BASE}/mxgraph`;
+    w.mxImageBasePath = `${BASE}/mxgraph/images`;
+    w.DRAW_MATH_URL = `${BASE}/math4/es5`;
+    w.DRAWIO_LIGHTBOX_URL = BASE;
+    // Must be truthy: the viewer replaces '' with its external default.
+    w.PROXY_URL = `${BASE}/proxy`;
     w.mxLoadResources = false;
     w.mxLoadStylesheets = false;
     const s = document.createElement('script');
