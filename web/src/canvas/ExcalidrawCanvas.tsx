@@ -655,6 +655,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       )}
       <LayoutBar
         editing={!!edit}
+        broken={!!(edit && sess && sess.blockId === edit.blockId && 'reason' in sess.s)}
         moved={!!(editBlock ?? (selBlock ? blocks.find((b) => b.id === selBlock) : undefined))?.layout}
         notice={!edit && notice && notice.blockId === selBlock ? notice.text : null}
         onReset={() => {
@@ -739,7 +740,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
 }
 
 /** Bottom-centre bar for layout edit mode (design §5.5): what the mode does, or that a block has a moved layout, or why it cannot be edited. */
-function LayoutBar({ editing, moved, notice, onReset, onDone }: { editing: boolean; moved: boolean; notice: string | null; onReset: () => void; onDone: () => void }) {
+function LayoutBar({ editing, broken, moved, notice, onReset, onDone }: { editing: boolean; broken: boolean; moved: boolean; notice: string | null; onReset: () => void; onDone: () => void }) {
   if (!editing && !notice && !moved) return null;
   return (
     <div
@@ -748,7 +749,7 @@ function LayoutBar({ editing, moved, notice, onReset, onDone }: { editing: boole
       className="absolute bottom-16 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
-      <span>{editing ? '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요' : (notice ?? '직접 옮긴 배치예요')}</span>
+      <span>{editing ? (broken ? '코드 오류를 고치면 옮길 수 있어요' : '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요') : (notice ?? '직접 옮긴 배치예요')}</span>
       {(editing || (!notice && moved)) && (
         <button type="button" className={BAR_BTN} style={{ borderColor: 'var(--border)' }} disabled={!moved} onClick={onReset}>
           레이아웃 초기화

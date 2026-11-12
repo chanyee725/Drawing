@@ -309,6 +309,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await page.keyboard.type('\nWeb > ');
   await page.waitForTimeout(1200);
   assert.equal(await overlay.count(), 1, 'overlay waits for the panel to close');
+  assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/, 'the bar says why nothing moves while the code is broken');
   await panel.getByRole('button', { name: '닫기' }).click();
   await overlay.waitFor({ state: 'detached', timeout: 5000 });
   assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/);
