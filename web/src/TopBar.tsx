@@ -10,6 +10,8 @@ type Props = {
   title: string;
   hasFile: boolean;
   status: string;
+  /** The status is a problem: keep it visible on narrow screens. */
+  statusAlert?: boolean;
   view: View;
   onView: (v: View) => void;
   onTitle: (t: string) => void;
@@ -17,7 +19,7 @@ type Props = {
   onToggleNav?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, view, onView, onTitle, onToggleNav }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav }: Props) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4" style={{ borderColor: 'var(--border)' }}>
       {onToggleNav && (
@@ -38,8 +40,15 @@ export function TopBar({ title, hasFile, status, view, onView, onTitle, onToggle
           파일을 골라 주세요
         </span>
       )}
-      <span className="hidden min-w-0 truncate text-xs md:inline" style={{ color: 'var(--text-muted)' }} aria-live="polite">
-        {status}
+      <span
+        className={`min-w-0 shrink-0 truncate text-xs md:shrink md:inline ${statusAlert ? 'inline font-medium' : 'hidden'}`}
+        style={{ color: statusAlert ? 'var(--danger, #c0392b)' : 'var(--text-muted)' }}
+        role={statusAlert ? 'alert' : undefined}
+        aria-live="polite"
+        title={status}
+      >
+        <span className="md:hidden">{statusAlert ? '저장 안 됨' : ''}</span>
+        <span className="hidden md:inline">{status}</span>
       </span>
       <div className="flex shrink-0 rounded-md border p-0.5 md:mx-auto" style={{ borderColor: 'var(--border)' }} role="group" aria-label="보기 방식">
         {VIEWS.map((v) => (
