@@ -237,7 +237,11 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await panel.locator('.cm-line').first().click();
   await page.keyboard.press('End');
   await page.keyboard.type(' two');
-  await page.waitForTimeout(500);
+  // The overlay keeps its last picture while the new one is drawn, so the (hidden) block never goes blank.
+  for (let i = 0; i < 5; i++) {
+    assert.equal(await overlay.count(), 1, 'overlay stays while the code is redrawn');
+    await page.waitForTimeout(100);
+  }
   await panel.getByRole('button', { name: '닫기' }).click();
   await page.waitForTimeout(500);
   // Edit mode stays through the code panel.
