@@ -35,11 +35,18 @@ export function subscribeMockAgents(onData: AgentsListener, { intervalMs = 2200 
   const fileId = 'main:docs/pipeline.drawio';
   const relPath = 'docs/pipeline.drawio';
   const pages = { p1: '파이프라인', p2: '구성' } as const;
-  const plan: Array<{ page: keyof typeof pages; cells: string[]; text: string }> = [
-    { page: 'p1', cells: ['s0'], text: '수집 단계 이름을 고치고 있어요' },
-    { page: 'p1', cells: ['s2'], text: '학습 단계를 옮기고 있어요' },
-    { page: 'p1', cells: ['s4', 'e3'], text: '배포 화살표를 잇고 있어요' },
-    { page: 'p2', cells: ['b'], text: 'server 상자를 다듬고 있어요' },
+  type Step = { page: keyof typeof pages; cells: string[]; text: string };
+  const plans: Step[][] = [
+    [
+      { page: 'p1', cells: ['s0'], text: '수집 단계 이름을 고치고 있어요' },
+      { page: 'p1', cells: ['s2'], text: '학습 단계를 옮기고 있어요' },
+      { page: 'p1', cells: ['s4', 'e3'], text: '배포 화살표를 잇고 있어요' },
+    ],
+    [
+      { page: 'p1', cells: ['s3'], text: '평가 단계를 검토하고 있어요' },
+      { page: 'p2', cells: ['b'], text: 'server 상자를 다듬고 있어요' },
+      { page: 'p1', cells: ['s1'], text: '정제 단계 설명을 보고 있어요' },
+    ],
   ];
   const mk = (id: string, name: string, role: string, roleName: string): Agent => ({
     id,
@@ -54,8 +61,9 @@ export function subscribeMockAgents(onData: AgentsListener, { intervalMs = 2200 
   const agents = [mk('m1', 'impl-1', 'impl', '구현자'), mk('m2', 'review-1', 'review', '리뷰어')];
   let tick = 0;
   const step = () => {
-    const a = agents[tick % 2];
-    const p = plan[(tick * 3 + (tick % 2)) % plan.length];
+    const i = tick % 2;
+    const a = agents[i];
+    const p = plans[i][Math.floor(tick / 2) % plans[i].length];
     tick++;
     const now = Date.now();
     a.activity = p.text;

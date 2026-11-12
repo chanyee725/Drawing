@@ -62,7 +62,8 @@ const num = (v: unknown): number | null => {
 function normalizeRect(v: unknown): Rect | null {
   const r = v as Raw | null;
   if (!r || typeof r !== 'object') return null;
-  const x = num(r.x), y = num(r.y), width = num(r.width), height = num(r.height);
+  // The watch feed sends {x, y, w, h}; accept {width, height} too.
+  const x = num(r.x), y = num(r.y), width = num(r.width ?? r.w), height = num(r.height ?? r.h);
   return x == null || y == null || width == null || height == null ? null : { x, y, width, height };
 }
 

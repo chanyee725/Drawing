@@ -23,7 +23,7 @@ const change = (extra = {}) => ({
   page: { id: 'p1', name: 'Page 1' },
   kinds: ['text'],
   cellIds: ['c1'],
-  bbox: { x: 10, y: 20, width: 30, height: 40 },
+  bbox: { x: 10, y: 20, w: 30, h: 40 },
   summary: '1개 글자 바뀜',
   at: NOW - 1000,
   ...extra,
@@ -52,6 +52,7 @@ test('normalizeAgents keeps known fields only and tolerates junk', () => {
   });
   assert.deepEqual(snap.dispatch, { found: true, connected: true });
   assert.equal(snap.agents.length, 2);
+  assert.deepEqual(snap.agents[0].lastChange.bbox, { x: 10, y: 20, width: 30, height: 40 });
   assert.deepEqual(Object.keys(snap.agents[0]).sort(), ['activity', 'activityAt', 'id', 'lastChange', 'name', 'role', 'roleName', 'status']);
   assert.equal(snap.agents[1].id, '2');
   assert.equal(snap.agents[1].roleName, 'review');
