@@ -7,5 +7,5 @@ export type CanvasHandle = {
   /** The scope as a PNG, or null when the canvas is empty. */
   png(): Promise<Blob | null>;
   /** Send a key to the canvas as if typed there (tool keys, zoom, undo...). */
-  key(k: { key: string; code?: string; ctrl?: boolean; shift?: boolean; alt?: boolean }): void;
+  key(k: { key: string; code?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean }): void;
 };

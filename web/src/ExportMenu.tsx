@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
+import { IS_MAC } from './platform';
 
 type Props = {
   open: boolean;
@@ -42,7 +43,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, onImage, onMar
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="내보내기 (Ctrl+E)"
+        title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`}
         onClick={() => onOpen(!open)}
         className="h-8 whitespace-nowrap rounded-md border px-3 text-sm disabled:opacity-50"
         style={{ borderColor: 'var(--border)' }}

@@ -280,11 +280,11 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         if (!elements.length) return null;
         return await exportToBlob({ elements, appState: opts(), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16 });
       },
-      key: ({ key, code, ctrl, shift, alt }) => {
+      key: ({ key, code, ctrl, meta, shift, alt }) => {
         const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');
         if (!target) return;
         target.focus({ preventScroll: true });
-        target.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey: !!ctrl, shiftKey: !!shift, altKey: !!alt, bubbles: true, cancelable: true }));
+        target.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey: !!ctrl, metaKey: !!meta, shiftKey: !!shift, altKey: !!alt, bubbles: true, cancelable: true }));
       },
     };
     return () => {

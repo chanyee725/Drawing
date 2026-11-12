@@ -14,6 +14,7 @@ import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
 import type { CanvasHandle } from './export/types';
+import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 
 const SAVE_DELAY = 700;
 const RETRY_MIN = 1000;
@@ -351,19 +352,23 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
-      const mod = e.ctrlKey || e.metaKey;
+      // Mac uses only Cmd, everything else only Ctrl, so Mac's Ctrl+E/K stay with text fields.
+      const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       const k = e.code;
+      // Inside a text field, the document editor or the code editor these keys belong to the editor
+      // (Ctrl+E is "code" in the document), so the export shortcuts step aside; the menu and palette still work.
+      const editing = e.target instanceof Element && !!e.target.closest('.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""]');
       if (mod && !e.shiftKey && !e.altKey && k === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
         setExportOpen(false);
         setPaletteOpen((o) => !o);
-      } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen) {
+      } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen && !editing && window.matchMedia(EXPORT_MENU_QUERY).matches) {
         e.preventDefault();
         e.stopPropagation();
         setPaletteOpen(false);
         openExport(true);
-      } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen) {
+      } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen && !editing) {
         e.preventDefault();
         e.stopPropagation();
         void report(exportCanvas(canvasHandle.current, 'copy', fileRef.current?.title ?? ''));
@@ -375,10 +380,9 @@ export function App() {
 
   const commands = (): Command[] => {
     const h = canvasHandle.current;
-    const key = (k: Parameters<CanvasHandle['key']>[0]) => () => canvasHandle.current?.key(k);
+    const key = (k: Parameters<CanvasHandle['key']>[0]) => () => canvasHandle.current?.key(IS_MAC && k.ctrl ? { ...k, ctrl: false, meta: true } : k);
     const needCanvas = !h || !file;
-    const mac = /Mac|iPhone|iPad/.test(navigator.platform);
-    const M = mac ? '⌘' : 'Ctrl+';
+    const M = IS_MAC ? '⌘' : 'Ctrl+';
     const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[] = []): Command => ({ id, title, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
     return [
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
@@ -388,7 +392,7 @@ export function App() {
       { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
       { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
-      { id: 'theme', title: theme === 'dark' ? '밝은 화면으로 바꾸기' : '어두운 화면으로 바꾸기', run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
+      { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
       canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구']),
       canvasCmd('tool-rect', '도구: 사각형', 'R', { key: 'r' }, ['tool', 'rectangle', '도구']),
       canvasCmd('tool-diamond', '도구: 마름모', 'D', { key: 'd' }, ['tool', 'diamond', '도구']),
