@@ -239,6 +239,87 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     assert.equal(readFileSync(await pdl.path()).subarray(1, 4).toString(), 'PNG');
   });
 
+  await t.test('Ctrl+E and Shift+Alt+C stay with the document editor', async () => {
+    step = 'editor keys';
+    await page.getByRole('button', { name: '문서', exact: true }).click();
+    const para = page.locator('.ProseMirror p', { hasText: '본문' }).first();
+    await para.waitFor();
+    await para.click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('Home');
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.keyboard.press('Shift+ArrowRight');
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Control+e');
+    await page.waitForTimeout(400);
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByRole('menu', { name: '내보내기' }).count(), 0, 'Ctrl+E in the editor must not open the export menu');
+    assert.ok((await page.locator('.ProseMirror code').count()) >= 1, 'Ctrl+E in the editor toggles the code mark');
+    await page.keyboard.press('Control+e');
+    await page.keyboard.press('Shift+Alt+c');
+    await page.waitForTimeout(600);
+    assert.equal(await page.getByText('이미지로 복사했어요').count(), 0, 'Shift+Alt+C in the editor must not copy an image');
+    // The menu button still opens it.
+    await page.getByRole('button', { name: '내보내기', exact: true }).click();
+    await page.getByRole('menu', { name: '내보내기' }).waitFor();
+    await page.keyboard.press('Escape');
+  });
+
+  await t.test('Ctrl+E does nothing when the export menu is hidden (narrow window)', async () => {
+    step = 'narrow';
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.mouse.click(5, 450);
+    await page.keyboard.press('Control+e');
+    await page.waitForTimeout(300);
+    await page.setViewportSize({ width: 1500, height: 950 });
+    await page.waitForTimeout(300);
+    assert.equal(await page.getByRole('menu', { name: '내보내기' }).count(), 0, 'the hidden menu must not have been opened');
+  });
+
+  await t.test('Mac: Cmd keys work, Ctrl keys do not', async () => {
+    step = 'mac';
+    const mctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
+    await mctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }));
+    const mp = await mctx.newPage();
+    mp.on('pageerror', (e) => !/must point at the current document/.test(e.message) && errors.push(`[mac] ${e.stack}`.slice(0, 400)));
+    await mp.goto(`${BASE}/#file=e7`);
+    await mp.waitForSelector('.excalidraw canvas', { timeout: 30000 });
+    await mp.waitForTimeout(1000);
+    await mp.getByRole('button', { name: '캔버스', exact: true }).click();
+    await mp.waitForTimeout(500);
+    const mzoom = async () => parseInt(await mp.locator('.reset-zoom-button').first().innerText(), 10);
+    const dlg = mp.getByRole('dialog', { name: '명령 팔레트' });
+    const run = async (q) => {
+      await mp.keyboard.press('Meta+k');
+      await dlg.waitFor();
+      await mp.keyboard.type(q);
+      await mp.keyboard.press('Enter');
+      await dlg.waitFor({ state: 'detached' });
+      await mp.waitForTimeout(250);
+    };
+    // Ctrl+K is not the Mac shortcut.
+    await mp.keyboard.press('Control+k');
+    await mp.waitForTimeout(300);
+    assert.equal(await dlg.count(), 0, 'Ctrl+K must not open the palette on a Mac');
+    await run('화면 크기 100%');
+    assert.equal(await mzoom(), 100);
+    await run('확대');
+    const up = await mzoom();
+    assert.ok(up > 100, `palette zoom in on a Mac gave ${up}`);
+    await run('축소');
+    assert.ok((await mzoom()) < up, 'palette zoom out on a Mac');
+    await run('화면 크기 100%');
+    assert.equal(await mzoom(), 100);
+    // Cmd+E opens the menu with a Mac tooltip; Ctrl+E does not.
+    assert.equal(await mp.getByRole('button', { name: '내보내기', exact: true }).getAttribute('title'), '내보내기 (⌘E)');
+    await mp.mouse.click(1300, 800);
+    await mp.keyboard.press('Control+e');
+    await mp.waitForTimeout(300);
+    assert.equal(await mp.getByRole('menu', { name: '내보내기' }).count(), 0, 'Ctrl+E must not open the menu on a Mac');
+    await mp.keyboard.press('Meta+e');
+    await mp.getByRole('menu', { name: '내보내기' }).waitFor();
+    await mctx.close();
+  });
+
   assert.deepEqual([...origins], [BASE], 'no request left this server');
   assert.deepEqual(errors, []);
 });
