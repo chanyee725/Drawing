@@ -533,3 +533,14 @@ test('reading a newer-format file after an outside edit leaves it untouched, and
     assert.equal(await readFile(file, 'utf8'), edited);
   });
 });
+
+test('a typed .dpx suffix is dropped: demo.dpx is the file demo.dpx.json', async () => {
+  await withApp(async ({ ws, call }) => {
+    const r = await call('POST', '/api/file', { path: 'a/demo.dpx', title: 'Demo' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.path, 'a/demo.dpx.json');
+    assert.deepEqual(await readdir(join(ws, 'a')), ['demo.dpx.json']);
+    assert.equal((await call('GET', `/api/file?path=${q('a/demo.dpx')}`)).status, 200);
+    assert.equal((await call('POST', '/api/file', { path: 'a/demo' })).status, 409);
+  });
+});

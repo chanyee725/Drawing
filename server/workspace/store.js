@@ -47,7 +47,10 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
 
   const fileRel = (rel) => {
     parseRelPath(rel);
-    return isDpx(rel) ? rel : rel + FILE_EXT;
+    if (isDpx(rel)) return rel;
+    // A typed `.dpx` suffix is dropped like in the web UI: `demo.dpx` is the file `demo.dpx.json`, not `demo.dpx.dpx.json`.
+    const stem = rel.replace(/\.dpx$/i, '');
+    return (stem === '' || stem.endsWith('/') ? rel : stem) + FILE_EXT;
   };
   // A folder named like a file (`x.dpx.json/`) would be confused with a file, so no path may contain one.
   const checkFolderNames = (segs) => {
