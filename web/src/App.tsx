@@ -18,6 +18,7 @@ import { fileStem } from './fileName';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
+import { HistoryDialog } from './HistoryDialog';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
@@ -135,6 +136,7 @@ export function App() {
   exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
   const canvasHandle = useRef<CanvasHandle | null>(null);
 
@@ -235,6 +237,26 @@ export function App() {
     }
   };
   const overwrite = () => void session.overwrite();
+
+  // Restore = a normal save of the old version's content. The current state is kept as a version first.
+  const restoreVersion = async (id: string): Promise<string | null> => {
+    const p = session.getState().path;
+    if (!p) return '열린 파일이 없어요';
+    await session.flush();
+    if (session.isDirty() || session.getState().conflict) return '저장되지 않은 변경이 있어 되돌리지 못했어요';
+    try {
+      const old = await api.historyVersion(p, id);
+      await api.historySnapshot(p);
+      const cur = await api.readFile(p);
+      await api.saveFile(p, { revision: cur.revision, title: old.title, document: old.document, canvas: old.canvas, blocks: old.blocks });
+      load(p, await api.readFile(p));
+      void refreshTree();
+      setStatus('이전 버전으로 되돌렸어요');
+      return null;
+    } catch (e) {
+      return e instanceof ApiError && e.status === 409 ? '다른 곳에서 바뀌었어요. 다시 시도해 주세요' : '되돌리지 못했어요. 잠시 뒤 다시 시도해 주세요';
+    }
+  };
 
   // Warn before leaving with unsaved edits; on pagehide send them with keepalive.
   useEffect(() => {
@@ -396,6 +418,7 @@ export function App() {
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
       { id: 'export-copy', title: '이미지로 복사', keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
+      { id: 'history', title: '버전 기록 열기', disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
       { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
       { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
@@ -461,6 +484,7 @@ export function App() {
           view={view}
           onView={setView}
           onTitle={(title) => edit({ title })}
+          onHistory={() => setHistoryOpen(true)}
           onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
           exportMenu={
             <ExportMenu
@@ -476,6 +500,7 @@ export function App() {
             />
           }
         />
+        {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
         {paletteOpen && <CommandPalette commands={commands()} onClose={() => setPaletteOpen(false)} />}
         {conflict && (
           <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
