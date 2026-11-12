@@ -12,12 +12,14 @@ const ATTRS = new Set([
   'colorMode', 'styleMode', 'typeface', 'textSize', 'wrap', 'connectorStyle',
 ]);
 
-type State = { bracket: boolean };
+// depth counts open `{` so Enter indents a group body and typing `}` dedents it.
+type State = { bracket: boolean; depth: number };
 
 export const dslLanguage = StreamLanguage.define<State>({
-  name: 'eraser-dsl',
-  startState: () => ({ bracket: false }),
-  languageData: { commentTokens: { line: '//' } },
+  name: 'diagram-dsl',
+  startState: () => ({ bracket: false, depth: 0 }),
+  languageData: { commentTokens: { line: '//' }, indentOnInput: /^\s*\}$/ },
+  indent: (state, textAfter, cx) => Math.max(0, state.depth - (/^\s*\}/.test(textAfter) ? 1 : 0)) * cx.unit,
   token(stream, state) {
     if (stream.eatSpace()) return null;
     if (stream.match('//')) {
@@ -48,6 +50,7 @@ export const dslLanguage = StreamLanguage.define<State>({
     }
     if (ch === '{' || ch === '}') {
       stream.next();
+      state.depth = Math.max(0, state.depth + (ch === '{' ? 1 : -1));
       return 'brace';
     }
     if (ch === ':' || ch === ',') {
