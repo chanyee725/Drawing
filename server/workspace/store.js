@@ -16,6 +16,7 @@ export class StoreError extends Error {
 }
 
 const sha = (text) => createHash('sha256').update(text).digest('hex');
+const MAX_TOMBSTONES = 1000;
 const isDpx = (name) => name.endsWith(FILE_EXT) && name.length > FILE_EXT.length;
 
 export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 60 } = {}) {
@@ -259,14 +260,20 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         const fileFrom = checkedFileRel(from);
         const fromAbs = await wrapPath(fileFrom);
         const st = await statOrNull(fromAbs);
-        if (st?.isFile()) return moveFile(fileFrom, fromAbs, checkedFileRel(to));
+        if (st?.isFile()) return moved(from, await moveFile(fileFrom, fromAbs, checkedFileRel(to)));
         if (type === 'file') throw new StoreError(404, 'not found');
       }
       const fromAbs = await wrapPath(from);
       const st = await statOrNull(fromAbs);
       if (!st?.isDirectory()) throw new StoreError(404, 'not found');
-      return moveFolder(from, fromAbs, to);
+      return moved(from, await moveFolder(from, fromAbs, to));
     });
+  }
+
+  // A move or rename through the API tells other tabs where the thing went; `from` is the path as the caller wrote it.
+  function moved(from, result) {
+    onExternalChange?.({ kind: 'tree', path: result.path, from });
+    return result;
   }
 
   async function moveFile(from, fromAbs, toRel) {
@@ -325,6 +332,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
       await unlink(abs);
       forget(rel, false);
+      onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
       return { path: rel };
     });
   }
@@ -337,6 +345,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
       await rm(abs, { recursive: true });
       forget(rel, true);
+      onExternalChange?.({ kind: 'tree', path: rel });
       return { path: rel };
     });
   }
@@ -345,7 +354,11 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     const bury = (k) => {
       const e = known.get(k);
       if (!e) return;
-      tombstones.set(k, Math.max(e.revision, tombstones.get(k) ?? 0));
+      const floor = Math.max(e.revision, tombstones.get(k) ?? 0);
+      tombstones.delete(k); // re-insert so the newest burials are the last to go
+      tombstones.set(k, floor);
+      // Bounded: only the most recent deletions keep a revision floor.
+      if (tombstones.size > MAX_TOMBSTONES) tombstones.delete(tombstones.keys().next().value);
       known.delete(k);
     };
     if (!isDir) return void bury(rel);
@@ -432,16 +445,21 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
 
   async function startWatching() {
     await scan(fsr.root, '');
-    watcher = watch(fsr.root, { recursive: true }, (_ev, filename) => {
-      if (!filename) return;
-      const rel = String(filename).split('\\').join('/');
-      clearTimeout(timers.get(rel));
-      timers.set(rel, setTimeout(() => {
-        timers.delete(rel);
-        reconcile(rel).catch(() => {});
-      }, watchDebounceMs));
-    });
-    watcher.on('error', () => {});
+    try {
+      watcher = watch(fsr.root, { recursive: true }, (_ev, filename) => {
+        if (!filename) return;
+        const rel = String(filename).split('\\').join('/');
+        clearTimeout(timers.get(rel));
+        timers.set(rel, setTimeout(() => {
+          timers.delete(rel);
+          reconcile(rel).catch(() => {});
+        }, watchDebounceMs));
+      });
+      watcher.on('error', () => {});
+    } catch (err) {
+      // EACCES, ENOSPC (watch limit), ...: the app still works, outside edits are just not noticed until a file is read or saved. No path in the log.
+      console.warn(`workspace: not watching for outside changes (${err?.code ?? 'error'})`);
+    }
   }
 
   function close() {
