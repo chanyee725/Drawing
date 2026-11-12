@@ -86,7 +86,7 @@ const KEYWORDS: [Glyph, string[]][] = [
 /** Pick a glyph for an icon name. Exact glyph names win, then keywords, then the placeholder. */
 export function glyphFor(name: string): Glyph {
   const n = name.trim().toLowerCase();
-  if (n in GLYPHS) return n as Glyph;
+  if (Object.hasOwn(GLYPHS, n)) return n as Glyph;
   const words = n.split(/[-_\s.]+/).filter(Boolean);
   for (const [glyph, keys] of KEYWORDS) {
     if (words.some((w) => keys.includes(w))) return glyph;

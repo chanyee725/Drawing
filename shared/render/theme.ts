@@ -66,7 +66,7 @@ const NAMED: Record<string, [string, string]> = {
 export function sanitizeColor(value: string | undefined): string | undefined {
   if (!value) return undefined;
   const v = value.trim().toLowerCase();
-  if (v in NAMED) return v;
+  if (Object.hasOwn(NAMED, v)) return v;
   if (/^#([0-9a-f]{3}|[0-9a-f]{6})$/.test(v)) return v;
   return undefined;
 }
@@ -97,7 +97,7 @@ function luminance(hex: string): number {
 export function strokeOf(color: string | undefined, theme: Theme): string {
   const t = THEMES[theme];
   if (!color) return t.stroke;
-  const named = NAMED[color];
+  const named = (Object.hasOwn(NAMED, color) ? NAMED[color] : undefined);
   if (named) return theme === 'light' ? named[0] : named[1];
   return color;
 }

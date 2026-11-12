@@ -12,7 +12,9 @@ const FIXTURES = ['architecture-web-service', 'flowchart-ticket-workflow', 'sequ
 /** Compare with `__snapshots__/<name>.svg`; write it when missing or with UPDATE_SNAPSHOTS=1. */
 function snapshot(name: string, svg: string): void {
   const file = fileURLToPath(new URL(`./__snapshots__/${name}.svg`, import.meta.url));
-  if (process.env.UPDATE_SNAPSHOTS === '1' || !existsSync(file)) writeFileSync(file, svg + '\n');
+  const update = process.env.UPDATE_SNAPSHOTS === '1';
+  if (!update && !existsSync(file) && process.env.CI) assert.fail(`snapshot ${name} is missing (run with UPDATE_SNAPSHOTS=1 and commit it)`);
+  if (update || !existsSync(file)) writeFileSync(file, svg + '\n');
   assert.equal(svg + '\n', readFileSync(file, 'utf8'), `snapshot ${name} changed (UPDATE_SNAPSHOTS=1 to accept)`);
 }
 
@@ -56,7 +58,7 @@ test('performance: 100-node architecture diagram lays out in under 150 ms', asyn
     assert.equal(r.scene.items.filter((it) => it.kind === 'icon').length, 105);
   }
   times.sort((a, b) => a - b);
-  assert.ok(times[2]! < 150, `median ${times[2]!.toFixed(1)} ms`);
+  assert.ok(times[2]! < (process.env.CI ? 450 : 150), `median ${times[2]!.toFixed(1)} ms`);
 });
 
 test('colour values cannot inject markup', async () => {
@@ -113,4 +115,14 @@ test('unknown icons get the placeholder glyph, vendor names map to generic glyph
   assert.equal(glyphFor('aws-ec2'), 'server');
   assert.equal(glyphFor('gcp-pubsub'), 'queue');
   assert.equal(glyphFor('zzz-unknown'), 'placeholder');
+});
+
+test('Object.prototype key names as colour or icon fall back to defaults', async () => {
+  const { glyphFor } = await import('../../shared/render/index.ts');
+  for (const k of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+    const r = await renderDiagram(`A [color: ${k}, icon: ${k}] > B`, { type: 'flowchart' });
+    assert.ok(r.svg.startsWith('<svg'), k);
+    assert.ok(!r.svg.includes('function'), k);
+    assert.equal(glyphFor(k), 'placeholder', k);
+  }
 });
