@@ -72,8 +72,7 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
   const origins = new Set();
   const errors = [];
   page.on('request', (r) => !/^(data|blob):/.test(r.url()) && origins.add(new URL(r.url()).origin));
-  // Known E6 bug (also on develop): clicking a diagram embed that follows text throws this inside ProseMirror. Not part of E7.
-  page.on('pageerror', (e) => !/must point at the current document/.test(e.message) && errors.push(`[${step}] ${e.stack}`.slice(0, 400)));
+  page.on('pageerror', (e) => errors.push(`[${step}] ${e.stack}`.slice(0, 400)));
   await page.goto(`${BASE}/#file=e7`);
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
   await page.waitForSelector('.doc-diagram-pic img', { timeout: 30000 });
@@ -280,7 +279,7 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     const mctx = await browser.newContext({ viewport: { width: 1500, height: 950 } });
     await mctx.addInitScript(() => Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'MacIntel' }));
     const mp = await mctx.newPage();
-    mp.on('pageerror', (e) => !/must point at the current document/.test(e.message) && errors.push(`[mac] ${e.stack}`.slice(0, 400)));
+    mp.on('pageerror', (e) => errors.push(`[mac] ${e.stack}`.slice(0, 400)));
     await mp.goto(`${BASE}/#file=e7`);
     await mp.waitForSelector('.excalidraw canvas', { timeout: 30000 });
     await mp.waitForTimeout(1000);
