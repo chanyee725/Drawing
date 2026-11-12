@@ -1,8 +1,9 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
+import { api, ApiError, type Block, FILE_FORMAT_VERSION, type DpxFile, type TreeNode } from './api';
 import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
-import { isRetryableSaveError } from './saveRetry';
+import { externalAction, type WorkspaceEvent } from './externalChange';
+import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 // TipTap and the diagram renderer are big; they load when a file is first opened.
@@ -12,7 +13,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model';
+import { migrateDocument } from './doc/model';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
@@ -92,6 +93,8 @@ export function App() {
   const inFlight = useRef(false);
   const retryDelay = useRef(0);
   const conflictRef = useRef(false);
+  // Set when a reload was stopped because the save failed: that notice stays until a save succeeds.
+  const reloadStopped = useRef(false);
   fileRef.current = file;
   pathRef.current = path;
 
@@ -126,7 +129,7 @@ export function App() {
         if (!p || !f || !dirty.current || conflictRef.current) return;
         const seq = editSeq.current;
         inFlight.current = true;
-        setStatus('저장 중이에요…');
+        if (!reloadStopped.current) setStatus('저장 중이에요…');
         try {
           const saved = await api.saveFile(p, f, keepalive);
           if (pathRef.current !== p) return;
@@ -135,24 +138,27 @@ export function App() {
           retryDelay.current = 0;
           if (editSeq.current === seq) {
             dirty.current = false;
+            reloadStopped.current = false;
             setStatus('저장했어요');
           }
           void refreshTree();
         } catch (e) {
           if (pathRef.current !== p) return;
+          // A retry or refusal must not hide the notice that the reload was stopped.
+          const problem = (text: string) => setStatus(saveProblemText(text, reloadStopped.current), true);
           if (e instanceof ApiError && e.status === 409) {
             clearTimer();
             conflictRef.current = true;
             setConflict({ revision: e.revision });
-            setStatus('다른 곳에서 바뀌었어요', true);
+            problem('다른 곳에서 바뀌었어요');
           } else if (!isRetryableSaveError(e)) {
             // The server refused this request (4xx); retrying the same body would fail forever.
             // Keep a pending edit timer: a newer edit may already have fixed the body.
-            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > DOC_FORMAT_VERSION;
-            setStatus(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
+            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > FILE_FORMAT_VERSION;
+            problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
-            setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요', true);
+            problem('저장하지 못했어요. 잠시 뒤 다시 시도할게요');
             // A pending edit timer will save sooner; otherwise back off and retry.
             if (timer.current === null) schedule(retryDelay.current);
           }
@@ -175,7 +181,8 @@ export function App() {
   const flushForReload = useCallback(async () => {
     await flush();
     if (!dirty.current && !conflictRef.current) return true;
-    setStatus('저장하지 못해서 새로고침을 멈추었어요', true);
+    reloadStopped.current = true;
+    setStatus(RELOAD_STOPPED, true);
     return false;
   }, [flush, setStatus]);
 
@@ -189,7 +196,7 @@ export function App() {
       });
       dirty.current = true;
       editSeq.current += 1;
-      if (!conflictRef.current) setStatus('');
+      if (!conflictRef.current && !reloadStopped.current) setStatus('');
       schedule(SAVE_DELAY);
     },
     [schedule],
@@ -200,6 +207,7 @@ export function App() {
     dirty.current = false;
     retryDelay.current = 0;
     conflictRef.current = false;
+    reloadStopped.current = false;
     setConflict(null);
     setPath(p);
     pathRef.current = p;
@@ -309,21 +317,61 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
+  // The open file is gone (deleted or moved away): drop it and its pending save, or the timer would write to a path that no longer exists.
+  const closeOpenFile = useCallback(() => {
+    clearTimer();
+    dirty.current = false;
+    conflictRef.current = false;
+    reloadStopped.current = false;
+    setConflict(null);
+    setPath(null);
+    pathRef.current = null;
+    setFile(null);
+    fileRef.current = null;
+    setHashPath(null);
+  }, []);
+
+  // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource('/api/events');
+    let busy = false;
+    es.addEventListener('workspace', (m) => {
+      let e: WorkspaceEvent;
+      try {
+        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
+      } catch {
+        return;
+      }
+      const act = externalAction(e, pathRef.current, dirty.current || inFlight.current);
+      if (act === 'close') {
+        closeOpenFile();
+        setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
+      } else if (act === 'reload' && !busy) {
+        const p = pathRef.current!;
+        busy = true;
+        void saving.current
+          .then(() => (dirty.current || pathRef.current !== p ? null : api.readFile(p)))
+          .then((f) => {
+            if (f && !dirty.current && pathRef.current === p && f.revision > (fileRef.current?.revision ?? 0)) load(p, f);
+          })
+          .catch(() => {})
+          .finally(() => {
+            busy = false;
+          });
+      }
+      void refreshTree();
+    });
+    return () => es.close();
+  }, [closeOpenFile, load, refreshTree]);
+
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
     if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) {
-        clearTimer();
-        dirty.current = false;
-        conflictRef.current = false;
-        setConflict(null);
-        setPath(null);
-        setFile(null);
-        setHashPath(null);
-      }
+      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');

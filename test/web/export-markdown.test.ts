@@ -80,10 +80,21 @@ test('more line-start markers: "1) ", a lone "-" or "#", rules, setext underline
   for (const [input, want] of cases) assert.equal(documentToMarkdown('', { type: 'doc', content: [p(t(input))] }, []), `${want}\n`, input);
 });
 
-test('a block export is named after the document title, the block type and its position', () => {
+test('a block export is named after the document title, the block type and its position among that type', () => {
   const bs = [blk('a', 'flowchart', ''), blk('b', 'erd', ''), blk('c', 'flowchart', '')];
-  assert.equal(blockExportTitle('설계', bs[2], bs), '설계 - flowchart 3');
-  assert.equal(blockExportTitle('', bs[1], bs), '제목 없는 파일 - erd 2');
+  assert.equal(blockExportTitle('설계', bs[2], bs), '설계 - flowchart 2');
+  assert.equal(blockExportTitle('', bs[1], bs), '제목 없는 파일 - erd 1');
   assert.equal(exportName(blockExportTitle('a/b', bs[0], bs), 'svg'), 'a-b - flowchart 1.svg');
   assert.equal(blockExportTitle('x', blk('zz', 'erd', ''), bs), 'x - erd 1');
+});
+
+test('text that looks like a ~~~ fence, strikethrough or an indented code block is escaped', () => {
+  const md = (s: string) => documentToMarkdown('', { type: 'doc', content: [p(t(s))] }, []);
+  assert.equal(md('~~~js'), '\\~\\~\\~js\n');
+  assert.equal(md('a ~~b~~'), 'a \\~\\~b\\~\\~\n');
+  assert.equal(md('\tcode'), '&#9;code\n');
+  assert.equal(md('    code'), '   &#32;code\n');
+  assert.equal(md('      \tx'), '   &#32;  \tx\n');
+  assert.equal(md('  \tcode'), '  &#9;code\n');
+  assert.equal(md('   three'), '   three\n');
 });

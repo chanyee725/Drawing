@@ -88,3 +88,30 @@ test('type detection allows leading spaces and tabs and stays fast with many bla
   assert.equal(detectDiagramType('\n'.repeat(50000) + 'a > b'), 'cloud-architecture');
   assert.ok(Date.now() - t < 2000);
 });
+
+test('a one-line group closes on its } and keeps the label (graph and sequence)', () => {
+  const g = parseArchitecture('G { A > B: hi }\nC > D');
+  assert.deepEqual(g.diagnostics, []);
+  const edges = g.ast.edges ?? [];
+  assert.equal(edges[0]?.label, 'hi');
+  assert.equal(g.ast.children.length >= 2, true);
+  const s = parse('loop { a > b: ping }\nb > a: pong', 'sequence');
+  assert.deepEqual(s.diagnostics, []);
+});
+
+test('offsets still count the BOM', () => {
+  const plain = parse('a > > b', 'cloud-architecture').diagnostics.map((d) => d.offset);
+  const bom = parse('\uFEFFa > > b', 'cloud-architecture').diagnostics.map((d) => d.offset);
+  assert.deepEqual(bom, plain.map((o) => o + 1));
+});
+
+test('parse never throws, even when the input cannot be turned into a string', () => {
+  const evil = { toString() { throw new Error('nope'); } } as unknown as string;
+  const r = parse(evil);
+  assert.equal(r.diagnostics[0]?.severity, 'error');
+  assert.match(r.diagnostics[0]!.message, /Internal parser error/);
+});
+
+test('an unclosed entity body names the entity, or nothing when there is none', () => {
+  assert.deepEqual(fmt(parse('a {\n id string', 'erd').diagnostics), ["error 1:3+1 Missing closing '}' for entity 'a'"]);
+});

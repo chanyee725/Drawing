@@ -27,5 +27,6 @@ export interface LayoutBasis {
 export interface BlockLayout {
   v: number;
   basis?: LayoutBasis;
-  items: Record<string, LayoutItem>;
+  /** Optional: a layout may carry only `basis` (the server accepts it), meaning nothing moved yet. */
+  items?: Record<string, LayoutItem>;
 }

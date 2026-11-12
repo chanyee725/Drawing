@@ -1,5 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { getSchema } from '@tiptap/core';
+import { TrailingNode } from '@tiptap/extensions';
+import { EditorState, type Plugin } from '@tiptap/pm/state';
+import { docExtensions } from '../../web/src/doc/extensions.ts';
 import { blockItems, blocksAfterHistory, newBlockGeometry, docShapeProblem, embeddedBlockIds, filterSlash, migrateDocument, SLASH_ITEMS, withTrailingParagraph } from '../../web/src/doc/model.ts';
 
 const blocks = [{ id: 'a', type: 'architecture' }, { id: 'b', type: 'sequence' }];
@@ -111,4 +115,31 @@ test('the editor starts a document ending in a diagram with a paragraph after it
   assert.equal(withTrailingParagraph(EMPTY), EMPTY);
   const broken = { type: 'page', content: [] };
   assert.equal(withTrailingParagraph(broken), broken);
+});
+
+const diagram = { type: 'diagram', attrs: { blockId: 'a' } };
+const heading = { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: '제목' }] };
+const table = { type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell', content: [{ type: 'paragraph' }] }] }] };
+
+test('a document that is only a diagram, or ends in a heading or table, also gets a trailing paragraph', () => {
+  for (const content of [[diagram], [{ type: 'paragraph' }, heading], [heading, table], [{ type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph' }] }] }]]) {
+    const out = withTrailingParagraph({ type: 'doc', content }) as { content: { type: string }[] };
+    assert.equal(out.content.length, content.length + 1);
+    assert.deepEqual(out.content[content.length], { type: 'paragraph' });
+  }
+});
+
+test('the editor adds no trailing paragraph on its first transaction once the document starts with one', () => {
+  const schema = getSchema(docExtensions());
+  const plugins = (TrailingNode.config.addProseMirrorPlugins as (this: unknown) => Plugin[]).call({ name: 'trailingNode', options: { node: undefined, notAfter: [] }, editor: { schema } });
+  for (const content of [[diagram], [{ type: 'paragraph' }, heading], [heading, table]]) {
+    const raw = { type: 'doc', content };
+    // Without the fix the first transaction (the focus of a click) appends a paragraph, changing the document under the selection.
+    const before = EditorState.create({ doc: schema.nodeFromJSON(raw), plugins });
+    assert.equal(before.applyTransaction(before.tr.setMeta('focus', true)).state.doc.childCount, content.length + 1);
+    const start = EditorState.create({ doc: schema.nodeFromJSON(withTrailingParagraph(raw)), plugins });
+    const next = start.applyTransaction(start.tr.setMeta('focus', true));
+    assert.equal(next.transactions.length, 1, 'no appended transaction');
+    assert.ok(next.state.doc.eq(start.doc), 'the document is unchanged');
+  }
 });
