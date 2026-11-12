@@ -339,7 +339,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           aria-label="다이어그램 코드"
           className="absolute right-3 top-16 bottom-3 z-10 flex w-[min(28rem,calc(100%-1.5rem))] flex-col gap-2 rounded-lg border p-3 shadow-lg"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-          onKeyDown={(e) => e.key === 'Escape' && setEditing(null)}
+          // CodeMirror marks Escape it already used (closing the autocomplete popup) as handled; leave the panel open then.
+          onKeyDown={(e) => e.key === 'Escape' && !e.defaultPrevented && setEditing(null)}
         >
           <div className="flex items-center gap-2 text-sm">
             <span className="font-medium">다이어그램 코드</span>

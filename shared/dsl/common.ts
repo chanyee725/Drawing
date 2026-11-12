@@ -5,14 +5,14 @@ const ELEMENT_KEYS = ['icon', 'color', 'label', 'link', 'colorMode', 'styleMode'
 export const GRAPH_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'wrap', 'connectorStyle']);
 export const SEQUENCE_KEYS = new Set(ELEMENT_KEYS);
 export const ERD_KEYS = new Set(ELEMENT_KEYS);
-const LEGEND_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'connection', 'position']);
+export const LEGEND_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'connection', 'position']);
 
 export const SHAPES = [
   'rectangle', 'circle', 'cylinder', 'diamond', 'document', 'ellipse',
   'hexagon', 'oval', 'parallelogram', 'star', 'trapezoid', 'triangle',
 ];
 
-const ENUMS: Record<string, readonly string[]> = {
+export const ENUMS: Record<string, readonly string[]> = {
   colorMode: ['pastel', 'bold', 'outline'],
   styleMode: ['shadow', 'plain', 'watercolor'],
   typeface: ['rough', 'clean', 'mono'],
