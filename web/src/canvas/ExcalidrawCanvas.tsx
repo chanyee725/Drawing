@@ -7,6 +7,8 @@ import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalid
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
+import { BlockProps } from '../BlockProps';
+import { CanvasInsertMenu } from './CanvasInsertMenu';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
@@ -325,6 +327,14 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         validateEmbeddable={NO_EMBEDS}
         aiEnabled={false}
       />
+      <CanvasInsertMenu
+        api={api}
+        wrap={wrap}
+        onBlock={(b) => {
+          onChangeRef.current({ blocks: [...blocksRef.current, b] });
+          setEditing(b.id);
+        }}
+      />
       {broken.length > 0 && !block && (
         <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
           {broken.map((b) => (
@@ -375,6 +385,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
               닫기
             </button>
           </div>
+          <BlockProps type={block.type} code={block.code} onChange={(code) => patchBlock({ code })} />
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>

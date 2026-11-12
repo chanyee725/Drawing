@@ -184,3 +184,16 @@ body {
 @keyframes doc-h-flash { from { background: var(--accent-soft); } to { background: transparent; } }
 .doc-wikilink { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 4px; cursor: pointer; text-decoration: none; }
 .doc-wikilink.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+
+/* The canvas `/` insert menu: the document's slash list with a search field on top. */
+.canvas-insert input {
+  width: 100%;
+  margin-bottom: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  outline: none;
+}
+.canvas-insert input:focus { border-color: var(--accent); }
