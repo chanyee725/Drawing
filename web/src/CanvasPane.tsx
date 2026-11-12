@@ -16,9 +16,17 @@ export function CanvasPane({ blocks, hasFile }: { blocks: Block[]; hasFile: bool
       ) : (
         blocks.map((b, i) => {
           const a = analyzeDiagram(b.type, b.code);
+          const errors = a.diagnostics.filter((d) => d.severity === 'error').length;
           return (
             <div key={b.id} className="rounded-md border px-4 py-3 text-sm" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }} data-preview={a.preview ? 'ready' : 'pending'}>
-              다이어그램 {i + 1}: {a.preview ? '그렸어요' : '미리보기는 렌더러를 연결하면 보여요'}
+              다이어그램 {i + 1}:{' '}
+              {a.preview
+                ? '그렸어요'
+                : a.parsed
+                  ? errors
+                    ? `오류 ${errors}개가 있어요 · 그리기는 렌더러를 연결하면 보여요`
+                    : '코드는 올바른 문법이에요 · 그리기는 렌더러를 연결하면 보여요'
+                  : '이 종류는 아직 그릴 수 없어요'}
             </div>
           );
         })

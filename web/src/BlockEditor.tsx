@@ -3,7 +3,7 @@ import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
-import { linter, lintGutter, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
+import { linter, lintGutter, forceLinting, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import { dslLanguage, highlightFor } from './dsl/language';
 import { analyzeDiagram } from './dsl/adapter';
 
@@ -28,14 +28,15 @@ export function BlockEditor({ code, type, dark, onChange }: Props) {
   onChangeRef.current = onChange;
 
   useEffect(() => {
-    // Error markers come from the parser adapter; empty until E2 is connected.
+    // Error markers come from the parser (via the adapter). Re-lint when the type changes.
     const lint = linter(
       (v): CmDiagnostic[] => {
         const doc = v.state.doc;
+        const len = doc.length;
         return analyzeDiagram(typeRef.current, doc.toString()).diagnostics.map((d) => {
-          const line = doc.line(Math.min(Math.max(d.line, 1), doc.lines));
-          const from = Math.min(line.from + Math.max((d.column ?? 1) - 1, 0), line.to);
-          return { from, to: Math.max(from, line.to), severity: d.severity, message: d.message };
+          const from = Math.min(d.offset, len);
+          const to = Math.min(Math.max(d.offset + d.length, from + 1), len);
+          return { from, to: Math.max(from, to), severity: d.severity, message: d.message };
         });
       },
       { delay: 300 },
@@ -68,6 +69,10 @@ export function BlockEditor({ code, type, dark, onChange }: Props) {
     // The editor is created once per block; code/dark changes are synced below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (view.current) forceLinting(view.current);
+  }, [type]);
 
   useEffect(() => {
     view.current?.dispatch({ effects: hl.current.reconfigure(highlightFor(dark)) });

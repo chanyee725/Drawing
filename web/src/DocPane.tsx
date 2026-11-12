@@ -63,9 +63,9 @@ export function DocPane({ blocks, dark, onBlocks }: Props) {
             </button>
           </div>
           <BlockEditor code={b.code} type={b.type} dark={dark} onChange={(code) => patch(b.id, { code })} />
-          {!analyzeDiagram(b.type, b.code).connected && (
+          {!analyzeDiagram(b.type, b.code).parsed && (
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              문법 검사는 아직 연결 전이에요.
+              이 종류는 아직 문법 검사를 지원하지 않아요.
             </p>
           )}
         </article>
