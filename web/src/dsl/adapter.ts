@@ -24,15 +24,17 @@ export type Analysis = {
 };
 
 /** Editor block type (templates.ts) to parser type. BPMN has no parser yet. */
-const PARSER_TYPE: Record<string, ParserType | undefined> = {
+const PARSER_TABLE: Record<string, ParserType> = {
   architecture: 'cloud-architecture',
   flowchart: 'flowchart',
   sequence: 'sequence',
   erd: 'erd',
 };
 
+const parserType = (type: string): ParserType | undefined => (Object.hasOwn(PARSER_TABLE, type) ? PARSER_TABLE[type] : undefined);
+
 export function analyzeDiagram(type: string, code: string): Analysis {
-  const pt = PARSER_TYPE[type];
+  const pt = parserType(type);
   if (!pt) return { ast: null, diagnostics: [], parsed: false };
   const { ast, diagnostics } = parse(code, pt);
   return { ast, diagnostics, parsed: true };
@@ -58,7 +60,7 @@ export type RenderOutcome = { svg: string; diagnostics: Diagnostic[]; scene: Sce
 
 /** Render the code to SVG. Returns null for unsupported types or when rendering fails. */
 export async function renderPreview(type: string, code: string, theme: PreviewTheme): Promise<RenderOutcome | null> {
-  const pt = PARSER_TYPE[type];
+  const pt = parserType(type);
   if (!pt) return null;
   try {
     const { svg, diagnostics, scene } = await renderDiagram(code, { type: pt, theme });
@@ -75,7 +77,7 @@ export async function renderPreview(type: string, code: string, theme: PreviewTh
  * unsupported type shows nothing, so an earlier drawing never lingers.
  */
 export function nextPreview(prev: Preview | null, result: RenderOutcome | null, type?: string, theme?: PreviewTheme): Preview | null {
-  if (type !== undefined && !PARSER_TYPE[type]) return null;
+  if (type !== undefined && !parserType(type)) return null;
   const errors = result ? result.diagnostics.filter((d) => d.severity === 'error') : [];
   if (result && errors.length === 0) {
     return { svg: result.svg, errors: [], stale: false, failed: false, scene: result.scene, theme: result.theme };
