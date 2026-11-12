@@ -78,6 +78,9 @@ export async function setup(ctx) {
       route('DELETE', '/api/file', (p) => store.removeFile(need(p, 'path'))),
       route('POST', '/api/folder', (_p, b) => store.createFolder(need(b?.path, 'path')), 201),
       route('DELETE', '/api/folder', (p) => store.removeFolder(need(p, 'path'))),
+      // Deleted files stay here for 30 days; restore puts one back at its old path (409 if the path is taken).
+      route('GET', '/api/trash', () => store.trash()),
+      route('POST', '/api/trash/restore', (_p, b) => store.restoreTrash(need(b?.id, 'id'))),
       route('GET', '/api/history', (p) => store.history(need(p, 'path'))),
       route('GET', '/api/history/version', (p, _b, q) => store.historyVersion(need(p, 'path'), q.get('id'))),
       // Snapshot the file as it is on disk now (before a restore); ignores the 5-minute interval.

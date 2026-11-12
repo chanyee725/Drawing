@@ -24,6 +24,11 @@ export const HISTORY_DIR = ['.drawing', 'history'];
 export const HISTORY_INTERVAL_MS = 5 * 60 * 1000;
 export const HISTORY_MAX = 50;
 const SNAPSHOT_ID = /^\d{13}$/;
+// Deleted files keep their version history (and last content) in `.drawing/trash/<id>/` for 30 days.
+export const TRASH_DIR = ['.drawing', 'trash'];
+export const TRASH_DAYS = 30;
+export const TRASH_MAX = 200;
+const TRASH_ID = /^\d{13}-[0-9a-f]{8}$/;
 
 export function createStore(
   workspaceDir,
@@ -181,7 +186,8 @@ export function createStore(
     const versions = [];
     for (const id of (await snapshotIds(dir)).reverse()) {
       try {
-        versions.push({ id, time: Number(id), bytes: (await stat(join(dir, `${id}.json`))).size });
+        const st = await lstat(join(dir, `${id}.json`));
+        if (st.isFile()) versions.push({ id, time: Number(id), bytes: st.size });
       } catch {}
     }
     return { path: rel, versions };
@@ -194,6 +200,9 @@ export function createStore(
     const dir = await historyDirOf(rel);
     let text;
     try {
+      // The snapshot itself must be a plain file: a link there could point at anything the server can read.
+      const st = await lstat(join(dir, `${id}.json`));
+      if (!st.isFile()) throw new StoreError(404, 'version not found');
       text = await readFile(join(dir, `${id}.json`), 'utf8');
     } catch (err) {
       if (err.code === 'ENOENT') throw new StoreError(404, 'version not found');
@@ -229,6 +238,177 @@ export function createStore(
     } catch {}
   }
   const dropHistory = (rel) => historyDirOf(rel).then((d) => rm(d, { recursive: true, force: true })).catch(() => {});
+
+  // ---- trash: deleted files stay restorable for TRASH_DAYS ----
+  // `.drawing/trash/<ms>-<hex>/` holds `meta.json` {path, deletedAt}, `file.json` (the content when we saw it go)
+  // and `history/` (the file's snapshots). Like history, trash is best effort and never fails a delete.
+  const trashRoot = () => fsr.resolveInternal(...TRASH_DIR);
+  const entryDir = async (id) => {
+    if (typeof id !== 'string' || !TRASH_ID.test(id)) throw new StoreError(400, 'invalid trash id');
+    return fsr.resolveInternal(...TRASH_DIR, id);
+  };
+  const plainFile = async (abs) => (await statOrNull(abs))?.isFile() === true;
+
+  // Move `rel`'s history (and `text`, if known) into a new trash entry. Without text, the newest snapshot stands in on restore.
+  // Returns the new entry's id (or null). Pass `purge: false` when deleting many files at once and call
+  // `purgeTrash(keepIds)` once afterwards, so the entries just made are never the ones dropped.
+  async function trashQuietly(rel, text, { purge = true } = {}) {
+    try {
+      const histDir = await historyDirOf(rel);
+      const hasHistory = (await snapshotIds(histDir)).length > 0;
+      if (text == null && !hasHistory) return null;
+      const t = now();
+      const id = `${String(t).padStart(13, '0')}-${randomBytes(4).toString('hex')}`;
+      const dir = join(await trashRoot(), id);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'meta.json'), JSON.stringify({ path: rel, deletedAt: t }) + '\n', { mode: 0o644 });
+      if (text != null) await writeFile(join(dir, 'file.json'), text, { mode: 0o644 });
+      if (hasHistory) await rename(histDir, join(dir, 'history'));
+      await rm(histDir, { recursive: true, force: true });
+      if (purge) await purgeTrash([id]);
+      return id;
+    } catch {
+      return null;
+    }
+  }
+
+  // Trash every file of one delete, then purge once, sparing what this delete just made.
+  async function trashMany(items) {
+    const ids = [];
+    for (const [rel, text] of items) ids.push(await trashQuietly(rel, text, { purge: false }));
+    await purgeTrash(ids.filter(Boolean)).catch(() => {});
+  }
+
+  async function readEntry(root, id) {
+    const dir = join(root, id);
+    try {
+      if (!(await lstat(dir)).isDirectory() || !(await plainFile(join(dir, 'meta.json')))) return null;
+      const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8'));
+      if (typeof meta?.path !== 'string' || !Number.isFinite(meta.deletedAt)) return null;
+      parseRelPath(meta.path);
+      return { id, dir, path: meta.path, deletedAt: meta.deletedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  async function trashEntries() {
+    let root;
+    try {
+      root = await trashRoot();
+    } catch {
+      return [];
+    }
+    let names;
+    try {
+      names = (await readdir(root)).filter((n) => TRASH_ID.test(n)).sort();
+    } catch {
+      return [];
+    }
+    const out = [];
+    for (const id of names) {
+      const e = await readEntry(root, id);
+      if (e) out.push(e);
+      else await rm(join(root, id), { recursive: true, force: true }).catch(() => {}); // not ours or damaged
+    }
+    return out;
+  }
+
+  // Drop entries older than 30 days, and the oldest beyond TRASH_MAX. Ids in `spare` (made by the delete in
+  // progress) are never dropped, even past the cap; the next ordinary purge trims the excess.
+  async function purgeTrash(spare = [], { cap = true } = {}) {
+    const entries = await trashEntries();
+    const cutoff = now() - TRASH_DAYS * 24 * 60 * 60 * 1000;
+    const keep = entries.filter((e) => e.deletedAt >= cutoff);
+    const spared = new Set(spare);
+    const droppable = keep.filter((e) => !spared.has(e.id));
+    const drop = [...entries.filter((e) => e.deletedAt < cutoff && !spared.has(e.id)), ...droppable.slice(0, Math.max(0, cap ? keep.length - TRASH_MAX : 0))];
+    for (const e of drop) await rm(e.dir, { recursive: true, force: true }).catch(() => {});
+  }
+
+  async function trash() {
+    return serial(async () => {
+      await purgeTrash([], { cap: false }).catch(() => {}); // listing only ages entries out; the cap is enforced when something is deleted
+      const items = (await trashEntries()).map((e) => ({ id: e.id, path: e.path, deletedAt: e.deletedAt })).reverse();
+      return { items };
+    });
+  }
+
+  async function restoreTrash(id) {
+    return serial(async () => {
+      const dir = await entryDir(id);
+      const entry = await readEntry(join(dir, '..'), id);
+      if (!entry) throw new StoreError(404, 'not in the trash');
+      const rel = entry.path;
+      if (!isDpx(rel)) throw new StoreError(404, 'not in the trash');
+      checkFolderNames(rel.split('/').slice(0, -1));
+      const abs = await wrapPath(rel);
+      if (await statOrNull(abs)) throw new StoreError(409, 'a file already exists at that path');
+      const histDir = join(dir, 'history');
+      const hasHist = (await statOrNull(histDir))?.isDirectory() === true;
+      let text = null;
+      if (await plainFile(join(dir, 'file.json'))) text = await readFile(join(dir, 'file.json'), 'utf8');
+      else if (hasHist) {
+        const ids = await snapshotIds(histDir);
+        for (const sid of ids.reverse()) {
+          if (await plainFile(join(histDir, `${sid}.json`))) {
+            text = await readFile(join(histDir, `${sid}.json`), 'utf8');
+            break;
+          }
+        }
+      }
+      if (text == null) throw new StoreError(422, 'nothing left to restore');
+      let file;
+      try {
+        file = parseStored(text);
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(422, `unreadable file: ${err.message}`);
+        throw err;
+      }
+      await ensureParent(abs);
+      // Start above the revision the path had when it was deleted, so a stale tab cannot overwrite the restored file.
+      const floor = tombstones.get(rel) ?? 0;
+      if (file.revision <= floor && file.version <= FORMAT_VERSION) text = serialize({ ...file, revision: floor + 1 });
+      await atomicWrite(abs, text, { exclusive: true });
+      await adopt(rel, abs);
+      if (hasHist) await mergeHistory(histDir, await historyDirOf(rel));
+      await rm(dir, { recursive: true, force: true });
+      for (let d = dirname(rel); d !== '.'; d = dirname(d)) knownDirs.add(d);
+      onExternalChange?.({ kind: 'tree', path: rel });
+      return { path: rel };
+    });
+  }
+
+  // Put trashed snapshots back; ids that are taken (a new file got history at that path) move to the next free id.
+  async function mergeHistory(fromDir, toDir) {
+    await mkdir(toDir, { recursive: true });
+    const taken = new Set(await snapshotIds(toDir));
+    for (const id of await snapshotIds(fromDir)) {
+      if (!(await plainFile(join(fromDir, `${id}.json`)))) continue;
+      let next = id;
+      while (taken.has(next)) next = String(Number(next) + 1).padStart(13, '0');
+      taken.add(next);
+      await rename(join(fromDir, `${id}.json`), join(toDir, `${next}.json`)).catch(() => {});
+    }
+  }
+
+  // Every diagram file under a folder (rel path + content), read before the folder goes away.
+  async function collectFiles(absDir, relDir) {
+    const out = [];
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return out;
+    }
+    for (const e of entries) {
+      if (e.name.startsWith('.') || e.isSymbolicLink()) continue;
+      const rel = `${relDir}/${e.name}`;
+      if (e.isDirectory()) out.push(...(await collectFiles(join(absDir, e.name), rel)));
+      else if (e.isFile() && isDpx(e.name)) out.push({ rel, text: await readFile(join(absDir, e.name), 'utf8').catch(() => null) });
+    }
+    return out;
+  }
 
   // ---- tree ----
   async function walk(absDir, relDir) {
@@ -452,9 +632,10 @@ export function createStore(
     return serial(async () => {
       const st = await statOrNull(abs);
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
+      const text = await readFile(abs, 'utf8').catch(() => null);
       await unlink(abs);
       forget(rel, false);
-      await dropHistory(rel);
+      await trashQuietly(rel, text);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
       return { path: rel };
     });
@@ -466,9 +647,11 @@ export function createStore(
     return serial(async () => {
       const st = await statOrNull(abs);
       if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
+      const files = await collectFiles(abs, rel);
       await rm(abs, { recursive: true });
       forget(rel, true);
-      await dropHistory(rel);
+      await trashMany(files.map((f) => [f.rel, f.text]));
+      await dropHistory(rel); // what is left belongs to files that were already gone
       // `from`: other tabs with a file under this folder open must close it (same shape as a folder move).
       onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       return { path: rel };
@@ -529,9 +712,12 @@ export function createStore(
     if (!st) {
       if (known.has(rel)) {
         forget(rel, false);
+        await trashQuietly(rel, null); // deleted outside: keep its history out of reach of a new file at this path
         onExternalChange?.({ kind: 'delete', path: rel });
       } else if (knownDirs.has(rel)) {
+        const gone = [...known.keys()].filter((k) => k.startsWith(rel + '/'));
         forget(rel, true);
+        await trashMany(gone.map((k) => [k, null]));
         onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       }
       return;
@@ -600,5 +786,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, history, historyVersion, historySnapshotNow, startWatching, close };
+  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close };
 }
