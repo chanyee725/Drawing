@@ -40,7 +40,7 @@
   - 코드 확인(5.6.0, `@tldraw/editor/dist-esm/lib/license/LicenseManager.mjs`): 개발 판별은 `protocol === "http:"` 이거나 https+루프백이거나 `NODE_ENV !== "production"` 이면 개발로 봐요. 개발로 판별되면 추적 요청이 없어요. 그 밖에는 키 상태에 따라 `cdn.tldraw.com/.../watermark-track.svg` 로 `license_type`·`license_id`·현재 페이지 `url` 을 붙여 요청해요. 이 유형에 `with_watermark`(hobby로 보임)와 `unlicensed`(키 없는 프로덕션)도 있어서, 문서의 "hobby는 아무것도 안 보냄"과 다르게 읽혀요. 런타임에서 이 요청을 직접 본 건 아니에요(이번 실행은 http라 개발 판별) (미확인).
   - 가격: 가격 페이지는 "Value-based pricing", "Talk to sales", 스타트업 할인, 무료 hobby 신청만 있고 금액은 없어요. https://tldraw.dev/pricing
 - 이전 판의 정정: "라이선스 문구는 AI 요약(WebFetch)을 거쳤으므로 원문 확인 필요"라고 했던 부분을 원문 기준으로 바꿨어요. 바뀐 점은 (1) 100일은 LICENSE가 아니라 tldraw.dev 문구, (2) hobby·워터마크 의무도 LICENSE가 아니라 tldraw.dev 문구, (3) 데이터 전송은 라이선스 종류별로 다르게 문서화돼 있고 코드와 문서가 어긋나 보임, (4) "키는 클라이언트에서 오프라인 검증 가능"은 문서 원문("validated on the client. You can use them offline")과 일치.
-- 시사점: 127.0.0.1에서 혼자 쓰는 로컬 도구라도, 실제 작업에 쓰면 LICENSE.md의 "Development Environment(개발·테스트·스테이징 용도)"에 들어맞는다고 보기 어려워요 (추정, 법률 검토 아님). 코드는 http면 무조건 개발로 판별해서 기술적으로는 키 없이 돌아가지만, 그게 라이선스상 허용이라는 뜻은 아니에요. 오픈소스로 배포하면 사용자마다 자기 키가 필요해요("you and your downstream users will require their own … license", tldraw.dev 문서). 기본 선택지로는 비추. (추정)
+- 시사점: 이 도구는 판매·배포 없이 회사 안에서만 써요(전제, §7). 그래도 tldraw는 "배포"가 아니라 "프로덕션 사용"을 막는 라이선스라서 내부 전용이어도 걸려요. 판정은 §7. 코드는 http면 무조건 개발로 판별해서 기술적으로는 키 없이 돌아가지만, 그게 라이선스상 허용이라는 뜻은 아니에요.
 
 ## 3. (c) Eraser 유사 DSL + ELK.js → SVG — `spikes/dsl`
 
@@ -69,7 +69,7 @@
 
 1. **DSL → ELK → SVG 파이프라인을 코어로**: 의존성이 작고(8 MB), 70~140 ms로 빠르고, Eraser의 핵심(diagram-as-code)과 직결. LCA 좌표 보정은 필수. 결과 SVG도 눈으로 확인해서 쓸 만했어요. 라벨 위치·에지 간격은 다듬어야 해요.
 2. **자유 캔버스가 필요하면 Excalidraw(MIT)**: 라이선스 리스크 없고, 헤드리스 확인에서 외부 요청이 0건이라 로컬 전용 원칙에도 맞아요. 단 번들 8 MB, 스타일이 다르므로 별도 "캔버스 모드"로 격리하고 lazy-load.
-3. **tldraw는 기본 선택지에서 제외**: 원문 LICENSE.md 기준 기본 조건은 개발 환경 한정이고, 프로덕션은 trial/commercial(키)이나 tldraw.dev의 hobby(비상업, 워터마크 의무)가 필요해요. 키 없이도 CDN에 35건 요청이 나가요. 라이선스가 정리되기 전에는 채택 금지.
+3. **tldraw는 기본 선택지에서 제외 (내부 전용 전제에서도 유지)**: 원문 LICENSE.md는 배포가 아니라 프로덕션 사용 자체를 막고, 사내 업무 사용을 개발 환경으로 볼 근거가 원문에 없어요(§7). 쓰려면 commercial 계약을 하거나, tldraw에 사내 사용이 개발 환경에 드는지 서면으로 확인받아야 해요. 키 없이도 CDN에 35건 요청이 나가요.
 4. **Yjs는 협업 요구가 확정될 때 도입**: 문서 모델을 처음부터 Yjs 공유 타입(중첩 Y.Map + Y.Text)으로 잡아 두면 이후 전환 비용이 낮음. 지금 단계에서는 필수 아님.
 5. 다음 스파이크: (a) ELK 결과를 Excalidraw elements로 변환(캔버스 모드 연결), (b) 아이콘 세트와 텍스트 실측, (c) ELK 라벨 배치·에지 간격 옵션 조정.
 
@@ -80,3 +80,39 @@
 - 절차: 1280×800 뷰포트로 열고 networkidle + 2.5초 대기 → 빈 화면 스크린샷 → `r` 키, 드래그로 사각형 그리기 → 스크린샷. 콘솔 메시지, `pageerror`, 실패 요청, 127.0.0.1 밖 요청을 모았어요. 첫 화면까지 약 3.2~3.4초(대기 포함).
 - SVG: `out.svg` 를 HTML 안에 넣어 1220×220 뷰포트로 스크린샷. `file://` 로 SVG를 직접 열고 `fullPage` 스크린샷을 찍으면 30초 타임아웃이 나서 이렇게 바꿨어요.
 - 스크린샷은 용량 때문에 저장소에 넣지 않았어요. 위 결과는 스크린샷을 눈으로 보고 적은 거예요.
+
+## 7. 라이선스 판정: 내부 전용·비배포 시나리오 (2026-11-12)
+
+> 전제(사용자 확정): 판매·배포하지 않고 회사 안에서만 써요. 외부(고객·공개 인터넷)에 노출하지 않아요.
+> 근거는 아래 원문을 `curl`로 받아 직접 읽은 것만 썼어요. 법률 검토가 아니라서 "원문에 근거 없음"은 단정하지 않고 (미확인)으로 둬요.
+
+### 7.1 의무가 언제 생기나 (원문 기준)
+
+| 라이선스 | 의무가 생기는 계기 (원문) | 사내 전용·비배포일 때 | 출처 |
+|---|---|---|---|
+| MIT (Excalidraw, Yjs) | 복사본에 "The above copyright notice and this permission notice shall be included in all copies" | 사용 제한 없음. 코드를 복사해 넣으면 저작권 고지만 유지 | <https://github.com/excalidraw/excalidraw/blob/master/LICENSE> |
+| Apache-2.0 | §4 "Redistribution" 때 고지·라이선스 동봉 | 재배포가 없으면 §4 조건이 걸릴 일 없음 | <https://www.apache.org/licenses/LICENSE-2.0.txt> |
+| EPL-2.0 (elkjs) | §3.1 "If a Contributor Distributes the Program in any form" → 소스 제공. "Distribute"는 "making available in any manner that enables the transfer of a copy" | 사외 배포가 없으면 소스 제공 의무 없음. 사내 다른 PC에 복사하거나 사내 웹으로 JS를 내려주는 게 EPL의 "Distribute"인지는 원문에 사내 예외가 없어 (미확인). 걸려도 elkjs를 고치지 않으면 "elkjs 원본 소스 위치 안내" 정도라 부담 작음 (추정) | <https://github.com/kieler/elkjs/blob/master/LICENSE.md> |
+| GPL-3.0 (elkjs의 선택지) | "To "convey" a work means any kind of propagation that enables other parties to make or receive copies." §2 "You may make, run and propagate covered works that you do not convey, without conditions" | 사외로 넘기지 않으면 조건 없음. FSF FAQ: 사내 복사는 "the organization is just making the copies for itself". 단 외부 계약자에게 주면 배포 | <https://www.gnu.org/licenses/gpl-3.0.txt>, <https://www.gnu.org/licenses/gpl-faq.html#InternalDistribution> |
+| AGPL-3.0 (현재 후보 부품엔 없음) | §13 "if you modify the Program, your modified version must prominently offer all users interacting with it remotely through a computer network … the Corresponding Source" | 고쳐서 사내 네트워크로 동료에게 제공하면, 그 동료들에게 소스를 제공해야 할 수 있음(동료도 "users interacting … remotely"로 읽힘 (추정)). 고치지 않거나 127.0.0.1에서 본인만 쓰면 해당 없음 | <https://www.gnu.org/licenses/agpl-3.0.txt> |
+| MPL-2.0 | §3.1·§3.2 "Distribution of Source/Executable Form" 때만 | 배포가 없으면 의무 없음 | <https://www.mozilla.org/media/MPL/2.0/index.txt> |
+| tldraw license | 배포가 아니라 **사용 환경**으로 갈려요: "Not to use the Software in Production Environments" | 아래 7.2 | <https://github.com/tldraw/tldraw/blob/main/LICENSE.md> |
+
+요약: 오픈소스 라이선스(MIT·Apache·MPL·EPL·GPL)는 의무가 "배포/전달"에 걸려 있어서, 사내 전용이면 사실상 고지 유지 정도만 남아요. AGPL만 "네트워크로 제공 + 수정"에 걸려요. tldraw는 성격이 달라요.
+
+### 7.2 tldraw: 회사 내부 사용은 production인가
+
+- 원문 정의:
+  - Production Environment: "any production deployment … or where the software is used to provide functionality to end users, customers, or the public. Production Environment excludes internal development."
+  - Development Environment: "any internal hosting or deployment … for development, testing, or staging purposes, operated by your organization and not accessible to end users, customers, or the public."
+- 판정:
+  1. 원문의 예외는 "internal **development**"이지 "internal use"가 아니에요. Development Environment도 "개발·테스트·스테이징 목적"으로 한정돼요. 회사 직원이 실제 업무에 쓰는 것은 이 목적에 안 들어맞아요. → **사내 업무 사용을 Development로 볼 근거는 원문에 없어요.**
+  2. "end users"가 회사 직원을 포함하는지는 원문에 정의가 없어요. 직원이 이 도구의 최종 사용자라면 Production 정의("used to provide functionality to end users")에 들어가요. → **Production일 가능성이 높다 (추정). 단정은 못 해요 (미확인: "end users" 정의 없음, tldraw 서면 확인 필요).**
+  3. Production이면 키가 필요해요. LICENSE.md는 trial("for the specified period")과 commercial(별도 계약)만 말해요. hobby는 tldraw.dev 문서에만 있고 "non-commercial projects" 대상이에요. 회사 업무용 도구가 "non-commercial"인지는 원문·문서에 정의가 없어요 (미확인). 회사 업무라 hobby 대상이 아닐 가능성이 높아요 (추정).
+  4. 워터마크: LICENSE.md 본문은 워터마크 의무를 직접 두지 않고 "ensure proper watermark display"라는 기술적 집행만 언급해요. 워터마크 의무가 문서로 확인되는 건 hobby뿐이에요(tldraw.dev). commercial 키에 워터마크가 붙는지는 공개 문서에 없어요 (미확인). 키 없이 http로 연 이번 실행에서는 "Get a license for production" 문구가 화면에 떴어요(§2).
+  5. 배포 관련 조건(독립 제품 배포 금지, 라이선스 동봉)은 배포를 안 하므로 해당 없음.
+- 결론: 내부 전용 전제로 바꿔도 **tldraw 제외 결론은 유지**해요. 이유가 "배포하면 문제"에서 "사내 업무 사용도 production일 수 있음"으로 바뀌었을 뿐이에요. 쓰려면 (a) commercial 계약, 또는 (b) tldraw에 "사내 비공개 업무 도구가 Development Environment인지" 서면 확인이 먼저예요.
+
+### 7.3 Eraser 쪽 자산과의 관계
+
+- 오픈소스 부품 라이선스와 별개로, Eraser의 실제 자산 파일(아이콘·일러스트·폰트 파일·코드)을 복제하는 건 사내 전용이어도 저작권 문제예요. 복제는 배포 여부와 관계없이 그 자체로 권리자 허락이 필요한 행위라서요 (추정, 법률 검토 아님). 자세한 구분은 [00 요약](00-summary.md)의 디자인 원칙과 [04](04-visual-design.md) 참고.
