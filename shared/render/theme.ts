@@ -62,6 +62,9 @@ const NAMED: Record<string, [string, string]> = {
   brown: ['#8d6342', '#b78d6a'],
 };
 
+/** Palette color names, for editor completion. */
+export const NAMED_COLOR_NAMES: readonly string[] = Object.keys(NAMED);
+
 /** Accept only palette names and `#rgb`/`#rrggbb`. Anything else becomes neutral (and can't inject markup). */
 export function sanitizeColor(value: string | undefined): string | undefined {
   if (!value) return undefined;

@@ -3,9 +3,11 @@ import { EditorState, Compartment } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
+import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { linter, lintGutter, forceLinting, type Diagnostic as CmDiagnostic } from '@codemirror/lint';
 import { dslLanguage, highlightFor } from './dsl/language';
 import { analyzeDiagram } from './dsl/adapter';
+import { dslCompletionSource } from './dsl/completion';
 
 type Props = { code: string; type: string; dark: boolean; onChange: (code: string) => void };
 
@@ -16,6 +18,9 @@ const baseTheme = EditorView.theme({
   '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--accent-soft)' },
   '&.cm-focused': { outline: '2px solid var(--accent)' },
   '.cm-scroller': { minHeight: '8rem' },
+  '.cm-tooltip.cm-tooltip-autocomplete': { background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent-soft)', color: 'var(--text)' },
+  '.cm-completionDetail': { color: 'var(--text-muted)', marginLeft: '0.75em', fontStyle: 'normal' },
 });
 
 export function BlockEditor({ code, type, dark, onChange }: Props) {
@@ -55,9 +60,10 @@ export function BlockEditor({ code, type, dark, onChange }: Props) {
           dslLanguage,
           hl.current.of(highlightFor(dark)),
           baseTheme,
+          autocompletion({ override: [dslCompletionSource(() => typeRef.current)], icons: false }),
           lintGutter(),
           lint,
-          keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+          keymap.of([indentWithTab, ...completionKeymap, ...defaultKeymap, ...historyKeymap]),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) onChangeRef.current(u.state.doc.toString());
           }),
