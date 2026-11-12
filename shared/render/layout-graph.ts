@@ -113,6 +113,64 @@ function clipToRect(r: { x: number; y: number; w: number; h: number }, p: Point)
   return { x: cx + dx * s, y: cy + dy * s };
 }
 
+type Rect = { x: number; y: number; w: number; h: number };
+
+/** Whether `p` is inside the drawn outline of a shape whose bounding box is `r` (rect-like shapes: the box). */
+function insideShape(shape: string, r: Rect, p: Point): boolean {
+  const u = (p.x - (r.x + r.w / 2)) / (r.w / 2);
+  const v = (p.y - (r.y + r.h / 2)) / (r.h / 2);
+  if (shape === 'diamond') return Math.abs(u) + Math.abs(v) <= 1;
+  if (shape === 'circle' || shape === 'ellipse') return u * u + v * v <= 1;
+  return Math.abs(u) <= 1 && Math.abs(v) <= 1;
+}
+
+const CURVED = new Set(['diamond', 'circle', 'ellipse']);
+
+/**
+ * Move `p` (on the bounding box) along the ray towards `toward` (a point further out on the edge)
+ * reversed, i.e. into the node, until it meets the shape outline.
+ */
+function snapToShape(shape: string, r: Rect, p: Point, toward: Point): Point {
+  if (!CURVED.has(shape)) return p;
+  const dx = p.x - toward.x;
+  const dy = p.y - toward.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return p;
+  const reach = Math.hypot(r.w, r.h);
+  const at = (t: number): Point => ({ x: p.x + (dx / len) * t, y: p.y + (dy / len) * t });
+  const N = 64;
+  let hi = -1;
+  for (let i = 0; i <= N; i++) {
+    if (insideShape(shape, r, at((reach * i) / N))) {
+      hi = i;
+      break;
+    }
+  }
+  if (hi < 0) return p;
+  if (hi === 0) return p;
+  let lo = (reach * (hi - 1)) / N;
+  let up = (reach * hi) / N;
+  for (let i = 0; i < 24; i++) {
+    const mid = (lo + up) / 2;
+    if (insideShape(shape, r, at(mid))) up = mid;
+    else lo = mid;
+  }
+  return at(up);
+}
+
+/** Like clipToRect, but to the drawn outline of diamonds, circles and ellipses. */
+function clipToShape(shape: string | undefined, r: Rect, p: Point): Point {
+  const cx = r.x + r.w / 2;
+  const cy = r.y + r.h / 2;
+  const u = Math.abs(p.x - cx) / (r.w / 2);
+  const v = Math.abs(p.y - cy) / (r.h / 2);
+  let k = 0;
+  if (shape === 'diamond') k = u + v;
+  else if (shape === 'circle' || shape === 'ellipse') k = Math.hypot(u, v);
+  if (k === 0) return clipToRect(r, p);
+  return { x: cx + (p.x - cx) / k, y: cy + (p.y - cy) / k };
+}
+
 /** Label centre on the drawn line: the middle of its longest segment (arc: the curve's midpoint). */
 function labelAnchor(points: Point[], route: string): Point {
   if (route === 'arc' && points.length === 2) {
@@ -281,9 +339,17 @@ export async function layoutGraph(d: GraphDiagram): Promise<Scene> {
       const b = rects.get(e.to)!;
       const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
-      const p0 = clipToRect(a, bc);
-      const p1 = clipToRect(b, ac);
+      const p0 = clipToShape(nodes.get(e.from)?.shape, a, bc);
+      const p1 = clipToShape(nodes.get(e.to)?.shape, b, ac);
       points = [p0, p1].map((p) => ({ x: round(p.x), y: round(p.y) }));
+    }
+    if (route === 'elbow' && points.length >= 2) {
+      const a = rects.get(e.from);
+      const b = rects.get(e.to);
+      const sa = nodes.get(e.from)?.shape;
+      const sb = nodes.get(e.to)?.shape;
+      if (a && sa && e.from !== e.to) points[0] = snapToShape(sa, a, points[0]!, points[1]!);
+      if (b && sb && e.from !== e.to) points[points.length - 1] = snapToShape(sb, b, points[points.length - 1]!, points[points.length - 2]!);
     }
     const edge: SceneEdge = {
       kind: 'edge',
