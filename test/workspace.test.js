@@ -271,3 +271,121 @@ test('unreadable files show in the tree but cannot be read (422)', async () => {
     assert.ok((await stat(join(ws, 'notes.txt'))).isFile());
   });
 });
+
+test('DELETE /api/file without extension never removes a same-named folder; kinds do not cross', async () => {
+  await withApp(async ({ ws, call }) => {
+    await call('POST', '/api/folder', { path: 'sub' });
+    await call('POST', '/api/file', { path: 'sub/inner' });
+    assert.equal((await call('DELETE', `/api/file?path=${q('sub')}`)).status, 404);
+    assert.equal((await call('GET', `/api/file?path=${q('sub/inner')}`)).status, 200);
+    assert.equal((await call('DELETE', `/api/file?path=${q('sub/inner')}`)).status, 200); // extension optional for files
+    await call('POST', '/api/file', { path: 'f' });
+    assert.equal((await call('DELETE', `/api/folder?path=${q('f.dpx.json')}`)).status, 404); // folder route never deletes a file
+    assert.equal((await call('DELETE', `/api/folder?path=${q('f')}`)).status, 404);
+    assert.ok((await stat(join(ws, 'f.dpx.json'))).isFile());
+    assert.ok((await stat(join(ws, 'sub'))).isDirectory());
+    assert.equal((await call('DELETE', `/api/folder?path=${q('sub')}`)).status, 200);
+  });
+});
+
+test('move: file wins over a same-named folder unless type says folder', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/folder', { path: 'sub' });
+    await call('POST', '/api/file', { path: 'sub/inner' });
+    await call('POST', '/api/file', { path: 'sub' }); // sub.dpx.json next to folder sub/
+    let r = await call('POST', '/api/move', { from: 'sub', to: 'renamed' });
+    assert.equal(r.body.path, 'renamed.dpx.json');
+    assert.equal((await call('GET', `/api/file?path=${q('sub/inner')}`)).status, 200); // folder untouched
+    r = await call('POST', '/api/move', { from: 'sub', to: 'folder2', type: 'folder' });
+    assert.equal(r.body.path, 'folder2');
+    assert.equal((await call('GET', `/api/file?path=${q('folder2/inner')}`)).status, 200);
+    assert.equal((await call('POST', '/api/move', { from: 'folder2', to: 'x', type: 'file' })).status, 404);
+    assert.equal((await call('POST', '/api/move', { from: 'folder2', to: 'x', type: 'bogus' })).status, 400);
+  });
+});
+
+test('outside edit that keeps the revision: old-revision PUT is 409, GET then PUT works, SSE carries the raised revision', async () => {
+  await withApp(async ({ ws, base, call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const sse = sseReader(base);
+    await sleep(100);
+    try {
+      const cur = JSON.parse(await readFile(join(ws, 'a.dpx.json'), 'utf8'));
+      await writeFile(join(ws, 'a.dpx.json'), JSON.stringify({ ...cur, title: 'outside' })); // revision untouched
+      const ev = await sse.waitFor((e) => e.path === 'a.dpx.json');
+      assert.equal(ev.kind, 'change');
+      assert.equal(ev.revision, 2);
+
+      let r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale client', revision: 1 });
+      assert.equal(r.status, 409);
+      assert.equal(r.body.revision, 2);
+      r = await call('GET', `/api/file?path=${q('a')}`);
+      assert.equal(r.body.title, 'outside');
+      assert.equal(r.body.revision, 2);
+      r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'merged', revision: 2 });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.revision, 3);
+    } finally {
+      await sse.stop();
+    }
+  });
+});
+
+test('outside edit seen first by PUT (no watcher event yet) still cannot be overwritten', async () => {
+  await withApp(async ({ ws, call, app }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const cur = JSON.parse(await readFile(join(ws, 'a.dpx.json'), 'utf8'));
+    await writeFile(join(ws, 'a.dpx.json'), JSON.stringify({ ...cur, title: 'outside' }));
+    const r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale client', revision: 1 });
+    assert.equal(r.status, 409);
+    assert.equal((await call('GET', `/api/file?path=${q('a')}`)).body.title, 'outside');
+  });
+});
+
+test('fs errors become 4xx, and neither response nor server log contains absolute paths', async () => {
+  await withApp(async ({ ws, call }) => {
+    const logged = [];
+    const orig = console.error;
+    console.error = (...a) => logged.push(a.join(' '));
+    try {
+      await call('POST', '/api/file', { path: 'sub.dpx.json' }); // a file named like this makes "sub.dpx.json/child" an ENOTDIR case
+      const r = await call('POST', '/api/file', { path: 'sub.dpx.json/child' });
+      assert.ok(r.status >= 400 && r.status < 500, `status ${r.status}`);
+      for (const [m, url, body] of [
+        ['POST', '/api/folder', { path: 'sub.dpx.json/deeper' }],
+        ['POST', '/api/move', { from: 'sub', to: 'sub.dpx.json/x' }],
+        ['GET', `/api/file?path=${q('sub.dpx.json/child')}`],
+        ['PUT', `/api/file?path=${q('sub.dpx.json/child')}`, { revision: 1 }],
+        ['DELETE', `/api/folder?path=${q('sub.dpx.json/child')}`],
+      ]) {
+        const x = await call(m, url, body);
+        assert.ok(x.status >= 400 && x.status < 500, `${m} ${url} -> ${x.status}`);
+        assert.ok(!JSON.stringify(x.body).includes(ws));
+      }
+      assert.ok(!JSON.stringify(r.body).includes(ws));
+    } finally {
+      console.error = orig;
+    }
+    assert.ok(!logged.join('\n').includes(ws), logged.join('\n'));
+  });
+});
+
+test('app logs only the error kind for unexpected 500s', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const boom = { name: 'boom', setup: async () => ({ routes: [{ method: 'GET', path: '/api/boom', handler: () => { throw Object.assign(new Error(`lstat '${ws}/x'`), { code: 'EBOOM' }); } }] }) };
+  const app = await createApp({ workspaceDir: ws }, { publicDir: ws, moduleList: [boom] });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const logged = [];
+  const orig = console.error;
+  console.error = (...a) => logged.push(a.join(' '));
+  try {
+    const res = await fetch(`http://127.0.0.1:${app.server.address().port}/api/boom`);
+    assert.equal(res.status, 500);
+  } finally {
+    console.error = orig;
+    await app.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+  assert.ok(logged.length > 0);
+  assert.ok(!logged.join('\n').includes(ws));
+});
