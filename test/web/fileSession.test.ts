@@ -128,7 +128,7 @@ test('a 4xx refusal is not retried', async (t) => {
 
 test('a newer-format file says why it is not saved', async (t) => {
   const { s, server } = setup(t);
-  s.load('a.dpx', file({ version: 3 }));
+  s.load('a.dpx', file({ version: 4 }));
   s.edit({ title: 'x' });
   t.mock.timers.tick(SAVE_DELAY);
   await settle();
