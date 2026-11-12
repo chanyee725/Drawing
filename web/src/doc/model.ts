@@ -1,5 +1,6 @@
 // Pure helpers for the document pane (no DOM, no editor): the stored document shape and the `/` menu list.
 import type { Block } from '../api.ts';
+import { findFreeSpot, isUnplaced, rectOf, type BlockGeom, type Rect } from '../canvas/sync.ts';
 
 export type DocJSON = { type: 'doc'; content?: DocNode[] };
 export type DocNode = { type: string; attrs?: Record<string, unknown>; content?: DocNode[]; [k: string]: unknown };
@@ -11,14 +12,31 @@ const isDoc = (d: unknown): d is DocJSON => !!d && typeof d === 'object' && (d a
 
 export const diagramNode = (blockId: string): DocNode => ({ type: DIAGRAM_NODE, attrs: { blockId } });
 
+/** Files written with this format version or later already have their own document (see server/workspace/model.js). */
+export const DOC_FORMAT_VERSION = 2;
+
+/** Why a stored document cannot be opened as is, or null when its outer shape is fine. Nodes are checked against the schema separately. */
+export function docShapeProblem(document: unknown): string | null {
+  if (!document || typeof document !== 'object' || Array.isArray(document)) return 'not an object';
+  const d = document as { type?: unknown; content?: unknown };
+  if (d.type !== 'doc') return 'type is not "doc"';
+  if (d.content !== undefined && !Array.isArray(d.content)) return 'content is not an array';
+  return null;
+}
+
+/** A document with no content at all (new files start like this). */
+export const isEmptyDoc = (document: unknown) => !docShapeProblem(document) && !(document as DocJSON).content?.length;
+
 /**
- * The content to open the editor with. A file saved before the document editor existed has an empty
- * document; it showed every diagram block in the document pane, so it opens with one embed per block.
+ * The document of a file written before the document editor existed (version < 2). Back then the
+ * document pane listed every diagram block, so an empty document gets one embed per block. This
+ * happens once: the next save stores version 2 and the document as it is then. Anything else,
+ * including a broken document, comes back unchanged.
  */
-export function initialDocument(document: unknown, blocks: readonly Pick<Block, 'id'>[]): DocJSON {
-  const doc = isDoc(document) ? document : { type: 'doc' as const, content: [] };
-  if (doc.content?.length || !blocks.length) return doc;
-  return { type: 'doc', content: blocks.map((b) => diagramNode(b.id)) };
+export function migrateDocument(file: { version?: number; document: unknown; blocks: readonly Pick<Block, 'id'>[] }): unknown {
+  if ((file.version ?? 1) >= DOC_FORMAT_VERSION || docShapeProblem(file.document) || !file.blocks.length) return file.document;
+  if ((file.document as DocJSON).content?.length) return file.document;
+  return { type: 'doc', content: file.blocks.map((b) => diagramNode(b.id)) };
 }
 
 /** Block ids embedded anywhere in the document, in document order. */
@@ -77,4 +95,48 @@ export function normalizeLink(input: string): string | null {
   // Any other scheme (javascript:, data:, file:...) is refused.
   if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^[^:/]+:\d+(\/|$)/.test(s)) return null;
   return `https://${s}`;
+}
+
+/**
+ * After an undo or redo in the document: blocks the document itself created (`created`, by id)
+ * follow their embed. An undo that takes the embed away removes the block from the canvas too
+ * (its latest state is kept in `created`); a redo that brings the embed back restores it.
+ * Returns the new block list, or null when nothing changes.
+ */
+export function blocksAfterHistory(before: readonly string[], after: readonly string[], created: Map<string, Block>, blocks: readonly Block[]): Block[] | null {
+  const was = new Set(before);
+  const now = new Set(after);
+  let next = [...blocks];
+  let changed = false;
+  for (const id of was) {
+    if (now.has(id) || !created.has(id)) continue;
+    const b = next.find((x) => x.id === id);
+    if (!b) continue;
+    created.set(id, b);
+    next = next.filter((x) => x.id !== id);
+    changed = true;
+  }
+  for (const id of now) {
+    if (was.has(id) || !created.has(id) || next.some((x) => x.id === id)) continue;
+    next.push(created.get(id)!);
+    changed = true;
+  }
+  return changed ? next : null;
+}
+
+/**
+ * Where a diagram made in the document goes on the canvas: the picture's size at a spot clear of
+ * every placed block and drawing, decided right away so it never sits on top of another block,
+ * even while the canvas is closed. Without a size yet it stays unplaced (w = 0) and the canvas places it.
+ */
+export function newBlockGeometry(size: { width: number; height: number } | null, blocks: readonly BlockGeom[], canvas: unknown): BlockGeom {
+  if (!size) return { x: 0, y: 0, w: 0, h: 0 };
+  const els = (canvas as { elements?: unknown } | null)?.elements;
+  const taken: Rect[] = blocks.filter((b) => !isUnplaced(b)).map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }));
+  if (Array.isArray(els))
+    for (const e of els as { x?: unknown; y?: unknown; width?: unknown; height?: unknown; isDeleted?: unknown }[]) {
+      if (!e || e.isDeleted || ![e.x, e.y, e.width, e.height].every((n) => typeof n === 'number' && Number.isFinite(n))) continue;
+      taken.push(rectOf(e as { x: number; y: number; width: number; height: number }));
+    }
+  return { ...findFreeSpot(size.width, size.height, taken), w: size.width, h: size.height };
 }

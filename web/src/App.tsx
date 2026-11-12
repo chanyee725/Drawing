@@ -9,6 +9,7 @@ import { DocPane } from './DocPane';
 import { CanvasPane } from './CanvasPane';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
+import { migrateDocument } from './doc/model';
 
 const SAVE_DELAY = 700;
 const RETRY_MIN = 1000;
@@ -178,6 +179,8 @@ export function App() {
     setConflict(null);
     setPath(p);
     pathRef.current = p;
+    // A file from before the document editor gets its diagrams listed in the document (once: saves store version 2).
+    f = { ...f, document: migrateDocument(f) };
     setFile(f);
     fileRef.current = f;
     setLoadSeq((n) => n + 1);
@@ -314,6 +317,7 @@ export function App() {
       key={`${path}#${loadSeq}`}
       document={file.document}
       blocks={file.blocks}
+      canvas={file.canvas}
       dark={theme === 'dark'}
       onDocument={(d) => edit({ document: d })}
       onBlocks={(b: Block[]) => edit({ blocks: b })}

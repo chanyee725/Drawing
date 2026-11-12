@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getSchema } from '@tiptap/core';
 import { Node as PMNode } from '@tiptap/pm/model';
-import { docExtensions } from '../../web/src/doc/extensions.ts';
-import { embeddedBlockIds, initialDocument } from '../../web/src/doc/model.ts';
+import { docExtensions, documentError } from '../../web/src/doc/extensions.ts';
+import { embeddedBlockIds, migrateDocument } from '../../web/src/doc/model.ts';
 
 const schema = getSchema(docExtensions());
 const text = (t: string, marks?: unknown[]) => ({ type: 'text', text: t, ...(marks ? { marks } : {}) });
@@ -38,9 +38,18 @@ test('a document with headings, lists, a checklist, code, a table, a link and a 
 });
 
 test('the migrated document of an old file fits the schema', () => {
-  PMNode.fromJSON(schema, initialDocument({ type: 'doc', content: [] }, [{ id: 'a' }, { id: 'b' }])).check();
+  PMNode.fromJSON(schema, migrateDocument({ version: 1, document: { type: 'doc', content: [] }, blocks: [{ id: 'a' }, { id: 'b' }] })).check();
 });
 
 test('unknown node types are rejected', () => {
   assert.throws(() => PMNode.fromJSON(schema, { type: 'doc', content: [{ type: 'nope' }] }));
+});
+
+test('broken documents are reported, so the editor opens them read-only instead of saving over them', () => {
+  assert.equal(documentError(SAMPLE, schema), null);
+  assert.equal(documentError({ type: 'doc', content: [] }, schema), null);
+  assert.ok(documentError({ type: 'doc', content: [{ type: 'mermaidThing' }] }, schema));
+  assert.ok(documentError({ type: 'page', content: [] }, schema));
+  assert.ok(documentError({ type: 'doc', content: {} }, schema));
+  assert.ok(documentError({ type: 'doc', content: [{ type: 'text', text: 'loose' }] }, schema));
 });
