@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parse, parseArchitecture, parseFlowchart } from '../../shared/dsl/index.ts';
-import type { GraphGroup } from '../../shared/dsl/index.ts';
+import type { GraphChild, GraphGroup } from '../../shared/dsl/index.ts';
 import { fixture, fmt } from './helpers.ts';
 
 test('flowchart fixture: nodes, shapes, chain, labels, edge attrs', () => {
@@ -187,4 +187,18 @@ test('partial AST survives errors on other lines', () => {
   assert.deepEqual(ast.edges.map((e) => `${e.from}>${e.to}`), ['A>B', 'C>D']);
   const g = ast.children.find((n) => n.id === 'G') as GraphGroup;
   assert.deepEqual(g.children.map((n) => n.id), ['E']);
+});
+
+function treeIds(children: GraphChild[]): string[] {
+  return children.flatMap((n) => (n.kind === 'group' ? [n.id, ...treeIds(n.children)] : [n.id]));
+}
+
+test('children of a rejected group stay in the tree so every edge id resolves', () => {
+  for (const code of ['A\nA {\n  B\n}\nB > C', 'X > A\nA { B }\nB > C']) {
+    const { ast, diagnostics } = parseArchitecture(code);
+    assert.equal(diagnostics.length, 1, code);
+    const ids = new Set(treeIds(ast.children));
+    assert.ok(ids.has('B'), code);
+    for (const e of ast.edges) assert.ok(ids.has(e.from) && ids.has(e.to), `${code}: ${e.from}>${e.to}`);
+  }
 });

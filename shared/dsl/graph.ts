@@ -144,7 +144,8 @@ export function parseGraph(c: Cursor, type: GraphDiagram['type']): GraphDiagram 
       const existing = group ?? registry.get(first[0]!.name);
       c.next();
       stack.push({
-        children: existing?.kind === 'group' ? existing.children : [],
+        // A rejected group keeps its children in the current scope so every edge id stays in the tree.
+        children: existing?.kind === 'group' ? existing.children : top().children,
         open: nx,
         name: first[0]!.name,
       });
