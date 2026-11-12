@@ -15,7 +15,7 @@ test('writes in place, inserts under the title, removes on null', () => {
   assert.equal(writeGlobal('A > B', 'colorMode', 'bold'), 'colorMode bold\nA > B');
   assert.equal(writeGlobal('title T\ncolorMode bold\nA', 'colorMode', null), 'title T\nA');
   assert.equal(writeGlobal('A', 'colorMode', null), 'A');
-  assert.equal(writeGlobal('colorMode: bold // x\nA', 'colorMode', 'plain'), 'colorMode: plain\nA');
+  assert.equal(writeGlobal('colorMode: bold // x\nA', 'colorMode', 'plain'), 'colorMode: plain // x\nA');
 });
 
 test('every written value parses without diagnostics', () => {
@@ -54,4 +54,11 @@ test('duplicate global lines collapse into one below the title', () => {
     writeGlobal('title T\ncolorMode bold\nA\ncolorMode outline\nB\n', 'colorMode', 'pastel'),
     'title T\ncolorMode pastel\nA\nB\n',
   );
+});
+
+test('a node named title-… is not a title, and quoted values read bare', () => {
+  assert.equal(writeGlobal('title-svc > B', 'colorMode', 'bold'), 'colorMode bold\ntitle-svc > B');
+  assert.equal(writeGlobal('title: T\nA', 'colorMode', 'bold'), 'title: T\ncolorMode bold\nA');
+  assert.equal(readGlobal('typeface "mono"\nA', 'typeface'), 'mono');
+  assert.equal(writeGlobal('colorMode bold   // keep me\nA', 'colorMode', 'outline'), 'colorMode outline   // keep me\nA');
 });

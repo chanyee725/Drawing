@@ -64,13 +64,15 @@ export function readGlobal(code: string, key: string): string | null {
   const lines = splitLines(code);
   const found = findLines(lines, key);
   if (found.length === 0) return null;
-  return lineRe(key).exec(scanLine(lines[found[found.length - 1]!]!).code)![3]!;
+  const v = lineRe(key).exec(scanLine(lines[found[found.length - 1]!]!).code)![3]!;
+  // The parser accepts a quoted value (`typeface "mono"`); the picker shows the bare one.
+  return /^(["']).*\1$/.test(v) ? v.slice(1, -1) : v;
 }
 
 /** Index to insert a new global line: after leading `title` / comment lines. */
 function insertIndex(lines: string[]): number {
   let i = 0;
-  while (i < lines.length && /^\s*(title\b.*|\/\/.*)$/.test(lines[i]!) && lines[i]!.trim() !== '') i++;
+  while (i < lines.length && /^\s*(title(\s*:\s*|\s+)\S.*|\/\/.*)$/.test(lines[i]!) && lines[i]!.trim() !== '') i++;
   return i;
 }
 
@@ -88,8 +90,12 @@ export function writeGlobal(code: string, key: string, value: string | null): st
   }
   if (found.length === 1) {
     const i = found[0]!;
-    const m = lineRe(key).exec(scanLine(lines[i]!).code)!;
-    lines[i] = `${m[1]}${key}${m[2]}${value}`;
+    const { code: body } = scanLine(lines[i]!);
+    const m = lineRe(key).exec(body)!;
+    // Keep a trailing `// comment` (and the spacing before it) as the user wrote it.
+    const comment = lines[i]!.slice(body.length);
+    const gap = comment ? (/\s*$/.exec(body)![0] || ' ') : '';
+    lines[i] = `${m[1]}${key}${m[2]}${value}${gap}${comment}`;
     return lines.join(eol);
   }
   const rest = lines.filter((_, i) => !found.includes(i));
