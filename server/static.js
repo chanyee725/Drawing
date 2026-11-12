@@ -1,6 +1,6 @@
 // Serve the built web app from public/, falling back to index.html.
-import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { open, stat } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
 import { extname, join, normalize, sep } from 'node:path';
 
 const TYPES = {
@@ -38,11 +38,29 @@ export async function serveStatic(req, res, pathname, publicDir) {
       return;
     }
   }
+  // Open before sending headers so an unreadable file gives a clean error status.
+  let fh;
+  try {
+    fh = await open(file, 'r');
+  } catch {
+    res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+    res.end('Not found\n');
+    return;
+  }
   res.writeHead(200, {
     'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
     'content-length': st.size,
     'cache-control': file.endsWith('index.html') ? 'no-store' : 'public, max-age=3600',
   });
-  if (req.method === 'HEAD') return res.end();
-  createReadStream(file).pipe(res);
+  if (req.method === 'HEAD') {
+    await fh.close();
+    return res.end();
+  }
+  try {
+    await pipeline(fh.createReadStream(), res);
+  } catch (err) {
+    // Client went away or the read failed mid-stream; drop the response, keep the server up.
+    if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') console.error('static read failed:', err.code ?? err.message);
+    res.destroy();
+  }
 }

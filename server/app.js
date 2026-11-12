@@ -10,7 +10,9 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 /**
  * Feature module contract (see server/modules.js):
  *   export async function setup(ctx) -> { routes?: Route[], close?: () => any }
- *   Route = { method: 'GET', path: '/api/x' | RegExp, handler(req, res, ctx, match) }
+ *   Route = { method: 'GET', path: '/api/x' | RegExp, handler(req, res, ctx, match, url) }
+ *   match is the RegExp match (or [pathname] for a string path); url is the parsed URL.
+ * Modules are closed in reverse setup order.
  * ctx = { projectDir, dispatch, hub, modules } where modules holds each module's
  * setup() result by name, so later modules can use earlier ones (e.g. agents uses watch).
  */
@@ -28,6 +30,10 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
   }
 
   const server = createServer(async (req, res) => {
+    // DNS rebinding guard: only answer requests addressed to this loopback port.
+    if (!isAllowedHost(req.headers.host, server.address()?.port)) {
+      return sendJson(res, 403, { error: 'forbidden host' });
+    }
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
@@ -49,11 +55,18 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
 
   async function close() {
     hub.closeAll();
-    for (const c of closers) await c();
-    await new Promise((r) => server.close(r));
+    for (const c of [...closers].reverse()) await c();
+    const closed = new Promise((r) => server.close(r));
+    server.closeAllConnections(); // don't wait for idle keep-alive sockets
+    await closed;
   }
 
   return { server, ctx, close };
+}
+
+export function isAllowedHost(host, port) {
+  if (!host || !port) return false;
+  return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
 }
 
 export function sendJson(res, status, body) {
