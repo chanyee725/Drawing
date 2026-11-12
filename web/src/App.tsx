@@ -15,7 +15,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { dropTarget, pathAfterMove, renameTarget } from './movePaths';
+import { dropTarget, moveErrorText, nameProblem, pathAfterMove, renameTarget } from './movePaths';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
@@ -304,7 +304,9 @@ export function App() {
       const r = await api.move(from, to, n.type);
       const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
       if (next) {
-        session.rename(next);
+        // The revision is re-read: a name that was deleted before makes the server raise it.
+        const fresh = await api.readFile(next).catch(() => null);
+        session.rename(next, fresh?.revision);
         setHashPath(next);
       }
       if (title) {
@@ -318,7 +320,7 @@ export function App() {
       await refreshTree();
     } catch (e) {
       ownMoves.current.delete(from);
-      setError(e instanceof ApiError && e.status === 409 ? '같은 이름이 이미 있어요' : e instanceof Error ? e.message : '옮기지 못했어요');
+      setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
     }
   };
   const moveInto = (n: TreeNode, dir: string) => {
@@ -326,9 +328,10 @@ export function App() {
     if (to) void move(n, to);
   };
   const rename = (n: TreeNode, name: string) => {
+    const problem = nameProblem(n, name);
+    if (problem) return setError(problem);
     const to = renameTarget(n, name);
     if (to) void move(n, to, n.type === 'file' ? fileStem(name) : undefined);
-    else if (name.trim() && /[\\/]/.test(name)) setError('이름에 /를 넣을 수 없어요');
   };
 
   const remove = async (n: TreeNode) => {

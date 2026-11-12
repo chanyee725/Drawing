@@ -31,3 +31,32 @@ export function pathAfterMove(open: string | null, from: string, to: string, typ
   if (type === 'file') return stem(open) === stem(from) ? to : null;
   return open.startsWith(`${from}/`) ? to + open.slice(from.length) : null;
 }
+
+/** Why a typed name cannot be used (Korean, for the sidebar), or null when it is fine to try. */
+export function nameProblem(node: Pick<TreeNode, 'type'>, name: string): string | null {
+  const raw = name.trim();
+  const bare = node.type === 'file' ? stem(raw) : raw;
+  if (!bare) return null;
+  if (bare === '.' || bare === '..') return '이름을 . 이나 ..로 할 수 없어요.';
+  if (/[\\/]/.test(bare)) return '이름에 / 나 \\를 넣을 수 없어요.';
+  if (bare.startsWith('.')) return '점(.)으로 시작하는 이름은 쓸 수 없어요.';
+  if (bare.length > 200) return '이름이 너무 길어요.';
+  if (node.type === 'folder' && /\.dpx(\.json)?$/i.test(bare)) return '폴더 이름은 .dpx로 끝날 수 없어요.';
+  return null;
+}
+
+const SERVER_TEXT: [RegExp, string][] = [
+  [/hidden names/, '점(.)으로 시작하는 이름은 쓸 수 없어요.'],
+  [/cannot end with/, '폴더 이름은 .dpx로 끝날 수 없어요.'],
+  [/invalid path|invalid path segment/, '쓸 수 없는 이름이에요.'],
+  [/name too long|path too long/, '이름이 너무 길어요.'],
+  [/into itself/, '폴더를 자기 안으로 옮길 수 없어요.'],
+  [/outside workspace|symlink|absolute/, '이 위치로는 옮길 수 없어요.'],
+  [/not found/, '옮길 항목을 찾지 못했어요. 목록을 새로 고쳐 보세요.'],
+];
+/** Korean text for a failed move or rename (server messages are English). */
+export function moveErrorText(status: number | undefined, message: string): string {
+  if (status === 409 && /target already exists|already exists/.test(message)) return '같은 이름이 이미 있어요.';
+  for (const [re, text] of SERVER_TEXT) if (re.test(message)) return text;
+  return '옮기지 못했어요. 잠시 뒤 다시 해 보세요.';
+}

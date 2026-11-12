@@ -141,19 +141,22 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
           onClick={() => !renaming && setOpen(!open)}
           onKeyDown={keys(() => setOpen(!open))}
           onDoubleClick={() => setRenaming(true)}
+          // A row never lets a drag bubble to the list background, or a refused drop would move the item to the root.
           onDragOver={(e) => {
+            e.stopPropagation();
             if (!canDrop()) return;
             e.preventDefault();
-            e.stopPropagation();
             setOver(true);
           }}
           onDragLeave={() => setOver(false)}
           onDrop={(e) => {
-            setOver(false);
-            if (!dragging || !canDrop()) return;
-            e.preventDefault();
             e.stopPropagation();
-            p.onMove(dragging, node.path);
+            setOver(false);
+            const d = dragging;
+            dragging = null;
+            if (!d || dropTarget(d, node.path) === null) return;
+            e.preventDefault();
+            p.onMove(d, node.path);
           }}
           className="group flex h-8 cursor-pointer items-center gap-1 pr-2 text-sm"
           style={{ ...pad, background: over ? 'var(--accent-soft)' : undefined }}
@@ -175,6 +178,12 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
       onClick={() => !renaming && p.onOpen(node.path)}
       onKeyDown={keys(() => p.onOpen(node.path))}
       onDoubleClick={() => setRenaming(true)}
+      // Dropping on a file does nothing (and must not reach the list background, which means "root").
+      onDragOver={(e) => e.stopPropagation()}
+      onDrop={(e) => {
+        e.stopPropagation();
+        dragging = null;
+      }}
       aria-current={active ? 'page' : undefined}
       className="group flex h-8 cursor-pointer items-center gap-1 pr-2 text-sm"
       style={{ ...pad, background: active ? 'var(--accent-soft)' : undefined, color: active ? 'var(--accent)' : undefined }}
@@ -222,9 +231,11 @@ export function Sidebar(p: Props) {
           if (dragging && dropTarget(dragging, '') !== null) e.preventDefault();
         }}
         onDrop={(e) => {
-          if (!dragging || dropTarget(dragging, '') === null) return;
+          const d = dragging;
+          dragging = null;
+          if (!d || dropTarget(d, '') === null) return;
           e.preventDefault();
-          p.onMove(dragging, '');
+          p.onMove(d, '');
         }}
       >
         {shown.length === 0 ? (

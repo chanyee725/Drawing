@@ -174,8 +174,9 @@ export function createFileSession(deps: Deps) {
     },
     close,
     /** The open file was renamed or moved by this tab: keep its content and pending save, write to the new path from now on. */
-    rename(p: string) {
-      if (state.path) set({ path: p });
+    rename(p: string, revision?: number) {
+      // The server raises the revision when a file lands on a name that was deleted before, so take the new one.
+      if (state.path) set({ path: p, ...(revision !== undefined && state.file ? { file: { ...state.file, revision } } : {}) });
     },
     /**
      * A server `workspace` event (other tabs, outside edits). 'close': the open file was deleted or moved

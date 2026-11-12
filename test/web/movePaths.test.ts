@@ -55,3 +55,31 @@ test('session.rename changes the save path without dropping the content', async 
   closed.rename('x');
   assert.equal(closed.getState().path, null);
 });
+
+import { moveErrorText, nameProblem } from '../../web/src/movePaths.ts';
+
+test('name problems are Korean and specific', () => {
+  assert.match(nameProblem(file, 'a/b')!, /\//);
+  assert.match(nameProblem(file, 'a\\b')!, /\\/);
+  assert.ok(!nameProblem(file, 'a\\b')!.includes('/를 넣을 수 없어요'));
+  assert.match(nameProblem(file, '..')!, /\.\./);
+  assert.match(nameProblem(file, '.')!, /\./);
+  assert.match(nameProblem(file, '.hidden')!, /점/);
+  assert.match(nameProblem(folder, 'x.dpx.json')!, /\.dpx/);
+  assert.equal(nameProblem(file, 'x.dpx.json'), null);
+  assert.equal(nameProblem(file, '  '), null);
+});
+
+test('server errors become Korean text', () => {
+  assert.equal(moveErrorText(409, 'target already exists'), '같은 이름이 이미 있어요.');
+  assert.match(moveErrorText(400, 'hidden names are not allowed'), /점/);
+  assert.match(moveErrorText(400, 'folder names cannot end with .dpx.json'), /\.dpx/);
+  assert.doesNotMatch(moveErrorText(500, 'boom'), /[a-z]{4}/);
+});
+
+test('session.rename can take the revision the server raised', () => {
+  const s = createFileSession({ saveFile: async () => ({ revision: 1 }) });
+  s.load('a.dpx.json', { version: 2, title: 't', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1 });
+  s.rename('b.dpx.json', 5);
+  assert.equal(s.getState().file?.revision, 5);
+});
