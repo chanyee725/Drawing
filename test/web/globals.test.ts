@@ -37,3 +37,21 @@ test('direction is offered only for graph types', () => {
   assert.ok(!propsFor('erd').some((p) => p.key === 'direction'));
   assert.deepEqual(propsFor('bpmn'), []);
 });
+
+test('CRLF code: new line goes under the title and endings stay CRLF', () => {
+  assert.equal(writeGlobal('title T\r\nA > B\r\n', 'colorMode', 'bold'), 'title T\r\ncolorMode bold\r\nA > B\r\n');
+  assert.equal(writeGlobal('title T\r\ncolorMode bold\r\nA\r\n', 'colorMode', 'outline'), 'title T\r\ncolorMode outline\r\nA\r\n');
+  assert.equal(readGlobal('colorMode bold\r\nA', 'colorMode'), 'bold');
+});
+
+test('quotes hide // and braces from depth counting', () => {
+  assert.equal(readGlobal('G [link: "https://x.io"] {\n  typeface mono\n}\n', 'typeface'), null);
+  assert.equal(readGlobal('G [label: "{"]\ntypeface mono\n', 'typeface'), 'mono');
+});
+
+test('duplicate global lines collapse into one below the title', () => {
+  assert.equal(
+    writeGlobal('title T\ncolorMode bold\nA\ncolorMode outline\nB\n', 'colorMode', 'pastel'),
+    'title T\ncolorMode pastel\nA\nB\n',
+  );
+});

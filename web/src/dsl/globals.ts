@@ -26,31 +26,48 @@ export const propsFor = (type: string): PropDef[] => PROPS.filter((p) => p.types
 
 const lineRe = (key: string) => new RegExp(`^(\\s*)${key}(\\s*:\\s*|\\s+)(\\S+)\\s*$`);
 
+/** Strip a trailing `//` comment (outside quotes) and count the net `{ }` depth change of the rest. */
+function scanLine(raw: string): { code: string; delta: number } {
+  let quote = '';
+  let delta = 0;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    if (quote) {
+      if (ch === '\\') i++;
+      else if (ch === quote) quote = '';
+    } else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === '/' && raw[i + 1] === '/') return { code: raw.slice(0, i), delta };
+    else if (ch === '{') delta++;
+    else if (ch === '}') delta--;
+  }
+  return { code: raw, delta };
+}
+
+const splitLines = (code: string) => code.split(/\r?\n/);
+const eolOf = (code: string) => (/\r\n/.test(code) ? '\r\n' : '\n');
+
 /** Line indexes of top-level global lines for `key`. */
 function findLines(lines: string[], key: string): number[] {
   const re = lineRe(key);
   const out: number[] = [];
   let depth = 0;
   lines.forEach((raw, i) => {
-    const line = raw.replace(/\/\/.*$/, '');
-    if (depth === 0 && re.test(line)) out.push(i);
-    for (const ch of line) {
-      if (ch === '{') depth++;
-      else if (ch === '}') depth = Math.max(0, depth - 1);
-    }
+    const { code, delta } = scanLine(raw);
+    if (depth === 0 && re.test(code)) out.push(i);
+    depth = Math.max(0, depth + delta);
   });
   return out;
 }
 
 /** Value of the last global line for `key`, or null when the code has none. */
 export function readGlobal(code: string, key: string): string | null {
-  const lines = code.split('\n');
+  const lines = splitLines(code);
   const found = findLines(lines, key);
   if (found.length === 0) return null;
-  return lineRe(key).exec(lines[found[found.length - 1]!]!.replace(/\/\/.*$/, ''))![3]!;
+  return lineRe(key).exec(scanLine(lines[found[found.length - 1]!]!).code)![3]!;
 }
 
-/** Index to insert a new global line: after leading `title` / comment / blank-free header lines. */
+/** Index to insert a new global line: after leading `title` / comment lines. */
 function insertIndex(lines: string[]): number {
   let i = 0;
   while (i < lines.length && /^\s*(title\b.*|\/\/.*)$/.test(lines[i]!) && lines[i]!.trim() !== '') i++;
@@ -59,22 +76,23 @@ function insertIndex(lines: string[]): number {
 
 /**
  * Return `code` with global `key` set to `value`. `value` null removes the line(s).
- * Existing lines keep their position and spacing; a new line goes below the title.
+ * A single existing line keeps its position and spacing. A global line only affects elements after it,
+ * so duplicates are all removed and one line goes below the title. Line endings (LF/CRLF) are kept.
  */
 export function writeGlobal(code: string, key: string, value: string | null): string {
-  const lines = code.split('\n');
+  const eol = eolOf(code);
+  const lines = splitLines(code);
   const found = findLines(lines, key);
   if (value === null) {
-    return found.length === 0 ? code : lines.filter((_, i) => !found.includes(i)).join('\n');
+    return found.length === 0 ? code : lines.filter((_, i) => !found.includes(i)).join(eol);
   }
-  if (found.length > 0) {
-    const re = lineRe(key);
-    for (const i of found) {
-      const m = re.exec(lines[i]!.replace(/\/\/.*$/, ''))!;
-      lines[i] = `${m[1]}${key}${m[2]}${value}`;
-    }
-    return lines.join('\n');
+  if (found.length === 1) {
+    const i = found[0]!;
+    const m = lineRe(key).exec(scanLine(lines[i]!).code)!;
+    lines[i] = `${m[1]}${key}${m[2]}${value}`;
+    return lines.join(eol);
   }
-  lines.splice(insertIndex(lines), 0, `${key} ${value}`);
-  return lines.join('\n');
+  const rest = lines.filter((_, i) => !found.includes(i));
+  rest.splice(insertIndex(rest), 0, `${key} ${value}`);
+  return rest.join(eol);
 }
