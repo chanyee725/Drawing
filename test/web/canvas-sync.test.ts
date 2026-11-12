@@ -140,11 +140,11 @@ test('layout is part of the picture identity but not of where the block sits', a
 });
 
 test('the image carries the layout and applyScene takes it back, only when the image changed', async () => {
-  const { layoutsFromImages } = await import('../../web/src/canvas/sync.ts');
+  const { layoutsFromImages, layoutSig } = await import('../../web/src/canvas/sync.ts');
   const b = { ...block('a'), layout: L1 };
   assert.deepEqual((blockImageSkeleton(b, 'f', 'e').customData as { layout?: unknown }).layout, L1);
   assert.equal('layout' in blockImageSkeleton(block('a'), 'f', 'e').customData, false);
-  const seen = new Map([['a', JSON.stringify(L1)]]);
+  const seen = new Map([['a', layoutSig(L1)]]);
   // The image still shows the old layout while the block moved on (a code-panel cleanup): the block wins.
   const lagging = splitScene([img('a', 0, { customData: { blockId: 'a', layout: L1 } })]);
   const cleaned = { ...b, layout: undefined };
@@ -193,4 +193,14 @@ test('asLayout takes only what the server would store, and keeps the object', as
     JSON.parse('{"v":1,"items":{"__proto__":{"cx":0,"cy":0,"parent":""}}}'),
     { v: 1, basis: { type: 'a', direction: 'right', count: -1 } },
   ]) assert.equal(asLayout(bad), undefined, JSON.stringify(bad).slice(0, 60));
+});
+
+test('layoutSig does not depend on key order', async () => {
+  const { layoutSig, sameDrawing } = await import('../../web/src/canvas/sync.ts');
+  const a = { v: 1, basis: { type: 'flowchart', direction: 'right', count: 2 }, items: { A: { cx: 1, cy: 2, parent: '' }, B: { cx: 3, cy: 4, parent: 'G' } } };
+  const b = { items: { B: { parent: 'G', cy: 4, cx: 3 }, A: { parent: '', cx: 1, cy: 2 } }, basis: { count: 2, direction: 'right', type: 'flowchart' }, v: 1 };
+  assert.equal(layoutSig(a), layoutSig(b));
+  assert.notEqual(layoutSig(a), layoutSig({ ...b, v: 2 }));
+  assert.equal(fileIdFor({ ...block('x'), layout: a }, 'light'), fileIdFor({ ...block('x'), layout: b }, 'light'));
+  assert.equal(sameDrawing([{ ...block('x'), layout: a }], [{ ...block('x'), layout: b }]), true);
 });

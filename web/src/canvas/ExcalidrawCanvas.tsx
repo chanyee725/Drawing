@@ -225,6 +225,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     const split = splitScene(elements as unknown as readonly SceneEl[]);
     for (const b of cur) if (split.deleted.has(b.id)) graveyard.current.set(b.id, b);
+    // A deleted image's layout is not "seen" any more: if undo brings the image back, the block takes its layout again.
+    for (const id of split.deleted) seenLayouts.current.delete(id);
     let next = applyScene(cur, split, layoutsFromImages(split.layouts, seenLayouts.current));
     // An image came back (undo) for a block that was deleted on the canvas.
     const back = [...split.geometry.keys()].filter((id) => !cur.some((b) => b.id === id) && graveyard.current.has(id));
