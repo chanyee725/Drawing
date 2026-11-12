@@ -205,6 +205,10 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
 
   // Arrow keys move the selection on screen and commit on key up: one undo step per press or hold, not one per
   // auto-repeat. `dx, dy` add up from the layout as it was when the press began.
+  // This relies on `live.current.layout` already holding the committed layout when the next keydown arrives: the key
+  // up commits through `onCommit` -> Excalidraw onChange -> App state, which React 18 flushes synchronously for a
+  // discrete event (keyup), so the overlay re-renders before the next keydown. If that chain ever goes async (a
+  // debounced onChange, a transition), a quick second press would start from the old layout and drop the first move.
   const held = useRef<{ leaves: string[]; dx: number; dy: number } | null>(null);
   const endHold = useCallback(() => {
     const h = held.current;
@@ -217,12 +221,22 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
   endHoldRef.current = endHold;
   useEffect(() => () => endHoldRef.current(), []);
 
-  // Keys while editing: Escape leaves, arrows nudge the selection, Ctrl/Cmd+A selects every node (not every canvas
-  // element). Delete would remove the whole block image, so it does nothing here. Typing in the code panel or any field
-  // is left alone.
+  // Keys while editing: Escape leaves, Enter opens the code (§5.2; the selection is empty in edit mode, so the
+  // canvas's own Enter cannot), arrows nudge the selection, Ctrl/Cmd+A selects every node (not every canvas element).
+  // Delete would remove the whole block image, so it does nothing here. Only keys on the canvas count: the sidebar,
+  // the page body, the code panel and any field are left alone.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (!(e.target instanceof Node) || !wrap.contains(e.target)) return;
       if (e.isComposing || (e.target instanceof HTMLElement && e.target.closest('aside, input, textarea, select, [contenteditable], [role="dialog"]'))) return;
+      const plain = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
+      if (e.key === 'Enter' && plain && !(e.target instanceof HTMLElement && e.target.closest('button, a'))) {
+        e.preventDefault();
+        e.stopPropagation();
+        endHold();
+        onOpenCode();
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault();
         e.stopPropagation();
@@ -273,7 +287,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
       window.removeEventListener('keyup', onUp, true);
       window.removeEventListener('blur', endHold);
     };
-  }, [onExit, dragTo, commit, show, endHold]);
+  }, [wrap, onExit, onOpenCode, dragTo, commit, show, endHold]);
 
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {

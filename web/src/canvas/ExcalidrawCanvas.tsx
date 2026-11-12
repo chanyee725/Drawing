@@ -443,25 +443,34 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       if (!img || !bid || !b) return;
       const { x, y } = viewportCoordsToSceneCoords(e, st);
       if (x < img.x || x > img.x + img.width || y < img.y || y > img.y + img.height) return;
-      const sv = sessRef.current;
-      const why = imageReason(img) ?? (sv && sv.blockId === bid && sv.key === sessionKey(b) && 'reason' in sv.s ? sv.s.reason : null);
-      if (why) return setNotice({ blockId: bid, text: why });
-      // The session is still being made: this press moves the block, like before.
-      const ls = ready(sv, b);
+      // No session (still being made, or a block that cannot be laid out: sequence, ERD, an error): this press moves
+      // the block, like before, and says nothing; the palette's try is where the reason shows.
+      const ls = ready(sessRef.current, b);
       const f = ls && frameOf(img, st, b);
       if (!ls || !f) return;
       const scene = ls.compose(b.layout).scene;
       const r = el.getBoundingClientRect();
       const hit = hitHandle(layoutHandles(scene.handles, scene.origin), toLayout(f, { x: e.clientX - r.left, y: e.clientY - r.top }));
       if (!hit) return;
+      // A node was hit, but a locked or turned image cannot be edited: say why instead of entering.
+      const why = imageReason(img);
+      if (why) return setNotice({ blockId: bid, text: why });
       e.stopPropagation();
       e.preventDefault();
       enterEdit(bid, { id: hit.id, clientX: e.clientX, clientY: e.clientY, shift: false, n: ++startN.current });
     };
+    // A press outside the canvas (sidebar, top bar, document) leaves edit mode too; a modal (the palette) does not.
+    const onOutside = (e: PointerEvent) => {
+      if (!editRef.current || !(e.target instanceof Node) || el.contains(e.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      exitEdit(true);
+    };
     el.addEventListener('dblclick', onDbl, true);
     el.addEventListener('keydown', onKey, true);
     el.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('pointerdown', onOutside, true);
     return () => {
+      document.removeEventListener('pointerdown', onOutside, true);
       el.removeEventListener('dblclick', onDbl, true);
       el.removeEventListener('keydown', onKey, true);
       el.removeEventListener('pointerdown', onDown, true);
