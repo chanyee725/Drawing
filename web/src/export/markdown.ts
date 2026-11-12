@@ -1,7 +1,7 @@
 // Document → Markdown (pure, no DOM). A diagram embed becomes a fenced code block with its DSL code,
 // tagged with the diagram type, so the text stays readable and can be pasted back.
 import type { Block } from '../api.ts';
-import { DIAGRAM_NODE, type DocNode } from '../doc/model.ts';
+import { DIAGRAM_NODE, FRAME_NODE, type DocNode } from '../doc/model.ts';
 
 type Mark = { type: string; attrs?: Record<string, unknown> };
 type N = DocNode & { text?: string; marks?: Mark[] };
@@ -127,6 +127,11 @@ function block(n: N, ctx: Ctx): string {
       const b = typeof n.attrs?.blockId === 'string' ? ctx.blocks.get(n.attrs.blockId) : undefined;
       // An embed whose block is gone leaves nothing to write.
       return b ? fence(b.code, b.type) : '';
+    }
+    case FRAME_NODE: {
+      // A canvas frame has no text form; leave a marker so the reader knows a figure was here.
+      const name = typeof n.attrs?.name === 'string' && n.attrs.name.trim() ? n.attrs.name.trim() : '프레임';
+      return `_\\[${escInline(name)} (캔버스 그림)\\]_`;
     }
     default:
       return kids.map((k) => block(k, ctx)).filter(Boolean).join('\n\n');

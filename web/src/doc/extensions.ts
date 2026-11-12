@@ -5,7 +5,7 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import StarterKit from '@tiptap/starter-kit';
 import { TaskItem, TaskList } from '@tiptap/extension-list';
 import { TableKit } from '@tiptap/extension-table';
-import { DIAGRAM_NODE, docShapeProblem, isEmptyDoc } from './model.ts';
+import { DIAGRAM_NODE, FRAME_NODE, docShapeProblem, isEmptyDoc } from './model.ts';
 import { headingsNeedingId, newHeadingId } from './outline.ts';
 
 /** Node name of a `+` link (to a file, a heading or a diagram) in the document JSON. */
@@ -116,8 +116,31 @@ export const DiagramEmbed = Node.create({
   },
 });
 
+/** A canvas frame shown in the document. It stores the frame's id and the name it had; the picture is drawn live. */
+export const FrameEmbed = Node.create({
+  name: FRAME_NODE,
+  group: 'block',
+  atom: true,
+  selectable: true,
+  draggable: true,
+  addAttributes() {
+    const attr = (key: string, data: string) => ({
+      default: '',
+      parseHTML: (el: HTMLElement) => el.getAttribute(data) ?? '',
+      renderHTML: (a: Record<string, unknown>) => (a[key] ? { [data]: String(a[key]) } : {}),
+    });
+    return { frameId: attr('frameId', 'data-frame-id'), name: attr('name', 'data-frame-name') };
+  },
+  parseHTML() {
+    return [{ tag: 'figure[data-frame-embed]' }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ['figure', mergeAttributes(HTMLAttributes, { 'data-frame-embed': '' })];
+  },
+});
+
 /** Everything the document supports. `diagram` replaces DiagramEmbed (the web adds its node view). */
-export function docExtensions(diagram: AnyExtension = DiagramEmbed): AnyExtension[] {
+export function docExtensions(diagram: AnyExtension = DiagramEmbed, frame: AnyExtension = FrameEmbed): AnyExtension[] {
   return [
     StarterKit.configure({
       heading: { levels: [1, 2, 3] },
@@ -130,6 +153,7 @@ export function docExtensions(diagram: AnyExtension = DiagramEmbed): AnyExtensio
     TaskItem.configure({ nested: true }),
     TableKit.configure({ table: { resizable: false } }),
     diagram,
+    frame,
   ];
 }
 
