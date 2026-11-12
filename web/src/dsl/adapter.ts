@@ -1,7 +1,7 @@
 // Seam between the editor and the parser/renderer. The editor only calls `analyzeDiagram`.
-// Parsing uses shared/dsl (E2). `preview` stays null until the E3 renderer is wired in:
-// build the scene from `ast` here and the canvas pane picks it up.
+// Parsing uses shared/dsl (E2); the live preview uses shared/render (E3) via `renderPreview`.
 import { parse, type DiagramType as ParserType, type Diagram } from '../../../shared/dsl/index.ts';
+import { renderDiagram } from '../../../shared/render/index.ts';
 
 export type Diagnostic = {
   /** 1-based line */
@@ -19,8 +19,6 @@ export type Analysis = {
   /** Parsed diagram; null for types the parser does not support (BPMN). */
   ast: Diagram | null;
   diagnostics: Diagnostic[];
-  /** Renderer output for the canvas preview. Opaque until E3 defines it. */
-  preview: unknown | null;
   /** true when a parser handled this type. */
   parsed: boolean;
 };
@@ -35,7 +33,39 @@ const PARSER_TYPE: Record<string, ParserType | undefined> = {
 
 export function analyzeDiagram(type: string, code: string): Analysis {
   const pt = PARSER_TYPE[type];
-  if (!pt) return { ast: null, diagnostics: [], preview: null, parsed: false };
+  if (!pt) return { ast: null, diagnostics: [], parsed: false };
   const { ast, diagnostics } = parse(code, pt);
-  return { ast, diagnostics, preview: null, parsed: true };
+  return { ast, diagnostics, parsed: true };
+}
+
+export type Preview = {
+  /** SVG markup of the last successful render. */
+  svg: string;
+  /** Errors of the code that is currently typed. Non-empty means `svg` is from earlier code. */
+  errors: Diagnostic[];
+  /** true when `svg` does not match the current code. */
+  stale: boolean;
+};
+
+/** Render the code to SVG. Returns null for unsupported types or when rendering fails. */
+export async function renderPreview(type: string, code: string, theme: 'light' | 'dark'): Promise<{ svg: string; diagnostics: Diagnostic[] } | null> {
+  const pt = PARSER_TYPE[type];
+  if (!pt) return null;
+  try {
+    const { svg, diagnostics } = await renderDiagram(code, { type: pt, theme });
+    return { svg, diagnostics };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Decide what the canvas shows after a render attempt: a clean render replaces the
+ * preview; a render with errors (or a failed one) keeps the last good SVG.
+ */
+export function nextPreview(prev: Preview | null, result: { svg: string; diagnostics: Diagnostic[] } | null): Preview | null {
+  const errors = result ? result.diagnostics.filter((d) => d.severity === 'error') : [];
+  if (result && errors.length === 0) return { svg: result.svg, errors: [], stale: false };
+  if (!prev) return null;
+  return { svg: prev.svg, errors, stale: true };
 }

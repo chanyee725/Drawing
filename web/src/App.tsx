@@ -287,7 +287,7 @@ export function App() {
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
   const doc = file && <DocPane blocks={file.blocks} dark={theme === 'dark'} onBlocks={(b: Block[]) => edit({ blocks: b })} />;
-  const canvas = <CanvasPane blocks={file?.blocks ?? []} hasFile={!!file} />;
+  const canvas = <CanvasPane blocks={file?.blocks ?? []} hasFile={!!file} theme={theme} />;
 
   const sidebar = (
     <Sidebar
