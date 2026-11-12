@@ -63,3 +63,8 @@ test('item lines inside a multi-line legend get the legend keys', () => {
   // A node line inside the block is not an item line.
   assert.ok(!labels(attributeCompletions('flowchart', 'A [', 'B\n')).includes('connection'));
 });
+
+test('bpmn gets no attribute suggestions', () => {
+  assert.equal(attributeCompletions('bpmn', 'Open website ['), null);
+  assert.equal(attributeCompletions('bpmn', 'A [icon: '), null);
+});

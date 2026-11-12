@@ -69,9 +69,10 @@ export type AttrCompletion = { from: number; options: Completion[] };
  * Completions for the cursor at the end of `before` (the current line up to the cursor).
  * `above` is the document text before the current line; with it, item lines inside a multi-line
  * `legend { ... }` get the legend keys. Returns null outside a `[ ... ]` list or inside a quoted string.
- * `from` is relative to the line start.
+ * `from` is relative to the line start. BPMN has no attribute list in the DSL, so nothing is offered.
  */
 export function attributeCompletions(type: string, before: string, above = ''): AttrCompletion | null {
+  if (type === 'bpmn') return null;
   const open = before.lastIndexOf('[');
   if (open < 0 || before.indexOf(']', open) >= 0) return null;
   const inner = before.slice(open + 1);
