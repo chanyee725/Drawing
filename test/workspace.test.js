@@ -697,3 +697,31 @@ test('an async fs.watch error is logged once, by code only, and does not crash',
     await rm(ws, { recursive: true, force: true });
   }
 });
+
+test('after an async fs.watch error the watcher is closed and started again, and outside edits are seen again', async (t) => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const watchers = [];
+  const watchFn = (_root, _opts, cb) => {
+    const w = Object.assign(new EventEmitter(), { cb, closed: false, close() { this.closed = true; } });
+    watchers.push(w);
+    return w;
+  };
+  const store = createStore(ws, { watchFn, watchRestartMs: 10 });
+  const warn = t.mock.method(console, 'warn', () => {});
+  try {
+    await store.startWatching();
+    assert.equal(watchers.length, 1);
+    watchers[0].emit('error', Object.assign(new Error('x'), { code: 'ENOSPC' }));
+    assert.equal(watchers[0].closed, true);
+    for (let i = 0; i < 100 && watchers.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(watchers.length, 2, 'a new watcher was started');
+    assert.equal(warn.mock.callCount(), 1);
+  } finally {
+    warn.mock.restore();
+    await store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+  const n = watchers.length;
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(watchers.length, n, 'no restart after close');
+});
