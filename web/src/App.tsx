@@ -127,8 +127,8 @@ export function App() {
             setConflict({ revision: e.revision });
             setStatus('다른 곳에서 바뀌었어요', true);
           } else if (!isRetryableSaveError(e)) {
-            // The server refused this request (4xx); retrying the same body would fail forever. The next edit tries again.
-            clearTimer();
+            // The server refused this request (4xx); retrying the same body would fail forever.
+            // Keep a pending edit timer: a newer edit may already have fixed the body.
             setStatus('저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
