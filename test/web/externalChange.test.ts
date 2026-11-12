@@ -10,6 +10,12 @@ test('the open file deleted or moved away closes it, so its save timer is cancel
   assert.equal(externalAction({ kind: 'tree', path: 'moved', from: 'proj' }, open, false), 'close');
 });
 
+test('a deleted folder closes a file open under it, and only that', () => {
+  assert.equal(externalAction({ kind: 'tree', path: 'proj', from: 'proj' }, open, true), 'close');
+  assert.equal(externalAction({ kind: 'tree', path: 'proj/sub', from: 'proj/sub' }, open, false), 'refresh');
+  assert.equal(externalAction({ kind: 'tree', path: 'pro', from: 'pro' }, open, false), 'refresh');
+});
+
 test('a changed open file reloads only when nothing is unsaved', () => {
   assert.equal(externalAction({ kind: 'change', path: open, revision: 4 }, open, false), 'reload');
   assert.equal(externalAction({ kind: 'change', path: open, revision: 4 }, open, true), 'refresh');

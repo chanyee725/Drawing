@@ -244,7 +244,8 @@ test('external edits emit a workspace SSE event; our own saves and creates do no
       assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json' && e.kind === 'delete')).kind, 'delete');
       await call('POST', '/api/folder', { path: 'tmpdir' });
       await call('DELETE', `/api/folder?path=${q('tmpdir')}`);
-      await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree');
+      // `from` is set so a tab with a file under the folder open closes it
+      assert.equal((await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree')).from, 'tmpdir');
       await sleep(400); // the watcher then sees nothing new
       sse.events.length = 0;
 

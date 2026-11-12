@@ -345,7 +345,8 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
       await rm(abs, { recursive: true });
       forget(rel, true);
-      onExternalChange?.({ kind: 'tree', path: rel });
+      // `from`: other tabs with a file under this folder open must close it (same shape as a folder move).
+      onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       return { path: rel };
     });
   }
@@ -407,7 +408,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         onExternalChange?.({ kind: 'delete', path: rel });
       } else if (knownDirs.has(rel)) {
         forget(rel, true);
-        onExternalChange?.({ kind: 'tree', path: rel });
+        onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       }
       return;
     }
