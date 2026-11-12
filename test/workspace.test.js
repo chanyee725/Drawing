@@ -130,13 +130,13 @@ test('write is atomic: no temp files left, content is always complete JSON', asy
     })();
     for (let i = 0; i < 10; i++) rev = (await call('PUT', `/api/file?path=${q('a')}`, { ...big, revision: rev })).body.revision;
     await reader;
-    assert.deepEqual(await readdir(ws), ['a.dpx.json']);
+    assert.deepEqual((await readdir(ws)).filter((n) => n !== '.drawing'), ['a.dpx.json']); // `.drawing` holds version history
 
     // a failed write (stale) leaves the file untouched and no temp file behind
     const before = await readFile(join(ws, 'a.dpx.json'), 'utf8');
     assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { title: 'x', revision: 1 })).status, 409);
     assert.equal(await readFile(join(ws, 'a.dpx.json'), 'utf8'), before);
-    assert.deepEqual(await readdir(ws), ['a.dpx.json']);
+    assert.deepEqual((await readdir(ws)).filter((n) => n !== '.drawing'), ['a.dpx.json']); // `.drawing` holds version history
   });
 });
 
