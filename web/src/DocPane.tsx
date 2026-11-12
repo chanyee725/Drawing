@@ -7,6 +7,7 @@ import type { Block, TreeNode } from './api';
 import { TEMPLATES } from './dsl/templates';
 import { docExtensions, documentError } from './doc/extensions';
 import { DiagramEmbedView, DocContext, typeLabel } from './doc/DiagramView';
+import { FrameEmbedView } from './doc/FrameView';
 import { SlashCommands } from './doc/SlashMenu';
 import { WikiLinks } from './doc/WikiMenu';
 import { HeadingLinks } from './doc/HeadingLinks';
@@ -14,7 +15,7 @@ import { buildHash, fileItems, figureItems, headingItems, outlineOf, type WikiKi
 import { copyText } from './doc/clipboard';
 import { renderBlock } from './canvas/render';
 import type { ImageKind } from './export/actions';
-import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
+import { blockItems, blocksAfterHistory, frameItems, framesOf, frameNode, type CanvasEl, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
 
 type Props = {
   document: unknown;
@@ -38,6 +39,12 @@ type Props = {
   onBlocks: (b: Block[]) => void;
   /** Show a diagram block on the canvas. */
   onShow: (blockId: string) => void;
+  /** Canvas frames and what sits in them, for frame embeds. */
+  frameScene: CanvasEl[];
+  /** Diagram blocks inside canvas frames, with their position. */
+  frameBlocks: Block[];
+  /** Show a canvas frame on the canvas. */
+  onShowFrame: (frameId: string) => void;
   /** Export one embedded diagram. */
   onExportBlock: (block: Block, kind: ImageKind) => void;
 };
@@ -75,7 +82,7 @@ const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
  * Remounted per file (App keys it), so it reads `document` only when it starts. A document the
  * editor cannot read is never saved over: the pane shows an error and stays read-only.
  */
-export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, path, tree, onOpenFile, jump, onNotice, onDocument, onBlocks, onShow, onExportBlock }: Props) {
+export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, path, tree, onOpenFile, jump, onNotice, onDocument, onBlocks, onShow, frameScene, frameBlocks, onShowFrame, onExportBlock }: Props) {
   const getBlocksRef = useRef(getBlocks);
   getBlocksRef.current = getBlocks;
   const onDocumentRef = useRef(onDocument);
@@ -139,6 +146,9 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
             .insertContent([{ type: 'text', text: typed.trim(), marks: [{ type: 'link', attrs: { href } }] }, { type: 'text', text: ' ' }])
             .run();
         }
+        case 'frame':
+          // Like the diagram embed: the cursor goes to a new line below.
+          return item.frameId ? chain().insertContent(frameNode(item.frameId, item.frameName ?? '')).createParagraphNear().run() : chain().run();
         case 'diagram': {
           let id = item.blockId;
           if (!id) {
@@ -154,7 +164,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
       }
     };
     return [
-      ...docExtensions(DiagramEmbedView),
+      ...docExtensions(DiagramEmbedView, FrameEmbedView),
       Placeholder.configure({ placeholder: ({ editor }) => (editor.isEmpty ? '여기에 적어 보세요. /를 누르면 제목, 표, 다이어그램을 넣을 수 있어요' : '') }),
       HeadingLinks.configure({
         copy: (id) => {
@@ -174,7 +184,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
           else scrollToHeading(editorRef.current, target);
         },
       }),
-      SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(getBlocksRef.current(), typeLabel)], run }),
+      SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(getBlocksRef.current(), typeLabel), ...frameItems(framesOf(getCanvasRef.current()))], run }),
     ];
   }, []);
 
@@ -217,7 +227,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
   const [outlineOpen, setOutlineOpen] = useState(false);
   const outline = useEditorState({ editor, selector: (s) => (s.editor ? outlineOf(s.editor.getJSON()) : []) });
   const inTable = useEditorState({ editor, selector: (s) => !!s.editor?.isActive('table') });
-  const ctx = useMemo(() => ({ blocks, dark, onShow, onExport: onExportBlock }), [blocks, dark, onShow, onExportBlock]);
+  const ctx = useMemo(() => ({ blocks, frameScene, frameBlocks, dark, onShow, onShowFrame, onExport: onExportBlock }), [blocks, frameScene, frameBlocks, dark, onShow, onShowFrame, onExportBlock]);
 
   const tableActions: [string, () => boolean][] = [
     ['행 추가', () => editor.chain().focus().addRowAfter().run()],

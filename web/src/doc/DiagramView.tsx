@@ -8,9 +8,20 @@ import { layoutSig } from '../canvas/sync';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
 import { DiagramEmbed } from './extensions';
+import type { CanvasEl } from './model';
 
-export type DocCtx = { blocks: Block[]; dark: boolean; onShow: (blockId: string) => void; onExport: (block: Block, kind: ImageKind) => void };
-export const DocContext = createContext<DocCtx>({ blocks: [], dark: false, onShow: () => {}, onExport: () => {} });
+export type DocCtx = {
+  blocks: Block[];
+  /** Canvas frames and what sits in them (see frameScene), for frame embeds. */
+  frameScene: CanvasEl[];
+  /** Diagram blocks that sit inside a canvas frame, with their canvas position (see App). */
+  frameBlocks: Block[];
+  dark: boolean;
+  onShow: (blockId: string) => void;
+  onShowFrame: (frameId: string) => void;
+  onExport: (block: Block, kind: ImageKind) => void;
+};
+export const DocContext = createContext<DocCtx>({ blocks: [], frameScene: [], frameBlocks: [], dark: false, onShow: () => {}, onShowFrame: () => {}, onExport: () => {} });
 
 export const typeLabel = (type: string) => DIAGRAM_TYPES.find((t) => t.id === type)?.label ?? type;
 

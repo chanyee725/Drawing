@@ -10,6 +10,69 @@ export const DIAGRAM_NODE = 'diagram';
 
 const isDoc = (d: unknown): d is DocJSON => !!d && typeof d === 'object' && (d as { type?: unknown }).type === 'doc';
 
+/** Node name of an embedded canvas frame (its content, drawn read-only) in the document JSON. */
+export const FRAME_NODE = 'frameEmbed';
+
+export const frameNode = (frameId: string, name: string): DocNode => ({ type: FRAME_NODE, attrs: { frameId, name } });
+
+/** The part of an Excalidraw element the frame helpers read. */
+export type CanvasEl = { id: string; type: string; name?: string | null; frameId?: string | null; containerId?: string | null; isDeleted?: boolean; version?: number; x?: number; y?: number; width?: number; height?: number };
+
+const liveElements = (canvas: unknown): CanvasEl[] => {
+  const els = (canvas as { elements?: unknown } | null | undefined)?.elements;
+  return Array.isArray(els) ? (els as CanvasEl[]).filter((e) => e && typeof e === 'object' && typeof e.id === 'string' && !e.isDeleted) : [];
+};
+
+export type FrameInfo = { id: string; name: string; /** False for an unnamed frame, whose name is its number ("프레임 2"). */ named: boolean };
+
+/** Frames on the canvas, in canvas order. An unnamed frame is numbered by its place among the frames: 프레임 1, 프레임 2. */
+export function framesOf(canvas: unknown): FrameInfo[] {
+  return liveElements(canvas)
+    .filter((e) => e.type === 'frame' || e.type === 'magicframe')
+    .map((e, i) => {
+      const name = typeof e.name === 'string' ? e.name.trim() : '';
+      return name ? { id: e.id, name, named: true } : { id: e.id, name: `프레임 ${i + 1}`, named: false };
+    });
+}
+
+/** A frame as the document calls it: a given name reads "프레임 구조도", a numbered one stays "프레임 2". */
+export const frameLabel = (f: { name: string; named: boolean }) => (f.named ? `프레임 ${f.name}` : f.name);
+
+type Placed = { x: number; y: number; w: number; h: number };
+type FrameBox = { x: number; y: number; width: number; height: number };
+
+/** Blocks whose centre lies inside the frame: the diagram blocks a frame on the canvas holds (they are not in `canvas.elements`). */
+export function blocksInFrame<B extends Placed>(frame: FrameBox, blocks: readonly B[]): B[] {
+  return blocks.filter((b) => {
+    if (!(b.w > 0 && b.h > 0)) return false;
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    return cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height;
+  });
+}
+
+/** What a frame preview needs: the frame, what sits in it, and the text bound to those (a new array each call; callers compare with `frameSceneSig`). */
+export function frameScene<E extends CanvasEl>(elements: readonly E[]): E[] {
+  const live = elements.filter((e) => e && !e.isDeleted);
+  const frames = new Set(live.filter((e) => e.type === 'frame' || e.type === 'magicframe').map((e) => e.id));
+  const inside = new Set(live.filter((e) => e.frameId && frames.has(e.frameId)).map((e) => e.id));
+  return live.filter((e) => frames.has(e.id) || inside.has(e.id) || (e.containerId && inside.has(e.containerId)));
+}
+
+/** Changes whenever something a frame preview shows changes. */
+export const frameSceneSig = (scene: readonly CanvasEl[]) => scene.map((e) => `${e.id}:${e.version ?? 0}`).join(',');
+
+/** Where an embedded frame stands now: its current name (a rename follows), or gone. */
+export function resolveFrame(frames: readonly FrameInfo[], frameId: string): { name: string; named: boolean } | null {
+  const f = frames.find((x) => x.id === frameId);
+  return f ? { name: f.name, named: f.named } : null;
+}
+
+/** `/` menu entries for frames on the canvas. */
+export function frameItems(frames: readonly FrameInfo[]): SlashItem[] {
+  return frames.map((f) => ({ id: `frame:${f.id}`, command: 'frame', title: `프레임 넣기: ${f.name}`, hint: '캔버스에 있는 것', keywords: ['frame', 'figure', 'embed', '프레임', '그림', f.name], frameId: f.id, frameName: f.named ? f.name : '' }));
+}
+
 export const diagramNode = (blockId: string): DocNode => ({ type: DIAGRAM_NODE, attrs: { blockId } });
 
 /** Files written with this format version or later already have their own document (see server/workspace/model.js). */
@@ -63,8 +126,8 @@ export function embeddedBlockIds(document: unknown): string[] {
   return out;
 }
 
-export type SlashCommand = 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'task' | 'code' | 'table' | 'quote' | 'rule' | 'link' | 'diagram';
-export type SlashItem = { id: string; command: SlashCommand; title: string; hint: string; keywords: string[]; blockId?: string };
+export type SlashCommand = 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'task' | 'code' | 'table' | 'quote' | 'rule' | 'link' | 'diagram' | 'frame';
+export type SlashItem = { id: string; command: SlashCommand; title: string; hint: string; keywords: string[]; blockId?: string; frameId?: string; frameName?: string };
 
 export const SLASH_ITEMS: SlashItem[] = [
   { id: 'h1', command: 'h1', title: '제목 1', hint: '# 공백', keywords: ['h1', 'heading', 'title', '제목', '헤딩'] },
