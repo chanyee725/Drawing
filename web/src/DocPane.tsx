@@ -132,7 +132,7 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
       const json = e.getJSON();
       onDocumentRef.current(json);
       if (transaction.getMeta('history$')) {
-        const next = blocksAfterHistory(embeddedBlockIds(transaction.before.toJSON()), embeddedBlockIds(json), created.current, blocksRef.current);
+        const next = blocksAfterHistory(embeddedBlockIds(transaction.before.toJSON()), embeddedBlockIds(json), created.current, blocksRef.current, !!(transaction.getMeta('history$') as { redo?: boolean }).redo);
         if (next) onBlocksRef.current(next);
       }
     },

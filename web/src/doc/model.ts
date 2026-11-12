@@ -100,16 +100,17 @@ export function normalizeLink(input: string): string | null {
 /**
  * After an undo or redo in the document: blocks the document itself created (`created`, by id)
  * follow their embed. An undo that takes the embed away removes the block from the canvas too
- * (its latest state is kept in `created`); a redo that brings the embed back restores it.
+ * (its latest state is kept in `created`); a redo that brings the embed back restores it. A redo
+ * that takes an embed away (it redoes a delete done by hand) leaves the block alone, as that delete did.
  * Returns the new block list, or null when nothing changes.
  */
-export function blocksAfterHistory(before: readonly string[], after: readonly string[], created: Map<string, Block>, blocks: readonly Block[]): Block[] | null {
+export function blocksAfterHistory(before: readonly string[], after: readonly string[], created: Map<string, Block>, blocks: readonly Block[], redo = false): Block[] | null {
   const was = new Set(before);
   const now = new Set(after);
   let next = [...blocks];
   let changed = false;
   for (const id of was) {
-    if (now.has(id) || !created.has(id)) continue;
+    if (redo || now.has(id) || !created.has(id)) continue;
     const b = next.find((x) => x.id === id);
     if (!b) continue;
     created.set(id, b);
