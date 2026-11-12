@@ -62,3 +62,16 @@ test('a node named title-… is not a title, and quoted values read bare', () =>
   assert.equal(readGlobal('typeface "mono"\nA', 'typeface'), 'mono');
   assert.equal(writeGlobal('colorMode bold   // keep me\nA', 'colorMode', 'outline'), 'colorMode outline   // keep me\nA');
 });
+
+test('each picker default draws the same as leaving the line out', async () => {
+  const { renderDiagram } = await import('../../shared/render/index.ts');
+  const { defaultFor } = await import('../../web/src/dsl/globals.ts');
+  const body = 'A [icon: server] > B: go\nB > C';
+  for (const type of ['flowchart', 'architecture'] as const) {
+    const plain = (await renderDiagram(body, { type })).svg;
+    for (const def of propsFor(type)) {
+      const withLine = (await renderDiagram(`${def.key} ${defaultFor(def, type)}\n${body}`, { type })).svg;
+      assert.equal(withLine, plain, `${type} ${def.key} default ${defaultFor(def, type)}`);
+    }
+  }
+});
