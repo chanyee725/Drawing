@@ -164,3 +164,28 @@ export function findFreeSpot(w: number, h: number, taken: readonly Rect[], gap =
   // Unreachable: the spot below the lowest rect is always free. Kept as a safe fallback.
   return { x: minX, y: round(Math.max(...taken.map((r) => r.y + r.h)) + gap) };
 }
+
+export const newBlockId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
+
+/**
+ * Live block images that show a block another image already shows: copies made by duplicate,
+ * paste or alt-drag, which keep `customData.blockId`. One image per block stays its owner
+ * (`owners`, block id → element id, updated in place); every other one is returned as a copy.
+ */
+export function findCopies(elements: readonly SceneEl[], owners: Map<string, string>): { id: string; blockId: string }[] {
+  const groups = new Map<string, SceneEl[]>();
+  for (const el of elements) {
+    const bid = blockIdOf(el);
+    if (bid === null || el.isDeleted) continue;
+    const g = groups.get(bid);
+    if (g) g.push(el);
+    else groups.set(bid, [el]);
+  }
+  const copies: { id: string; blockId: string }[] = [];
+  for (const [bid, els] of groups) {
+    const owner = els.find((e) => e.id === owners.get(bid)) ?? els[0];
+    owners.set(bid, owner.id);
+    for (const e of els) if (e !== owner) copies.push({ id: e.id, blockId: bid });
+  }
+  return copies;
+}

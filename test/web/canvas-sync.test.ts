@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from '../../web/src/canvas/sync.ts';
+import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from '../../web/src/canvas/sync.ts';
 
 const block = (id: string, x = 0) => ({ id, type: 'flowchart', code: 'A > B', x, y: 0, w: 200, h: 100 });
 const img = (id: string, x: number, extra: Partial<SceneEl> = {}): SceneEl => ({ id: `blk_${id}`, type: 'image', x, y: 0, width: 200, height: 100, customData: { blockId: id }, ...extra });
@@ -108,4 +108,19 @@ test('findFreeSpot fills a gap next to existing content before going far away', 
 
 test('rectOf normalizes negative line sizes', () => {
   assert.deepEqual(rectOf({ x: 10, y: 10, width: -5, height: 20 }), { x: 5, y: 10, w: 5, h: 20 });
+});
+
+test('findCopies keeps the known image as owner and reports the others', () => {
+  const owners = new Map<string, string>();
+  assert.deepEqual(findCopies([img('a', 0), rect('r1')], owners), []);
+  assert.equal(owners.get('a'), 'blk_a');
+  const copy = img('a', 300, { id: 'copy1' });
+  assert.deepEqual(findCopies([copy, img('a', 0), img('b', 0)], owners), [{ id: 'copy1', blockId: 'a' }]);
+  assert.equal(owners.get('a'), 'blk_a');
+});
+
+test('findCopies ignores deleted images and hands ownership to a live one', () => {
+  const owners = new Map([['a', 'blk_a']]);
+  assert.deepEqual(findCopies([img('a', 0, { isDeleted: true }), img('a', 5, { id: 'pasted' })], owners), []);
+  assert.equal(owners.get('a'), 'pasted');
 });

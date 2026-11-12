@@ -36,3 +36,8 @@ body {
 .block-selected .excalidraw .HintViewer {
   display: none;
 }
+
+/* The web-embed tool (right after "frame" in the extra-tools menu) is off: embeds would load outside pages. */
+.excalidraw [data-testid="toolbar-frame"] + [data-testid="toolbar-embeddable"] {
+  display: none;
+}

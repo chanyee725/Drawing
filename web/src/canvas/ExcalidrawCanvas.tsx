@@ -9,7 +9,7 @@ import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
 import { DIAGRAM_TYPES, isDiagramType } from '../dsl/templates';
 import { renderBlock, type BlockPicture } from './render';
-import { applyScene, blockIdOf, blockImageSkeleton, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 
@@ -44,6 +44,8 @@ const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: false },
   tools: { image: false },
 };
+// Web embeds load third-party pages in iframes; the canvas makes no outbound requests.
+const NO_EMBEDS = () => false;
 
 export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
@@ -62,6 +64,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
   const sigRef = useRef<string | null>(null);
   // Blocks removed by deleting their image, kept so undo can bring them back.
   const graveyard = useRef(new Map<string, Block>());
+  // Block id → the one image element that shows it; other images with that block id are copies.
+  const owners = useRef(new Map<string, string>());
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
+  apiRef.current = api;
 
   // Built once per mount (CanvasPane remounts on file switch/reload).
   const initialData = useMemo(
@@ -131,11 +137,33 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
     };
   }, [api, blocks]);
 
-  const handleChange = useCallback((elements: readonly ExcalidrawElement[], appState: AppState) => {
-    const sel = elements.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
+  const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
+    const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
     setBlockSelected(sel.length > 0 && sel.every((e) => blockIdOf(e as unknown as SceneEl) !== null));
+    let elements = sceneEls;
+    let cur = blocksRef.current;
+    // A copied block image (duplicate, paste, alt-drag) becomes a new block with the same code.
+    const copies = findCopies(elements as unknown as readonly SceneEl[], owners.current);
+    const xapi = apiRef.current;
+    if (copies.length && xapi) {
+      const retag = new Map<string, string>();
+      const added: Block[] = [];
+      for (const c of copies) {
+        const src = cur.find((b) => b.id === c.blockId);
+        if (!src) continue;
+        const id = newBlockId();
+        retag.set(c.id, id);
+        owners.current.set(id, c.id);
+        // Geometry comes from the image below (applyScene).
+        added.push({ ...src, id });
+      }
+      if (retag.size) {
+        elements = elements.map((e) => (retag.has(e.id) ? newElementWith(e, { customData: { ...e.customData, blockId: retag.get(e.id)! } }) : e));
+        cur = [...cur, ...added];
+        xapi.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+      }
+    }
     const split = splitScene(elements as unknown as readonly SceneEl[]);
-    const cur = blocksRef.current;
     for (const b of cur) if (split.deleted.has(b.id)) graveyard.current.set(b.id, b);
     let next = applyScene(cur, split);
     // An image came back (undo) for a block that was deleted on the canvas.
@@ -157,7 +185,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
       sigRef.current = sig;
       patch.canvas = { ...canvasRef.current, elements: split.free as unknown[] };
     }
-    if (next !== cur) patch.blocks = [...next];
+    if (next !== blocksRef.current) patch.blocks = [...next];
     if (patch.canvas || patch.blocks) onChangeRef.current(patch);
   }, []);
 
@@ -211,6 +239,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
         theme={theme(dark)}
         langCode="ko-KR"
         UIOptions={UI_OPTIONS}
+        validateEmbeddable={NO_EMBEDS}
+        aiEnabled={false}
       />
       {block && (
         <aside
