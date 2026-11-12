@@ -48,7 +48,7 @@ npm start -- <작업 폴더>
 
 | 문법 | 뜻 |
 |---|---|
-| `Name [icon: aws-ec2, color: blue]` | 노드와 속성. 속성은 `icon`, `color`, `label`, `shape` |
+| `Name [icon: aws-ec2, color: blue]` | 노드와 속성. 주요 속성은 `icon`, `color`, `label`, `shape` |
 | `Group { ... }` | 그룹. 안에 그룹을 또 넣을 수 있어요 |
 | `A > B`, `A < B`, `A <> B`, `A - B`, `A -- B`, `A --> B` | 연결. `A > B > C` 처럼 이어 쓸 수 있어요 |
 | `A > B: 라벨 [color: red]` | 연결 라벨과 속성 |
@@ -145,13 +145,13 @@ users.teamId > teams.id: [color: green]
 
 Mac에서는 Ctrl 대신 ⌘ 을 써요. `Ctrl/⌘+K` 로 여는 명령 팔레트에서도 같은 동작을 찾을 수 있어요.
 
-항상 쓸 수 있는 키:
+어디서나 쓰는 키 (내보내기와 복사는 파일을 연 상태에서, 글을 쓰는 중이 아닐 때):
 
 | 키 | 동작 |
 |---|---|
 | Ctrl/⌘+K | 명령 팔레트 |
-| Ctrl/⌘+E | 내보내기 메뉴 (글을 쓰는 중에는 에디터가 먼저 가져가요) |
-| Shift+Alt+C | 캔버스를 이미지로 복사 |
+| Ctrl/⌘+E | 내보내기 메뉴 (창 너비 768px 이상) |
+| Shift+Alt+C (Mac은 Shift+Option+C) | 캔버스를 이미지로 복사 |
 
 캔버스에 포커스가 있을 때:
 
