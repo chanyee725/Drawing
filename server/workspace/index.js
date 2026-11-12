@@ -52,7 +52,7 @@ export async function setup(ctx) {
     async handler(req, res, _ctx, _m, url) {
       try {
         const body = method === 'GET' || method === 'DELETE' ? null : await readJson(req);
-        send(res, okStatus, await fn(url.searchParams.get('path'), body));
+        send(res, okStatus, await fn(url.searchParams.get('path'), body, url.searchParams));
       } catch (e) {
         const err = toStoreError(e);
         if (!(err instanceof StoreError)) throw err;
@@ -78,6 +78,10 @@ export async function setup(ctx) {
       route('DELETE', '/api/file', (p) => store.removeFile(need(p, 'path'))),
       route('POST', '/api/folder', (_p, b) => store.createFolder(need(b?.path, 'path')), 201),
       route('DELETE', '/api/folder', (p) => store.removeFolder(need(p, 'path'))),
+      route('GET', '/api/history', (p) => store.history(need(p, 'path'))),
+      route('GET', '/api/history/version', (p, _b, q) => store.historyVersion(need(p, 'path'), q.get('id'))),
+      // Snapshot the file as it is on disk now (before a restore); ignores the 5-minute interval.
+      route('POST', '/api/history', (p) => store.historySnapshotNow(need(p, 'path'))),
       // body: {from, to, type?: 'file'|'folder'}; without type a file wins over a same-named folder
       route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type)),
     ],

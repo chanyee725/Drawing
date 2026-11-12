@@ -58,6 +58,13 @@ export function createResolver(rootDir) {
     }
   }
 
+  /** Absolute path for an internal location (`.drawing/...`): fixed segments only, same symlink/escape checks as `resolve`. */
+  async function resolveInternal(...segs) {
+    const abs = join(root, ...segs);
+    await assertInside(abs);
+    return abs;
+  }
+
   const toRel = (abs) => abs.slice(root.length + 1).split(sep).join('/');
-  return { root, resolve, toRel };
+  return { root, resolve, resolveInternal, toRel };
 }

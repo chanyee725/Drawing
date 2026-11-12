@@ -19,7 +19,16 @@ const sha = (text) => createHash('sha256').update(text).digest('hex');
 const MAX_TOMBSTONES = 1000;
 const isDpx = (name) => name.endsWith(FILE_EXT) && name.length > FILE_EXT.length;
 
-export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 60, watchFn = watch } = {}) {
+// Version history: snapshots of saved files live in a hidden folder inside the workspace (never listed in the tree).
+export const HISTORY_DIR = ['.drawing', 'history'];
+export const HISTORY_INTERVAL_MS = 5 * 60 * 1000;
+export const HISTORY_MAX = 50;
+const SNAPSHOT_ID = /^\d{13}$/;
+
+export function createStore(
+  workspaceDir,
+  { onExternalChange, watchDebounceMs = 60, watchFn = watch, now = Date.now, historyIntervalMs = HISTORY_INTERVAL_MS, historyMax = HISTORY_MAX } = {},
+) {
   const fsr = createResolver(workspaceDir);
   const known = new Map(); // rel file path -> { hash, revision } of the content we last wrote or saw
   const knownDirs = new Set();
@@ -111,6 +120,115 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   }
 
   const serialize = (file) => JSON.stringify(file, null, 2) + '\n';
+
+  // ---- version history ----
+  // `.drawing/history/<file path>/<ms timestamp>.json` holds the file as it was on disk just before a save
+  // overwrote it (the timestamp is that save's time), so the end of each edit session is kept.
+  // History is a convenience: a failure here never fails the save, delete or move it belongs to.
+  const historyDirOf = async (rel) => {
+    try {
+      return await fsr.resolveInternal(...HISTORY_DIR, ...rel.split('/'));
+    } catch (err) {
+      if (err instanceof PathError) throw new StoreError(400, err.message);
+      throw err;
+    }
+  };
+
+  async function snapshotIds(dir) {
+    try {
+      return (await readdir(dir)).filter((n) => n.endsWith('.json') && SNAPSHOT_ID.test(n.slice(0, -5))).map((n) => n.slice(0, -5)).sort();
+    } catch {
+      return [];
+    }
+  }
+
+  const sameContent = (a, b) => {
+    try {
+      const { revision: _a, ...x } = parseStored(a);
+      const { revision: _b, ...y } = parseStored(b);
+      return JSON.stringify(x) === JSON.stringify(y);
+    } catch {
+      return false;
+    }
+  };
+
+  // Keep `text` as a snapshot of `rel` unless the newest one is younger than the interval (or `force`) or has the same content.
+  async function snapshot(rel, text, { force = false } = {}) {
+    const dir = await historyDirOf(rel);
+    const ids = await snapshotIds(dir);
+    const last = ids[ids.length - 1];
+    if (last !== undefined) {
+      if (!force && now() - Number(last) < historyIntervalMs) return null;
+      try {
+        if (sameContent(await readFile(join(dir, `${last}.json`), 'utf8'), text)) return last;
+      } catch {}
+    }
+    let id = Math.max(now(), last === undefined ? 0 : Number(last) + 1);
+    id = String(id).padStart(13, '0');
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, `${id}.json`), text, { mode: 0o644 });
+    ids.push(id);
+    for (const old of ids.slice(0, Math.max(0, ids.length - historyMax))) await unlink(join(dir, `${old}.json`)).catch(() => {});
+    return id;
+  }
+
+  const snapshotQuietly = (rel, text) => snapshot(rel, text).catch(() => null);
+
+  async function history(rel) {
+    rel = checkedFileRel(rel);
+    await wrapPath(rel);
+    const dir = await historyDirOf(rel);
+    const versions = [];
+    for (const id of (await snapshotIds(dir)).reverse()) {
+      try {
+        versions.push({ id, time: Number(id), bytes: (await stat(join(dir, `${id}.json`))).size });
+      } catch {}
+    }
+    return { path: rel, versions };
+  }
+
+  async function historyVersion(rel, id) {
+    rel = checkedFileRel(rel);
+    await wrapPath(rel);
+    if (typeof id !== 'string' || !SNAPSHOT_ID.test(id)) throw new StoreError(400, 'invalid version id');
+    const dir = await historyDirOf(rel);
+    let text;
+    try {
+      text = await readFile(join(dir, `${id}.json`), 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') throw new StoreError(404, 'version not found');
+      throw err;
+    }
+    try {
+      return { path: rel, id, time: Number(id), ...parseStored(text) };
+    } catch (err) {
+      if (err instanceof ValidationError) throw new StoreError(422, `unreadable version: ${err.message}`);
+      throw err;
+    }
+  }
+
+  // Snapshot what is on disk now, ignoring the interval (before a restore).
+  async function historySnapshotNow(rel) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    return serial(async () => {
+      const { text } = await loadStored(abs);
+      return { path: rel, id: await snapshot(rel, text, { force: true }) };
+    });
+  }
+
+  // A file or folder moved: its history moves with it (best effort); one deleted: its history goes too.
+  async function moveHistory(from, to) {
+    try {
+      const fromDir = await historyDirOf(from);
+      if (!(await statOrNull(fromDir))) return;
+      const toDir = await historyDirOf(to);
+      await rm(toDir, { recursive: true, force: true });
+      await mkdir(dirname(toDir), { recursive: true });
+      await rename(fromDir, toDir);
+    } catch {}
+  }
+  const dropHistory = (rel) => historyDirOf(rel).then((d) => rm(d, { recursive: true, force: true })).catch(() => {});
 
   // ---- tree ----
   async function walk(absDir, relDir) {
@@ -211,7 +329,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       throw err;
     }
     return serial(async () => {
-      const { file: current } = await syncExternal(rel, await loadStored(abs), abs);
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
       // A newer format than this server knows: writing would store it back as ours and drop what it added.
       if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
       if (current.revision !== base) {
@@ -219,6 +337,8 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       }
       const next = { ...content, revision: current.revision + 1 };
       const text = serialize(next);
+      // Keep what is on disk before overwriting it, so the end state of an edit session stays reachable.
+      await snapshotQuietly(rel, before);
       await atomicWrite(abs, text);
       known.set(rel, { hash: sha(text), revision: next.revision });
       return { path: rel, revision: next.revision };
@@ -284,6 +404,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     await rename(fromAbs, toAbs);
     forget(from, false);
     await adopt(toRel, toAbs);
+    await moveHistory(from, toRel);
     return { path: toRel };
   }
 
@@ -297,6 +418,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     forget(from, true);
     knownDirs.add(toRel);
     await scan(toAbs, toRel);
+    await moveHistory(from, toRel);
     return { path: toRel };
   }
 
@@ -332,6 +454,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
       await unlink(abs);
       forget(rel, false);
+      await dropHistory(rel);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
       return { path: rel };
     });
@@ -345,6 +468,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
       await rm(abs, { recursive: true });
       forget(rel, true);
+      await dropHistory(rel);
       // `from`: other tabs with a file under this folder open must close it (same shape as a folder move).
       onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       return { path: rel };
@@ -476,5 +600,5 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     return queue;
   }
 
-  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, startWatching, close };
+  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, history, historyVersion, historySnapshotNow, startWatching, close };
 }

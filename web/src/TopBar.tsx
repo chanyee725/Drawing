@@ -21,9 +21,11 @@ type Props = {
   onToggleNav?: () => void;
   /** The export button and its menu. */
   exportMenu?: ReactNode;
+  /** Opens the version history of the open file. */
+  onHistory?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu, onHistory }: Props) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4" style={{ borderColor: 'var(--border)' }}>
       {onToggleNav && (
@@ -68,6 +70,18 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
           </button>
         ))}
       </div>
+      {onHistory && (
+        <button
+          type="button"
+          onClick={onHistory}
+          disabled={!hasFile}
+          aria-haspopup="dialog"
+          className="h-8 shrink-0 whitespace-nowrap rounded-md border px-2 text-sm disabled:opacity-50 md:px-3"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          버전 기록
+        </button>
+      )}
       {exportMenu}
     </header>
   );
