@@ -25,6 +25,20 @@ Paths are relative to the workspace, `/`-separated. No `..`, absolute paths, hid
 - Saving rewrites the file from the fields the server knows (`normalizeContent`), so fields added by a newer version or by hand are dropped. A file with a newer `version` is never rewritten.
 - If the server cannot watch the folder (for example EACCES or the OS watch limit), it logs one line and goes on without outside-change events.
 
+## Block `layout`
+
+A block may carry `layout`, the node positions a user moved on top of the automatic layout (design: `docs/design/block-drag-edit.md`). Files that have it are format `version` 3; older files are read as they are and stored as v3 on the next save. An older server treats v3 files as read-only (422).
+
+```jsonc
+"layout": { "v": 1, "basis": { "type": "cloud-architecture", "direction": "right", "count": 3 },
+            "items": { "API": { "cx": 212.5, "cy": 96, "parent": "VPC" } } }
+```
+
+- Optional. Without it (or with empty `items`) the block draws with the automatic layout.
+- `v`: integer >= 1. `items`: at most 2000 entries; keys 1-200 characters, never `__proto__`; each value needs numeric `cx`, `cy` and a string `parent` (at most 200 characters). `basis`: string `type` and `direction` (at most 200 characters each), integer `count` >= 0. `basis.type` is the parsed diagram type (for example `cloud-architecture`), not the block `type`.
+- A `PUT` with an invalid `layout` gets 400. A stored file whose `layout` is invalid still reads; only that layout is dropped.
+- Unknown fields inside a `v` 1 layout are dropped. A layout with a `v` newer than the server knows is kept verbatim (only checked to be an object with an integer `v`), so a newer client's layout is never wiped.
+
 ## Errors
 
 Filesystem conflicts map to 400/409 (`ENOTDIR`, `EISDIR`, `EEXIST`, `ENOTEMPTY`). Responses and server logs never contain absolute paths.

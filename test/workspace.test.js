@@ -526,6 +526,10 @@ test('block layout: valid layouts round-trip, unknown fields are dropped, bad on
       { v: 1, items: { ['k'.repeat(201)]: { cx: 0, cy: 0, parent: '' } } },
       { v: 1, basis: { type: 'a', direction: 'right', count: -1 } },
       { v: 1, basis: { type: 'a', count: 1 } },
+      JSON.parse('{"v":1,"items":{"__proto__":{"cx":0,"cy":0,"parent":""}}}'),
+      { v: 1, items: { A: { cx: 0, cy: 0, parent: 'p'.repeat(201) } } },
+      { v: 1, basis: { type: 't'.repeat(201), direction: 'right', count: 1 } },
+      { v: 1, basis: { type: 'a', direction: 'd'.repeat(201), count: 1 } },
     ];
     let rev = 3;
     for (const l of bad) {
@@ -534,6 +538,21 @@ test('block layout: valid layouts round-trip, unknown fields are dropped, bad on
     const many = {};
     for (let i = 0; i < 2001; i++) many[`n${i}`] = { cx: 0, cy: 0, parent: '' };
     assert.equal((await put({ ...blk, layout: { v: 1, items: many } }, rev)).status, 400);
+  });
+});
+
+test('block layout: 200-character names are the limit and a "__proto__" key is refused by name', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const blk = { id: 'b1', type: 'architecture', code: 'A', x: 0, y: 0, w: 10, h: 10 };
+    const n = 'n'.repeat(200);
+    const layout = { v: 1, basis: { type: 't'.repeat(200), direction: 'd'.repeat(200), count: 1 }, items: { [n]: { cx: 0, cy: 0, parent: 'p'.repeat(200) } } };
+    assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { revision: 1, blocks: [{ ...blk, layout }] })).status, 200);
+    assert.deepEqual((await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0].layout, layout);
+    const proto = JSON.parse('{"v":1,"items":{"__proto__":{"cx":0,"cy":0,"parent":""}}}');
+    const r = await call('PUT', `/api/file?path=${q('a')}`, { revision: 2, blocks: [{ ...blk, layout: proto }] });
+    assert.equal(r.status, 400);
+    assert.match(JSON.stringify(r.body), /__proto__/);
   });
 });
 
@@ -556,6 +575,20 @@ test('a stored file with a broken layout still reads; only that layout is droppe
   const f = parseStored(text);
   assert.equal('layout' in f.blocks[0], false);
   assert.deepEqual(f.blocks[1].layout, { v: 1, items: { B: { cx: 1, cy: 2, parent: '' } } });
+});
+
+test('a v2 file reads as is and its next save is stored as v3 with a layout', async () => {
+  const { parseStored, normalizeContent, FORMAT_VERSION } = await import('../server/workspace/model.js');
+  const blk = { id: 'b1', type: 'flowchart', code: 'a', x: 0, y: 0, w: 1, h: 1 };
+  const v2 = JSON.stringify({ version: 2, title: 't', document: { type: 'doc', content: [] }, canvas: {}, revision: 4, blocks: [blk] });
+  const f = parseStored(v2);
+  assert.equal(f.version, 2);
+  assert.equal('layout' in f.blocks[0], false);
+  const layout = { v: 1, basis: { type: 'flowchart', direction: 'right', count: 1 }, items: { a: { cx: 1, cy: 2, parent: '' } } };
+  const saved = normalizeContent({ ...f, blocks: [{ ...f.blocks[0], layout }] });
+  assert.equal(saved.version, FORMAT_VERSION);
+  assert.equal(saved.version, 3);
+  assert.deepEqual(saved.blocks[0].layout, layout);
 });
 
 test('a file reads back with the version it was written with; a write stores the current one', async () => {

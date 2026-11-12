@@ -1,10 +1,7 @@
 // Client for the E1 workspace API (docs/workspace-api.md).
 // Node position overrides for a block (docs/design/block-drag-edit.md §2.1). Keys of `items` are node or empty-group names.
-export type BlockLayout = {
-  v: number;
-  basis?: { type: string; direction: string; count: number };
-  items?: Record<string, { cx: number; cy: number; parent: string }>;
-};
+export type { BlockLayout } from '../../shared/render/block-layout.ts';
+import type { BlockLayout } from '../../shared/render/block-layout.ts';
 // Newest file format this web build understands; a 422 on a file above it means a newer app wrote it.
 export const FILE_FORMAT_VERSION = 3;
 export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout };

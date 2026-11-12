@@ -1,7 +1,9 @@
 // Seam between the editor and the parser/renderer. The editor only calls `analyzeDiagram`.
 // Parsing uses shared/dsl (E2); the live preview uses shared/render (E3) via `renderPreview`.
 import { parse, type DiagramType as ParserType, type Diagram } from '../../../shared/dsl/index.ts';
-import { renderDiagram, sceneToSvg, type Scene } from '../../../shared/render/index.ts';
+import { renderDiagram, sceneToSvg, type BlockLayout, type Scene } from '../../../shared/render/index.ts';
+import { reconcileForSave, reconcileLayout, type ReconcileReason } from '../../../shared/render/overrides.ts';
+import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
 
 export type Diagnostic = {
   /** 1-based line */
@@ -56,18 +58,49 @@ export type Preview = {
 };
 
 type PreviewTheme = 'light' | 'dark';
-export type RenderOutcome = { svg: string; diagnostics: Diagnostic[]; scene: Scene; theme: PreviewTheme };
+export type RenderOutcome = {
+  svg: string;
+  diagnostics: Diagnostic[];
+  scene: Scene;
+  theme: PreviewTheme;
+  /** Set when the code changed so much that the saved layout was left out of this drawing (design §4.2). */
+  reset?: ReconcileReason;
+};
 
 /** Render the code to SVG. Returns null for unsupported types or when rendering fails. */
-export async function renderPreview(type: string, code: string, theme: PreviewTheme): Promise<RenderOutcome | null> {
+export async function renderPreview(type: string, code: string, theme: PreviewTheme, layout?: BlockLayout): Promise<RenderOutcome | null> {
   const pt = parserType(type);
   if (!pt) return null;
   try {
-    const { svg, diagnostics, scene } = await renderDiagram(code, { type: pt, theme });
-    return { svg, diagnostics, scene, theme };
+    if (!layout) {
+      const { svg, diagnostics, scene } = await renderDiagram(code, { type: pt, theme });
+      return { svg, diagnostics, scene, theme };
+    }
+    // Drawing never changes the file: overrides the code no longer fits are left out here and pruned on save.
+    const { ast, diagnostics } = parse(code, pt);
+    const kept = ast.type === 'sequence' || ast.type === 'erd' ? { layout: undefined } : reconcileLayout(ast, layout);
+    const { svg, scene } = await renderDiagram(ast, { theme, layout: kept.layout });
+    return { svg, diagnostics, scene, theme, ...('reset' in kept && kept.reset ? { reset: kept.reset } : {}) };
   } catch {
     return null;
   }
+}
+
+/**
+ * The block with its layout cleaned up for the code it has now (design §4.3), or null when the file would not change.
+ * Only for code that parses cleanly: with errors the canvas shows the last good picture, so nothing is pruned.
+ */
+export function prunedLayout<B extends { type: string; code: string; layout?: BlockLayout }>(b: B): B | null {
+  // A layout of an unknown version is read-only: never wiped or rewritten (design §2.1).
+  if (!b.layout || b.layout.v !== BLOCK_LAYOUT_VERSION) return null;
+  const { ast, diagnostics, parsed } = analyzeDiagram(b.type, b.code);
+  if (!parsed || !ast || diagnostics.some((d) => d.severity === 'error')) return null;
+  const { layout: _drop, ...rest } = b;
+  // A layout only belongs to graph diagrams; after switching to another kind it is dead weight.
+  if (ast.type === 'sequence' || ast.type === 'erd') return rest as B;
+  const r = reconcileForSave({ ast, diagnostics }, b.layout);
+  if (!r.changed) return null;
+  return (r.layout ? { ...rest, layout: r.layout } : rest) as B;
 }
 
 /**

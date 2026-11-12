@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from 'react';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import type { Block } from '../api';
 import type { ImageKind } from '../export/actions';
+import { layoutSig } from '../canvas/sync';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
 import { DiagramEmbed } from './extensions';
@@ -28,7 +29,7 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
     };
     // Redraw only when what the picture depends on changes, not when the block moves on the canvas.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [block?.id, block?.type, block?.code, theme]);
+  }, [block?.id, block?.type, block?.code, layoutSig(block?.layout), theme]);
 
   const label = block ? `${typeLabel(block.type)} 다이어그램` : '다이어그램';
   return (
