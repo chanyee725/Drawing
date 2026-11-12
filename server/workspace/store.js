@@ -22,6 +22,9 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   const fsr = createResolver(workspaceDir);
   const known = new Map(); // rel file path -> { hash, revision } of the content we last wrote or saw
   const knownDirs = new Set();
+  // rel file path -> last revision seen before the file was deleted or moved away, so a file that
+  // reappears at that path starts above it and clients holding the old revision get 409.
+  const tombstones = new Map();
   let queue = Promise.resolve();
   let watcher = null;
   const timers = new Map();
@@ -126,7 +129,12 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         } catch {
           // unreadable file still shows up so it can be renamed or deleted
         }
-        const st = await stat(join(absDir, e.name));
+        let st;
+        try {
+          st = await stat(join(absDir, e.name));
+        } catch {
+          continue; // removed or unreadable between readdir and stat
+        }
         out.push({ type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString() });
       }
     }
@@ -140,12 +148,14 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   async function createFile(rel, { title } = {}) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
-    const file = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
+    const fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
     return serial(async () => {
       await ensureParent(abs);
+      const file = { ...fresh, revision: Math.max(fresh.revision, (tombstones.get(rel) ?? 0) + 1) };
       const text = serialize(file);
       await atomicWrite(abs, text, { exclusive: true });
       known.set(rel, { hash: sha(text), revision: file.revision });
+      tombstones.delete(rel);
       return { path: rel, ...file };
     });
   }
@@ -162,7 +172,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   // If the file was edited outside without raising its revision, raise it here so a client that
   // loaded the old content cannot overwrite the outside edit with a "current" revision.
   async function syncExternal(rel, loaded, abs) {
-    const k = known.get(rel);
+    const k = known.get(rel) ?? (tombstones.has(rel) ? { hash: null, revision: tombstones.get(rel) } : null);
     const h = sha(loaded.text);
     if (!k || k.hash === h) return loaded;
     let file = loaded.file;
@@ -173,6 +183,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       await atomicWrite(abs, text);
     }
     known.set(rel, { hash: sha(text), revision: file.revision });
+    tombstones.delete(rel);
     return { text, file };
   }
 
@@ -203,6 +214,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
 
   async function createFolder(rel) {
     parseOrThrow(rel);
+    if (rel.split('/').some(isDpx)) throw new StoreError(400, `folder names cannot end with ${FILE_EXT}`);
     const abs = await wrapPath(rel);
     return serial(async () => {
       if (await statOrNull(abs)) throw new StoreError(409, 'already exists');
@@ -251,7 +263,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     await mkdir(dirname(toAbs), { recursive: true });
     await rename(fromAbs, toAbs);
     forget(from, false);
-    known.set(toRel, await knownEntry(toAbs));
+    await adopt(toRel, toAbs);
     return { path: toRel };
   }
 
@@ -274,6 +286,21 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       revision = parseStored(text).revision;
     } catch {}
     return { hash: sha(text), revision };
+  }
+
+  // Record a file that arrived at `rel` by a move; raise its revision above a tombstone there.
+  async function adopt(rel, abs) {
+    const entry = await knownEntry(abs);
+    const floor = tombstones.get(rel);
+    if (floor !== undefined && entry.revision > 0 && entry.revision <= floor) {
+      const file = { ...parseStored(await readFile(abs, 'utf8')), revision: floor + 1 };
+      const text = serialize(file);
+      await atomicWrite(abs, text);
+      known.set(rel, { hash: sha(text), revision: file.revision });
+    } else {
+      known.set(rel, floor !== undefined && entry.revision === 0 ? { ...entry, revision: floor } : entry);
+    }
+    tombstones.delete(rel);
   }
 
   async function removeFile(rel) {
@@ -301,9 +328,15 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   }
 
   function forget(rel, isDir) {
-    if (!isDir) return void known.delete(rel);
+    const bury = (k) => {
+      const e = known.get(k);
+      if (!e) return;
+      tombstones.set(k, Math.max(e.revision, tombstones.get(k) ?? 0));
+      known.delete(k);
+    };
+    if (!isDir) return void bury(rel);
     knownDirs.delete(rel);
-    for (const k of [...known.keys()]) if (k.startsWith(rel + '/')) known.delete(k);
+    for (const k of [...known.keys()]) if (k.startsWith(rel + '/')) bury(k);
     for (const k of [...knownDirs]) if (k.startsWith(rel + '/')) knownDirs.delete(k);
   }
 
@@ -323,7 +356,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         await scan(join(absDir, e.name), rel);
       } else if (e.isFile() && isDpx(e.name)) {
         try {
-          known.set(rel, await knownEntry(join(absDir, e.name)));
+          await adopt(rel, join(absDir, e.name));
         } catch {}
       }
     }
@@ -343,7 +376,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     if (st?.isSymbolicLink()) return;
     if (!st) {
       if (known.has(rel)) {
-        known.delete(rel);
+        forget(rel, false);
         onExternalChange?.({ kind: 'delete', path: rel });
       } else if (knownDirs.has(rel)) {
         forget(rel, true);
@@ -372,13 +405,15 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     }
     const prev = known.get(rel);
     if (prev?.hash === sha(loaded.text)) return; // our own write
-    if (!prev || !loaded.file) {
-      known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? prev?.revision ?? 0 });
+    const floor = prev?.revision ?? tombstones.get(rel);
+    if (!loaded.file || floor === undefined) {
+      known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? floor ?? 0 });
+      tombstones.delete(rel);
       onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: loaded.file?.revision ?? null });
       return;
     }
     const { file } = await syncExternal(rel, loaded, abs); // raises the revision if the editor did not
-    onExternalChange?.({ kind: 'change', path: rel, revision: file.revision });
+    onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: file.revision });
   }
 
   async function startWatching() {

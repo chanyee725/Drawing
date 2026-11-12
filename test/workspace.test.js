@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, stat, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.js';
 import { modules } from '../server/modules.js';
+import { newFile } from '../server/workspace/model.js';
+import { createStore } from '../server/workspace/store.js';
 
 async function withApp(fn) {
   const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
@@ -363,6 +365,65 @@ test('outside save of broken JSON then valid JSON with the same revision: old-re
     } finally {
       await sse.stop();
     }
+  });
+});
+
+test('deleted then recreated file starts above the old revision; old-revision PUT is 409', async () => {
+  await withApp(async ({ ws, call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    await call('PUT', `/api/file?path=${q('a')}`, { title: 'v2', revision: 1 });
+    await call('PUT', `/api/file?path=${q('a')}`, { title: 'v3', revision: 2 });
+    assert.equal((await call('DELETE', `/api/file?path=${q('a')}`)).status, 200);
+
+    // recreated through the API
+    let r = await call('POST', '/api/file', { path: 'a' });
+    assert.equal(r.body.revision, 4);
+    r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale', revision: 3 });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.revision, 4);
+
+    // recreated from outside with a low revision
+    assert.equal((await call('DELETE', `/api/file?path=${q('a')}`)).status, 200);
+    await writeFile(join(ws, 'a.dpx.json'), JSON.stringify(newFile({ title: 'outside' }))); // revision 1
+    r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale', revision: 4 });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.revision, 5);
+    assert.equal((await call('GET', `/api/file?path=${q('a')}`)).body.title, 'outside');
+
+    // another file moved onto the path
+    assert.equal((await call('DELETE', `/api/file?path=${q('a')}`)).status, 200);
+    await call('POST', '/api/file', { path: 'b' });
+    assert.equal((await call('POST', '/api/move', { from: 'b', to: 'a' })).status, 200);
+    r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale', revision: 1 });
+    assert.equal(r.status, 409);
+    assert.equal(r.body.revision, 6);
+  });
+});
+
+// Store without a watcher: a recursive fs.watch would itself trip over the unreadable folder.
+test('tree skips entries it cannot stat instead of failing', { skip: process.getuid?.() === 0 && 'root ignores permissions' }, async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const store = createStore(ws);
+  try {
+    await store.createFile('ok');
+    await mkdir(join(ws, 'locked'));
+    await writeFile(join(ws, 'locked', 'x.dpx.json'), '{}');
+    await chmod(join(ws, 'locked'), 0o444); // names listable (readdir), entries not stat-able
+    const tree = await store.tree();
+    assert.deepEqual(tree.find((n) => n.path === 'locked').children, []);
+    assert.ok(tree.some((n) => n.path === 'ok.dpx.json'));
+  } finally {
+    await chmod(join(ws, 'locked'), 0o755).catch(() => {});
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test('folders cannot be named like diagram files', async () => {
+  await withApp(async ({ ws, call }) => {
+    assert.equal((await call('POST', '/api/folder', { path: 'x.dpx.json' })).status, 400);
+    assert.equal((await call('POST', '/api/folder', { path: 'p/x.dpx.json/q' })).status, 400);
+    assert.deepEqual(await readdir(ws), []);
+    assert.equal((await call('POST', '/api/folder', { path: 'p/x.dpx' })).status, 201);
   });
 });
 
