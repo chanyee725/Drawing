@@ -21,8 +21,12 @@ export type TreeNode =
   | { type: 'file'; name: string; path: string; title: string; revision: number | null };
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public revision?: number) {
+  status: number;
+  revision?: number;
+  constructor(status: number, message: string, revision?: number) {
     super(message);
+    this.status = status;
+    this.revision = revision;
   }
 }
 
