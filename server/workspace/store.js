@@ -342,7 +342,14 @@ export function createStore(
       const rel = entry.path;
       if (!isDpx(rel)) throw new StoreError(404, 'not in the trash');
       checkFolderNames(rel.split('/').slice(0, -1));
-      const abs = await wrapPath(rel);
+      let abs;
+      try {
+        abs = await wrapPath(rel);
+      } catch (err) {
+        // A file now sits where one of the folders used to be: say so instead of a generic failure.
+        if (err?.code === 'ENOTDIR') throw new StoreError(409, 'a parent in the path is a file');
+        throw err;
+      }
       if (await statOrNull(abs)) throw new StoreError(409, 'a file already exists at that path');
       const histDir = join(dir, 'history');
       const hasHist = (await statOrNull(histDir))?.isDirectory() === true;

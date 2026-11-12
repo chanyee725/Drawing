@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readdir, rm, symlink, stat } from 'node:fs/promises';
+import { mkdtemp, mkdir, readdir, rm, symlink, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.js';
@@ -172,6 +172,19 @@ test('trash: deleting a folder keeps each file; restore recreates the folder', a
     assert.deepEqual(await trashPaths(store), ['p/b.dpx.json']);
     await assert.rejects(store.restoreTrash('nope'), { status: 400 });
     await assert.rejects(store.restoreTrash('1234567890123-deadbeef'), { status: 404 });
+  });
+});
+
+test('trash: restoring under a parent that is now a plain file is a 409 that says so', async () => {
+  await withStore({}, async ({ ws, store }) => {
+    await store.createFolder('d');
+    await store.createFile('d/a');
+    await store.removeFolder('d');
+    await rm(join(ws, 'd'), { recursive: true, force: true });
+    await writeFile(join(ws, 'd'), 'not a folder');
+    const item = (await store.trash()).items.find((i) => i.path === 'd/a.dpx.json');
+    await assert.rejects(store.restoreTrash(item.id), (e) => e.status === 409 && /parent/.test(e.message));
+    assert.ok((await store.trash()).items.some((i) => i.id === item.id), 'still in the trash');
   });
 });
 
