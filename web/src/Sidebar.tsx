@@ -18,6 +18,7 @@ type Props = {
   onRename: (node: TreeNode, name: string) => void;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onTrash: () => void;
 };
 
 function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
@@ -246,6 +247,9 @@ export function Sidebar(p: Props) {
           shown.map((n) => <Row key={n.path} node={n} depth={0} p={p} />)
         )}
       </nav>
+      <button type="button" onClick={p.onTrash} className="mx-3 mt-3 h-8 rounded-md border text-sm" style={{ borderColor: 'var(--border)' }}>
+        최근에 지운 파일
+      </button>
       <button
         type="button"
         onClick={p.onToggleTheme}

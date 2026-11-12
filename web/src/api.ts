@@ -18,6 +18,7 @@ export type TreeNode =
   | { type: 'file'; name: string; path: string; title: string; revision: number | null };
 
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
+export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number };
 export type HistoryVersion = DpxFile & { id: string; time: number };
 
 export class ApiError extends Error {
@@ -58,5 +59,7 @@ export const api = {
   historyVersion: (path: string, id: string) => call<HistoryVersion>('GET', `/api/history/version${q(path)}&id=${encodeURIComponent(id)}`),
   /** Keep the file as it is on disk now as a version (before a restore). */
   historySnapshot: (path: string) => call<{ id: string | null }>('POST', `/api/history${q(path)}`, {}),
+  trash: () => call<{ items: TrashItem[] }>('GET', '/api/trash').then((r) => r.items),
+  restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
   move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
 };

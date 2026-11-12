@@ -21,6 +21,7 @@ import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
 import { HistoryDialog } from './HistoryDialog';
+import { TrashDialog } from './TrashDialog';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
@@ -157,6 +158,7 @@ export function App() {
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
   const canvasHandle = useRef<CanvasHandle | null>(null);
 
@@ -396,7 +398,7 @@ export function App() {
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
+    if (!window.confirm(`"${label}"을(를) 지울까요? 30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.`)) return;
     removing.current = n.path;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
@@ -490,6 +492,7 @@ export function App() {
       { id: 'export-copy', title: '이미지로 복사', keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'history', title: '버전 기록 열기', disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
+      { id: 'trash', title: '최근에 지운 파일 보기', keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
       { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
       { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
@@ -535,6 +538,7 @@ export function App() {
       onRename={rename}
       theme={theme}
       onToggleTheme={toggleTheme}
+      onTrash={() => setTrashOpen(true)}
     />
   );
 
@@ -574,6 +578,7 @@ export function App() {
           }
         />
         {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
+        {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
         {paletteOpen && <CommandPalette commands={commands()} onClose={() => setPaletteOpen(false)} />}
         {conflict && (
           <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
