@@ -3,6 +3,7 @@
 import { parse, type DiagramType as ParserType, type Diagram } from '../../../shared/dsl/index.ts';
 import { renderDiagram, sceneToSvg, type BlockLayout, type Scene } from '../../../shared/render/index.ts';
 import { reconcileForSave, reconcileLayout, type ReconcileReason } from '../../../shared/render/overrides.ts';
+import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
 
 export type Diagnostic = {
   /** 1-based line */
@@ -90,7 +91,8 @@ export async function renderPreview(type: string, code: string, theme: PreviewTh
  * Only for code that parses cleanly: with errors the canvas shows the last good picture, so nothing is pruned.
  */
 export function prunedLayout<B extends { type: string; code: string; layout?: BlockLayout }>(b: B): B | null {
-  if (!b.layout) return null;
+  // A layout of an unknown version is read-only: never wiped or rewritten (design §2.1).
+  if (!b.layout || b.layout.v !== BLOCK_LAYOUT_VERSION) return null;
   const { ast, diagnostics, parsed } = analyzeDiagram(b.type, b.code);
   if (!parsed || !ast || diagnostics.some((d) => d.severity === 'error')) return null;
   const { layout: _drop, ...rest } = b;

@@ -4,7 +4,7 @@
 // points at the block. The block (file.blocks) is the source of truth for code and geometry; the
 // image element is rebuilt on load and never written into file.canvas.elements.
 
-import type { BlockLayout } from '../../../shared/render/block-layout.ts';
+import { layoutProblem, type BlockLayout } from '../../../shared/render/block-layout.ts';
 
 export type BlockGeom = { x: number; y: number; w: number; h: number };
 export type BlockLike = BlockGeom & { id: string; type: string; code: string; layout?: BlockLayout };
@@ -38,8 +38,19 @@ export function hash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+// Layouts are never mutated, so their text form is computed once per object (handleChange compares them on every frame).
+const sigs = new WeakMap<object, string>();
+
 /** Stable text form of a layout ("" for none), for cache keys and for comparing layouts. */
-export const layoutSig = (l: BlockLayout | undefined | null): string => (l ? JSON.stringify(l) : '');
+export function layoutSig(l: BlockLayout | undefined | null): string {
+  if (!l) return '';
+  let s = sigs.get(l);
+  if (s === undefined) {
+    s = JSON.stringify(l);
+    sigs.set(l, s);
+  }
+  return s;
+}
 
 /** What the picture depends on: type, code and layout (not where the block sits). */
 export const drawSig = (b: Pick<BlockLike, 'type' | 'code' | 'layout'>): string => `${b.type}\n${b.code}\n${layoutSig(b.layout)}`;
@@ -47,9 +58,21 @@ export const drawSig = (b: Pick<BlockLike, 'type' | 'code' | 'layout'>): string 
 /** File id of a rendered block image: changes whenever the picture would change. */
 export const fileIdFor = (b: DrawKey, theme: string) => `blk_${b.id}_${hash(`${theme}\n${drawSig(b)}`)}`;
 
-/** A layout read back from an image's `customData`; anything that is not a layout object counts as none. */
-const asLayout = (v: unknown): BlockLayout | undefined =>
-  v !== null && typeof v === 'object' && !Array.isArray(v) && Number.isInteger((v as { v?: unknown }).v) ? (v as BlockLayout) : undefined;
+const checked = new WeakMap<object, boolean>();
+
+/**
+ * A layout read back from an image's `customData`. Anything the server would refuse counts as none (same rules,
+ * `layoutProblem`), so a bad value never reaches a save. The object is kept as is, checked once.
+ */
+export function asLayout(v: unknown): BlockLayout | undefined {
+  if (v === null || typeof v !== 'object') return undefined;
+  let ok = checked.get(v);
+  if (ok === undefined) {
+    ok = layoutProblem(v) === null;
+    checked.set(v, ok);
+  }
+  return ok ? (v as BlockLayout) : undefined;
+}
 
 export type SplitScene<E extends SceneEl> = {
   /** Free-form elements to save in file.canvas.elements (deleted ones dropped). */
@@ -135,13 +158,28 @@ export function layoutsFromImages(layouts: ReadonlyMap<string, BlockLayout | und
 }
 
 /**
- * Where a block image should sit after its picture changed. The layout origin must not move on screen
- * (design §5.6), so the image shifts by the origin change, scaled like the picture: `x' = x + s * (origin.x - origin'.x)`.
+ * Where the layout origin sits in a picture (picture = layout + origin), for a picture that is a real drawing of the
+ * code with the block's layout applied (or none). `key` names what was drawn apart from the layout: theme, type, code.
+ * Placeholders, last-good pictures kept for broken code and pictures whose layout was reset have no anchor.
  */
-export function shiftForOrigin(el: { x: number; y: number; width: number }, oldPic: { width: number; origin?: { x: number; y: number } } | undefined, newOrigin: { x: number; y: number } | undefined): { x: number; y: number } {
-  if (!oldPic?.origin || !newOrigin || !(oldPic.width > 0)) return { x: el.x, y: el.y };
-  const s = el.width / oldPic.width;
-  return { x: round(el.x + s * (oldPic.origin.x - newOrigin.x)), y: round(el.y + s * (oldPic.origin.y - newOrigin.y)) };
+export type OriginAnchor = { key: string; x: number; y: number };
+
+/**
+ * Where a block image should sit after its picture changed. When only the layout changed (a node was dragged and the
+ * bounds moved), the layout origin must not move on screen (design §5.6), so the image shifts by the origin change,
+ * scaled like the picture: `x' = x + s * (origin.x - origin'.x)`. Any other change (code, theme, an error picture,
+ * an automatic reset) leaves the block where it is.
+ */
+export function shiftForOrigin(
+  el: { x: number; y: number; width: number },
+  oldPic: { width: number; anchor?: OriginAnchor } | undefined,
+  newPic: { anchor?: OriginAnchor },
+): { x: number; y: number } {
+  const a = oldPic?.anchor;
+  const b = newPic.anchor;
+  if (!a || !b || a.key !== b.key || !(oldPic!.width > 0)) return { x: el.x, y: el.y };
+  const s = el.width / oldPic!.width;
+  return { x: round(el.x + s * (a.x - b.x)), y: round(el.y + s * (a.y - b.y)) };
 }
 
 /** Cheap fingerprint of the free-form elements, to tell real edits from scroll/selection changes. */

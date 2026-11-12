@@ -170,8 +170,9 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         // Keep the zoom the block was shown at, so a bigger diagram takes more room instead of shrinking.
         const old = sizes.current.get(img.fileId ?? '');
         const scale = old && old.width > 0 ? img.width / old.width : 1;
-        // The layout origin stays where it was on screen, so moving a node left does not push the whole block right.
-        const at = shiftForOrigin(img, old, p.origin);
+        // When only the layout changed, its origin stays where it was on screen, so moving a node left does not push
+        // the whole block right. Code edits, resets and error pictures leave the block where it is.
+        const at = shiftForOrigin(img, old, p);
         return newElementWith(img, { fileId: p.fileId as FileId, width: p.width * scale, height: p.height * scale, ...at, customData });
       });
       const missing = blocks.filter((b) => !shown.has(b.id));

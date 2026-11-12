@@ -167,8 +167,30 @@ test('the image carries the layout and applyScene takes it back, only when the i
 test('shiftForOrigin keeps the layout origin still on screen, scaled like the picture', async () => {
   const { shiftForOrigin } = await import('../../web/src/canvas/sync.ts');
   const el = { x: 100, y: 50, width: 400 };
+  const at = (x: number, y: number, key = 'k') => ({ anchor: { key, x, y } });
   // Picture 200 wide shown at 400: scale 2. The origin moved from (10,10) to (30,0): shift (-40, +20).
-  assert.deepEqual(shiftForOrigin(el, { width: 200, origin: { x: 10, y: 10 } }, { x: 30, y: 0 }), { x: 60, y: 70 });
-  assert.deepEqual(shiftForOrigin(el, { width: 200 }, { x: 30, y: 0 }), { x: 100, y: 50 });
-  assert.deepEqual(shiftForOrigin(el, undefined, { x: 30, y: 0 }), { x: 100, y: 50 });
+  assert.deepEqual(shiftForOrigin(el, { width: 200, ...at(10, 10) }, at(30, 0)), { x: 60, y: 70 });
+  // No anchor on either side (placeholder, last good picture, reset) or no old picture: the block stays.
+  assert.deepEqual(shiftForOrigin(el, { width: 200 }, at(30, 0)), { x: 100, y: 50 });
+  assert.deepEqual(shiftForOrigin(el, { width: 200, ...at(10, 10) }, {}), { x: 100, y: 50 });
+  assert.deepEqual(shiftForOrigin(el, undefined, at(30, 0)), { x: 100, y: 50 });
+  // The code (or theme) changed too: not a layout edit, so the block stays.
+  assert.deepEqual(shiftForOrigin(el, { width: 200, ...at(10, 10, 'old code') }, at(30, 0, 'new code')), { x: 100, y: 50 });
+});
+
+test('asLayout takes only what the server would store, and keeps the object', async () => {
+  const { asLayout } = await import('../../web/src/canvas/sync.ts');
+  const ok = { v: 1, items: { a: { cx: 1, cy: 2, parent: 'g'.repeat(200) } } };
+  assert.equal(asLayout(ok), ok);
+  const newer = { v: 2, shape: ['new'] };
+  assert.equal(asLayout(newer), newer);
+  const many: Record<string, unknown> = {};
+  for (let i = 0; i < 2001; i++) many[`n${i}`] = { cx: 0, cy: 0, parent: '' };
+  for (const bad of [
+    'x', [], { v: 0 }, { v: 1, items: many },
+    { v: 1, items: { ['k'.repeat(201)]: { cx: 0, cy: 0, parent: '' } } },
+    { v: 1, items: { a: { cx: 0, cy: 0, parent: 'p'.repeat(201) } } },
+    JSON.parse('{"v":1,"items":{"__proto__":{"cx":0,"cy":0,"parent":""}}}'),
+    { v: 1, basis: { type: 'a', direction: 'right', count: -1 } },
+  ]) assert.equal(asLayout(bad), undefined, JSON.stringify(bad).slice(0, 60));
 });
