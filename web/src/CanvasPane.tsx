@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import type { Block } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import type { CanvasHandle } from './export/types';
+import { LazyBoundary } from './LazyBoundary';
 
 // Excalidraw is large; load it only when a canvas is shown.
 const ExcalidrawCanvas = lazy(() => import('./canvas/ExcalidrawCanvas'));
@@ -15,6 +16,8 @@ type Props = {
   dark: boolean;
   onChange: (patch: { canvas?: CanvasData; blocks?: Block[] }) => void;
   handle?: { current: CanvasHandle | null };
+  /** Called when the canvas chunk fails to load: save the open file. */
+  onFail?: () => Promise<boolean | void> | boolean | void;
 };
 
 const asCanvas = (c: unknown): CanvasData => {
@@ -22,7 +25,7 @@ const asCanvas = (c: unknown): CanvasData => {
   return { elements: Array.isArray(o.elements) ? o.elements : [], appState: o.appState && typeof o.appState === 'object' ? o.appState : {} };
 };
 
-export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, handle }: Props) {
+export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, handle, onFail }: Props) {
   if (fileKey === null)
     return (
       <main className="flex h-full min-h-64 flex-1 items-center justify-center p-6" aria-label="캔버스">
@@ -33,6 +36,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, han
     );
   return (
     <main className="relative h-full min-h-96 flex-1" aria-label="캔버스">
+      <LazyBoundary key={fileKey} onFail={onFail}>
       <Suspense
         fallback={
           <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -42,6 +46,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, han
       >
         <ExcalidrawCanvas key={fileKey} canvas={asCanvas(canvas)} blocks={blocks} focus={focus} dark={dark} onChange={onChange} handle={handle} />
       </Suspense>
+      </LazyBoundary>
     </main>
   );
 }
