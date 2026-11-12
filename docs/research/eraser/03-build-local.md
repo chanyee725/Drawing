@@ -40,7 +40,7 @@
 
 | 부품 | 라이선스 | 역할 | 적합도 |
 |---|---|---|---|
-| tldraw | 자체 SDK 라이선스 (오픈소스 아님) | freeform canvas | 조건부. 아래 참고 |
+| tldraw | 자체 SDK 라이선스 (오픈소스 아님) | freeform canvas | 제외. 사내 전용이어도 production 사용일 수 있어요([08](08-spike-oss.md) §7) |
 | Excalidraw | MIT | freeform canvas, 손그림 | 높음 |
 | rough.js | MIT | 손그림 렌더링 | 높음 (DSL 렌더러용) |
 | ELK.js | EPL-2.0 | 그룹·포트 있는 레이아웃 | 높음 |
