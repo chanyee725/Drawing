@@ -1,0 +1,95 @@
+// Our own small outline icon set (24x24 grid, stroke only), drawn for this project.
+// Vendor icon names (`aws-ec2`, `gcp-cloud-sql`, ...) map to a generic glyph by keyword;
+// unknown names get a neutral placeholder. No vendor or third-party icon artwork is included.
+
+export type Glyph =
+  | 'user'
+  | 'users'
+  | 'server'
+  | 'database'
+  | 'monitor'
+  | 'phone'
+  | 'cloud'
+  | 'queue'
+  | 'balancer'
+  | 'function'
+  | 'bucket'
+  | 'bolt'
+  | 'container'
+  | 'lock'
+  | 'globe'
+  | 'flag'
+  | 'mail'
+  | 'file'
+  | 'gear'
+  | 'chart'
+  | 'code'
+  | 'bell'
+  | 'search'
+  | 'placeholder';
+
+export const GLYPHS: Record<Glyph, string> = {
+  user: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M4 21c0-4.2 3.6-7 8-7s8 2.8 8 7',
+  users: 'M9 5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7z M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6 M16 5.3a3.4 3.4 0 0 1 0 6.4 M18 14.4c2.1.7 3.5 2.6 3.5 5.6',
+  server: 'M4 4h16v6H4z M4 14h16v6H4z M7.5 7h.01 M7.5 17h.01 M11 7h5 M11 17h5',
+  database:
+    'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3',
+  monitor: 'M3 4h18v12H3z M8 20h8 M12 16v4',
+  phone: 'M7 2h10v20H7z M11 18h2',
+  cloud: 'M7 19h10.5a4.5 4.5 0 0 0 .6-8.96A6.5 6.5 0 0 0 5.6 9.2 5 5 0 0 0 7 19z',
+  queue: 'M3 8h4v8H3z M10 8h4v8h-4z M17 8h4v8h-4z',
+  balancer: 'M12 6v4 M12 10l-6 7 M12 10l6 7 M12 10v7 M12 2a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M6 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M12 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4z M18 17a2 2 0 1 1 0 4 2 2 0 0 1 0-4z',
+  function: 'M5 20l6.5-10 M8 4h2.5l8 16',
+  bucket: 'M4 6l2 14h12l2-14 M4 6c0-1.4 3.6-2.5 8-2.5s8 1.1 8 2.5-3.6 2.5-8 2.5S4 7.4 4 6z',
+  bolt: 'M13 2L4 14h7l-1 8 9-12h-7z',
+  container: 'M12 2l9 5v10l-9 5-9-5V7z M3 7l9 5 9-5 M12 12v10',
+  lock: 'M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4 M12 15v2',
+  globe: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18z M3 12h18 M12 3c3.2 3.4 3.2 14.6 0 18 M12 3c-3.2 3.4-3.2 14.6 0 18',
+  flag: 'M5 21V4 M5 4h12l-3 4 3 4H5',
+  mail: 'M3 5h18v14H3z M3 6l9 7 9-7',
+  file: 'M6 2h8l4 4v16H6z M14 2v4h4 M9 13h6 M9 17h6',
+  gear: 'M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z M12 2v3 M12 19v3 M2 12h3 M19 12h3 M4.9 4.9L7 7 M17 17l2.1 2.1 M4.9 19.1L7 17 M17 7l2.1-2.1',
+  chart: 'M4 4v16h16 M8 16v-5 M12 16V8 M16 16v-7',
+  code: 'M8 7l-5 5 5 5 M16 7l5 5-5 5 M13.5 4l-3 16',
+  bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4z M10 21h4',
+  search: 'M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13z M15.5 15.5L21 21',
+  placeholder: 'M4 4h16v16H4z M9 9h6v6H9z',
+};
+
+/** Keyword → glyph, checked in order against the `-`/`_`/space separated words of the icon name. */
+const KEYWORDS: [Glyph, string[]][] = [
+  ['users', ['users', 'team', 'teams', 'group', 'people', 'customers']],
+  ['user', ['user', 'person', 'customer', 'admin', 'account', 'profile']],
+  ['database', ['database', 'db', 'rds', 'sql', 'aurora', 'dynamodb', 'dynamo', 'postgres', 'postgresql', 'mysql', 'mongo', 'mongodb', 'spanner', 'bigtable', 'firestore', 'cosmos', 'table', 'redshift', 'bigquery', 'warehouse']],
+  ['bolt', ['cache', 'redis', 'elasticache', 'memcached', 'memorystore', 'cdn', 'cloudfront']],
+  ['queue', ['queue', 'sqs', 'sns', 'kafka', 'pubsub', 'kinesis', 'rabbitmq', 'eventbridge', 'stream', 'bus', 'mq']],
+  ['balancer', ['elb', 'alb', 'nlb', 'balancer', 'lb', 'load', 'gateway', 'router', 'ingress', 'proxy', 'nginx']],
+  ['function', ['lambda', 'function', 'functions', 'serverless']],
+  ['bucket', ['s3', 'bucket', 'storage', 'blob', 'gcs', 'efs', 'disk', 'volume', 'ebs', 'archive', 'glacier']],
+  ['container', ['container', 'docker', 'kubernetes', 'k8s', 'eks', 'ecs', 'gke', 'aks', 'fargate', 'pod', 'package', 'box']],
+  ['server', ['server', 'ec2', 'compute', 'vm', 'instance', 'host', 'engine', 'node', 'backend', 'service', 'app']],
+  ['lock', ['lock', 'auth', 'iam', 'security', 'secret', 'secrets', 'key', 'kms', 'cognito', 'shield', 'waf', 'vault']],
+  ['globe', ['globe', 'internet', 'web', 'dns', 'route53', 'domain', 'world', 'www', 'network', 'vpc']],
+  ['monitor', ['monitor', 'browser', 'desktop', 'laptop', 'client', 'frontend', 'screen', 'ui']],
+  ['phone', ['phone', 'mobile', 'ios', 'android', 'tablet']],
+  ['cloud', ['cloud', 'aws', 'gcp', 'azure']],
+  ['mail', ['mail', 'email', 'ses', 'smtp', 'inbox', 'message']],
+  ['file', ['file', 'document', 'doc', 'docs', 'page', 'pdf', 'log', 'logs']],
+  ['gear', ['gear', 'settings', 'config', 'worker', 'job', 'jobs', 'cron', 'batch', 'pipeline', 'tool', 'tools']],
+  ['chart', ['chart', 'analytics', 'metrics', 'dashboard', 'cloudwatch', 'grafana', 'prometheus', 'stats']],
+  ['code', ['code', 'api', 'github', 'git', 'gitlab', 'terminal', 'script', 'sdk']],
+  ['bell', ['bell', 'notification', 'notifications', 'alert', 'alerts', 'alarm']],
+  ['search', ['search', 'elasticsearch', 'opensearch', 'find', 'query']],
+  ['flag', ['flag', 'milestone', 'start', 'goal']],
+];
+
+/** Pick a glyph for an icon name. Exact glyph names win, then keywords, then the placeholder. */
+export function glyphFor(name: string): Glyph {
+  const n = name.trim().toLowerCase();
+  if (Object.hasOwn(GLYPHS, n)) return n as Glyph;
+  const words = n.split(/[-_\s.]+/).filter(Boolean);
+  for (const [glyph, keys] of KEYWORDS) {
+    if (words.some((w) => keys.includes(w))) return glyph;
+  }
+  return 'placeholder';
+}

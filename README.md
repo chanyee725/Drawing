@@ -44,3 +44,7 @@
 | `npm run dev:web` | Vite 개발 서버 (`/api` 는 4330 포트 서버로 넘겨요) |
 
 작업 목록은 `docs/tickets.md`, 조사 자료는 `docs/research/eraser/` 에 있어요. 예전 draw.io 라이브 뷰어는 없앴고, git 기록에 남아 있어요.
+
+## 라이선스
+
+- 레이아웃에 `elkjs`(EPL-2.0)를 써요. 소스는 `node_modules/elkjs`에 그대로 있고 수정하지 않았어요.
