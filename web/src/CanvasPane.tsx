@@ -10,11 +10,16 @@ function BlockPreview({ block, index, theme }: { block: Block; index: number; th
   const supported = analyzeDiagram(block.type, '').parsed;
 
   useEffect(() => {
+    if (!supported) {
+      // Drop any drawing from the block's previous type.
+      setPreview(null);
+      return;
+    }
     let cancelled = false;
     const timer = setTimeout(() => {
       renderPreview(block.type, block.code, theme).then((r) => {
         if (cancelled) return;
-        setPreview((p) => nextPreview(p, r));
+        setPreview((p) => nextPreview(p, r, block.type));
         setDone(true);
       });
     }, 150);
@@ -22,25 +27,27 @@ function BlockPreview({ block, index, theme }: { block: Block; index: number; th
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [block.type, block.code, theme]);
+  }, [block.type, block.code, theme, supported]);
+
+  const shown = supported ? preview : null;
 
   return (
     <figure
       className="max-w-full overflow-auto rounded-md border p-3"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-      data-preview={preview ? (preview.stale ? 'stale' : 'ready') : 'pending'}
+      data-preview={!supported ? 'unsupported' : shown ? (shown.stale ? 'stale' : 'ready') : 'pending'}
       aria-label={`다이어그램 ${index + 1}`}
     >
-      {preview ? (
-        <div dangerouslySetInnerHTML={{ __html: preview.svg }} />
+      {shown ? (
+        <div dangerouslySetInnerHTML={{ __html: shown.svg }} />
       ) : (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           {!supported ? '이 종류는 아직 그릴 수 없어요' : done ? '그릴 내용이 아직 없어요' : '그리는 중이에요'}
         </p>
       )}
-      {preview?.stale && (
+      {shown?.stale && (
         <figcaption className="mt-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-          코드에 오류 {preview.errors.length}개가 있어요 · 마지막으로 그린 모습을 보여줘요
+          {shown.failed ? '그리지 못했어요' : `코드에 오류 ${shown.errors.length}개가 있어요`} · 마지막으로 그린 모습을 보여줘요
         </figcaption>
       )}
     </figure>

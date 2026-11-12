@@ -45,6 +45,8 @@ export type Preview = {
   errors: Diagnostic[];
   /** true when `svg` does not match the current code. */
   stale: boolean;
+  /** true when the renderer failed (threw) on the current code, so `errors` says nothing about it. */
+  failed: boolean;
 };
 
 /** Render the code to SVG. Returns null for unsupported types or when rendering fails. */
@@ -60,12 +62,18 @@ export async function renderPreview(type: string, code: string, theme: 'light' |
 }
 
 /**
- * Decide what the canvas shows after a render attempt: a clean render replaces the
- * preview; a render with errors (or a failed one) keeps the last good SVG.
+ * Decide what the canvas shows after a render attempt for a block of `type`: a clean
+ * render replaces the preview; a render with errors (or a failed one) keeps the last
+ * good SVG. An unsupported type shows nothing, so an earlier drawing never lingers.
  */
-export function nextPreview(prev: Preview | null, result: { svg: string; diagnostics: Diagnostic[] } | null): Preview | null {
+export function nextPreview(
+  prev: Preview | null,
+  result: { svg: string; diagnostics: Diagnostic[] } | null,
+  type?: string,
+): Preview | null {
+  if (type !== undefined && !PARSER_TYPE[type]) return null;
   const errors = result ? result.diagnostics.filter((d) => d.severity === 'error') : [];
-  if (result && errors.length === 0) return { svg: result.svg, errors: [], stale: false };
+  if (result && errors.length === 0) return { svg: result.svg, errors: [], stale: false, failed: false };
   if (!prev) return null;
-  return { svg: prev.svg, errors, stale: true };
+  return { svg: prev.svg, errors, stale: true, failed: !result };
 }

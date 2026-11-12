@@ -38,3 +38,22 @@ test('no earlier render and an error shows nothing', async () => {
   assert.equal(nextPreview(null, bad), null);
   assert.equal(analyzeDiagram('architecture', GOOD).parsed, true);
 });
+
+test('a failed render keeps the drawing but does not claim zero errors', async () => {
+  const good = nextPreview(null, await renderPreview('architecture', GOOD, 'light'), 'architecture');
+  assert.ok(good);
+  assert.equal(good.failed, false);
+  const kept = nextPreview(good, null, 'architecture');
+  assert.equal(kept?.svg, good.svg);
+  assert.equal(kept?.stale, true);
+  assert.equal(kept?.failed, true);
+});
+
+test('switching a block to an unsupported type drops the earlier drawing', async () => {
+  const good = nextPreview(null, await renderPreview('architecture', GOOD, 'light'), 'architecture');
+  assert.ok(good);
+  const r = await renderPreview('bpmn', GOOD, 'light');
+  assert.equal(r, null);
+  assert.equal(nextPreview(good, r, 'bpmn'), null);
+  assert.equal(analyzeDiagram('bpmn', '').parsed, false);
+});
