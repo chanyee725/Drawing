@@ -37,6 +37,8 @@ export interface DiagramApi {
   shownKey(): string | null;
   /** The container element the rects are relative to. */
   readonly container: HTMLElement;
+  /** Pan (zoom unchanged) to centre a container-px rect, unless it is already fully in view. */
+  reveal(r: Rect): void;
 }
 
 type FlashKind = 'added' | 'changed' | 'removed';
@@ -233,6 +235,14 @@ export function DiagramView({ xml, resetKey, flashKey, onApi, children }: Diagra
       onViewChange(cb) {
         listeners.current.add(cb);
         return () => listeners.current.delete(cb);
+      },
+      reveal(r) {
+        const g = graphRef.current;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        if (!g || (r.x >= 0 && r.y >= 0 && r.x + r.width <= w && r.y + r.height <= h)) return;
+        const v = viewOf(g);
+        setView(g, { ...v, tx: v.tx + (w / 2 - (r.x + r.width / 2)) / v.scale, ty: v.ty + (h / 2 - (r.y + r.height / 2)) / v.scale });
       },
     };
     onApiRef.current?.(api);

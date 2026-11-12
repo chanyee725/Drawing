@@ -16,7 +16,7 @@ function get(port, path, host) {
     const req = request({ host: '127.0.0.1', port, path, headers: host ? { host } : {} }, (res) => {
       let body = '';
       res.on('data', (c) => (body += c));
-      res.on('end', () => resolve({ status: res.statusCode, body }));
+      res.on('end', () => resolve({ status: res.statusCode, body, headers: res.headers }));
     });
     req.on('error', reject);
     req.end();
@@ -55,6 +55,25 @@ test('static: unreadable file gives an error status and the server keeps serving
     const host = `127.0.0.1:${s.port}`;
     assert.equal((await get(s.port, '/secret.js', host)).status, 404);
     assert.equal((await get(s.port, '/', host)).status, 200);
+  } finally {
+    await s.stop();
+  }
+});
+
+test('static: responses carry a same-origin CSP (no CDN, no outside connects)', async () => {
+  const s = await startApp();
+  try {
+    const r = await get(s.port, '/', `127.0.0.1:${s.port}`);
+    const csp = r.headers['content-security-policy'];
+    assert.ok(csp, 'CSP header present');
+    const dir = Object.fromEntries(csp.split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v]));
+    assert.deepEqual(dir['default-src'], ["'self'"]);
+    assert.deepEqual(dir['script-src'], ["'self'"]);
+    assert.deepEqual(dir['connect-src'], ["'self'"]);
+    assert.deepEqual(dir['img-src'], ["'self'", 'data:', 'blob:']);
+    assert.deepEqual(dir['font-src'], ["'self'", 'data:']);
+    assert.doesNotMatch(csp, /https?:|\*/);
+    assert.equal(r.headers['x-content-type-options'], 'nosniff');
   } finally {
     await s.stop();
   }

@@ -15,6 +15,24 @@ const TYPES = {
   '.map': 'application/json; charset=utf-8',
 };
 
+// Only this server's origin: the vendored viewer must never reach a CDN, and
+// diagram content (HTML labels, images) cannot pull in or send anything out.
+// 'unsafe-inline' styles: the viewer writes style attributes into the SVG/HTML it builds.
+export const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join('; ');
+
+const SECURITY_HEADERS = { 'content-security-policy': CSP, 'x-content-type-options': 'nosniff' };
+
 export async function serveStatic(req, res, pathname, publicDir) {
   let rel;
   try {
@@ -33,7 +51,7 @@ export async function serveStatic(req, res, pathname, publicDir) {
     file = join(publicDir, 'index.html');
     st = await stat(file).catch(() => null);
     if (!st) {
-      res.writeHead(503, { 'content-type': 'text/plain; charset=utf-8' });
+      res.writeHead(503, { ...SECURITY_HEADERS, 'content-type': 'text/plain; charset=utf-8' });
       res.end('Web app not built. Run: npm run build\n');
       return;
     }
@@ -48,6 +66,7 @@ export async function serveStatic(req, res, pathname, publicDir) {
     return;
   }
   res.writeHead(200, {
+    ...SECURITY_HEADERS,
     'content-type': TYPES[extname(file)] ?? 'application/octet-stream',
     'content-length': st.size,
     'cache-control': file.endsWith('index.html') ? 'no-store' : 'public, max-age=3600',

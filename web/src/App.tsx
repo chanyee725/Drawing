@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pickDataSource, type ConnectionState, type DataSource, type FileDetail, type FileSummary } from './data';
 import { applyFileEvent, paths, pickFile, sortFiles, sourcesFor } from './data/files';
 import { DiagramView, type DiagramApi } from './view/DiagramView';
+import { HistoryHighlight, HistoryPanel, useHistory } from './history';
 import { AgentPanel } from './agents/AgentPanel';
 import { LiveCursors } from './agents/LiveCursors';
 import { PageAgentChips } from './agents/PageAgentChips';
@@ -119,6 +120,7 @@ export function App() {
   const pages = detail?.pages ?? current?.pages ?? [];
   const page = pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
   const pageXml = detail && page ? (detail.pages.find((p) => p.id === page.id)?.xml ?? null) : null;
+  const hist = useHistory({ enabled: ds?.name === 'api', fileId: current?.id ?? null, pageId: page?.id ?? null, setPageId });
 
   useEffect(() => writeUrl(fileId, page?.id ?? null), [fileId, page?.id]);
 
@@ -224,14 +226,19 @@ export function App() {
           </div>
         ) : (
           <DiagramView
-            xml={pageXml}
+            xml={hist.view ? hist.view.xml : pageXml}
             resetKey={viewKey}
-            flashKey={`${current?.id}\n${page?.id}`}
+            flashKey={hist.view ? hist.view.key : `${current?.id}\n${page?.id}`}
             onApi={setApi}
           >
-            <LiveCursors api={api} agents={live.agents} path={current?.path ?? null} pageId={page?.id ?? null} viewKey={viewKey} now={now} focus={live.focus} />
+            <HistoryHighlight api={api} cells={hist.view?.cells ?? null} viewKey={hist.view?.key ?? null} />
+            {/* Cursors show live work; hide them while a past version is on screen. */}
+            {!hist.view && (
+              <LiveCursors api={api} agents={live.agents} path={current?.path ?? null} pageId={page?.id ?? null} viewKey={viewKey} now={now} focus={live.focus} />
+            )}
           </DiagramView>
         )}
+        {files.length > 0 && <HistoryPanel h={hist} />}
         {notice && (
           <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white shadow" role="status">
             {notice}
