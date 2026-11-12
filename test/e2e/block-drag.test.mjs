@@ -45,6 +45,8 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) })).json();
   const f = await call('POST', '/api/file', { path: 'drag', title: '드래그' });
   await call('PUT', '/api/file?path=drag', { ...f, blocks: [{ id: 'b1', type: 'architecture', code: CODE, x: 0, y: 0, w: 0, h: 0 }] });
+  const s = await call('POST', '/api/file', { path: 'seq', title: '시퀀스' });
+  await call('PUT', '/api/file?path=seq', { ...s, blocks: [{ id: 's1', type: 'sequence', code: 'Web > API: call\nAPI > Web: reply', x: 0, y: 0, w: 0, h: 0 }] });
   const saved = async () => {
     await new Promise((r) => setTimeout(r, 1500)); // autosave is debounced
     return (await call('GET', '/api/file?path=drag')).blocks[0];
@@ -177,6 +179,31 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   assert.ok(b, 'block still there');
   assert.deepEqual(b.layout, kept);
 
+  // Keys typed outside the canvas (a sidebar row, the page body) are not edit mode's: no nudge, no Escape exit.
+  await page.mouse.click(n.DB.x, n.DB.y);
+  await page.waitForTimeout(200);
+  await page.locator('aside [role="button"]').first().focus();
+  for (const k of ['ArrowRight', 'Delete', 'Escape']) await page.keyboard.press(k);
+  await page.evaluate(() => document.activeElement?.blur());
+  for (const k of ['ArrowDown', 'Backspace', 'Escape']) await page.keyboard.press(k);
+  b = await saved();
+  assert.deepEqual(b.layout, kept, 'keys outside the canvas do not move nodes');
+  assert.equal(await overlay.count(), 1, 'keys outside the canvas do not leave edit mode');
+  // Back on the canvas, Enter opens the code (design §5.2); edit mode stays under the panel.
+  await page.locator('.excalidraw').focus();
+  await page.keyboard.press('Enter');
+  const codePanel = page.getByRole('complementary', { name: '다이어그램 코드' });
+  await codePanel.locator('.cm-content').waitFor({ timeout: 5000 });
+  assert.equal(await overlay.count(), 1, 'edit mode stays while the code is open');
+  await codePanel.getByRole('button', { name: '닫기' }).click();
+  await page.waitForTimeout(300);
+  // A press outside the canvas (the sidebar) leaves edit mode.
+  await page.locator('aside').click({ position: { x: 5, y: 300 } });
+  await overlay.waitFor({ state: 'detached', timeout: 5000 });
+  // The block stays selected, so the palette enters again.
+  await palette('레이아웃 편집');
+  await overlay.waitFor({ timeout: 5000 });
+
   // Reset drops the layout (auto layout again); undo brings it back.
   await bar.getByRole('button', { name: '레이아웃 초기화' }).click();
   b = await saved();
@@ -284,5 +311,23 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   assert.equal(await overlay.count(), 0, 'broken code does not enter');
   assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/);
   await shot('block-drag-refused.png');
+
+  // Pressing a block that is not a graph (sequence) never shows the refusal; only a try from the palette does.
+  await page.goto(`${BASE}/#file=seq`);
+  await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
+  await page.getByRole('button', { name: '캔버스', exact: true }).click();
+  await page.waitForTimeout(800);
+  await page.keyboard.press('Shift+1');
+  await page.waitForTimeout(600);
+  await page.mouse.click(centre.x, centre.y);
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator('.block-selected').count(), 1, 'sequence block selected');
+  for (let i = 0; i < 2; i++) {
+    await page.mouse.click(centre.x, centre.y);
+    await page.waitForTimeout(300);
+  }
+  assert.equal(await bar.count(), 0, 'no refusal on a press');
+  await palette('레이아웃 편집');
+  assert.match(await bar.innerText(), /이 종류는 아직 노드를 옮길 수 없어요/);
   assert.deepEqual(errors, []);
 });
