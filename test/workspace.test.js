@@ -474,3 +474,18 @@ test('app logs only the error kind for unexpected 500s', async () => {
   assert.ok(logged.length > 0);
   assert.ok(!logged.join('\n').includes(ws));
 });
+
+test('no folder can be named like a file: create, move and parent segments are all refused', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/folder', { path: 'a' });
+    await call('POST', '/api/file', { path: 'f' });
+    assert.equal((await call('POST', '/api/folder', { path: 'q.dpx.json/z' })).status, 400);
+    assert.equal((await call('POST', '/api/folder', { path: 'a/q.dpx.json' })).status, 400);
+    assert.equal((await call('POST', '/api/file', { path: 'q.dpx.json/z' })).status, 400);
+    assert.equal((await call('POST', '/api/move', { from: 'a', to: 'y.dpx.json', type: 'folder' })).status, 400);
+    assert.equal((await call('POST', '/api/move', { from: 'a', to: 'x/y.dpx.json/a', type: 'folder' })).status, 400);
+    assert.equal((await call('POST', '/api/move', { from: 'f', to: 'y.dpx.json/f' })).status, 400);
+    const r = await call('GET', '/api/tree');
+    assert.deepEqual(r.body.tree.map((n) => n.path).sort(), ['a', 'f.dpx.json']);
+  });
+});
