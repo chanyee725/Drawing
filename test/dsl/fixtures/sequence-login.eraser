@@ -1,0 +1,15 @@
+title Login
+autoNumber on
+order Client, API, DB
+
+Client [icon: monitor] > API [icon: server]: POST /login
+activate API
+API > DB [icon: database]: find user
+DB > API: row
+alt [label: valid] {
+  API > Client: token
+}
+else [label: invalid] {
+  API > Client: 401 [color: red]
+}
+deactivate API

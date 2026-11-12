@@ -1,0 +1,13 @@
+title Ticket workflow
+direction right
+
+Start [shape: oval, color: green]
+Triage [icon: flag]
+Valid? [shape: diamond]
+Fix [color: blue]
+Done [shape: oval]
+
+Start > Triage > Valid?
+Valid? > Fix: yes
+Valid? > Done: no [color: red]
+Fix > Done
