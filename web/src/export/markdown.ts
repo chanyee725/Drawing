@@ -6,12 +6,18 @@ import { DIAGRAM_NODE, type DocNode } from '../doc/model.ts';
 type Mark = { type: string; attrs?: Record<string, unknown> };
 type N = DocNode & { text?: string; marks?: Mark[] };
 
-const escInline = (s: string) => s.replace(/([\\`*_[\]<>])/g, '\\$1');
+const escInline = (s: string) => s.replace(/([\\`*_[\]<>~])/g, '\\$1');
 /**
  * Line-start markers that would turn plain text into a heading, bullet, numbered item, rule or setext underline,
  * also after 1-3 leading spaces. Only the marker character is escaped.
  */
 const escStart = (s: string) => {
+  // 4+ spaces or a tab would make an indented code block: the first space or tab becomes an entity.
+  const deep = /^( *\t| {4})/.exec(s);
+  if (deep) {
+    const at = deep[0].length - 1;
+    return s.slice(0, at) + (s[at] === '\t' ? '&#9;' : '&#32;') + s.slice(at + 1);
+  }
   const [, lead = '', rest = ''] = /^( {0,3})([\s\S]*)$/.exec(s) ?? [];
   const esc = (r: string) =>
     /^#{1,6}(?=[ \t]|$)/.test(r) ? '\\' + r

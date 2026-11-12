@@ -87,3 +87,13 @@ test('a block export is named after the document title, the block type and its p
   assert.equal(exportName(blockExportTitle('a/b', bs[0], bs), 'svg'), 'a-b - flowchart 1.svg');
   assert.equal(blockExportTitle('x', blk('zz', 'erd', ''), bs), 'x - erd 1');
 });
+
+test('text that looks like a ~~~ fence, strikethrough or an indented code block is escaped', () => {
+  const md = (s: string) => documentToMarkdown('', { type: 'doc', content: [p(t(s))] }, []);
+  assert.equal(md('~~~js'), '\\~\\~\\~js\n');
+  assert.equal(md('a ~~b~~'), 'a \\~\\~b\\~\\~\n');
+  assert.equal(md('\tcode'), '&#9;code\n');
+  assert.equal(md('    code'), '   &#32;code\n');
+  assert.equal(md('  \tcode'), '  &#9;code\n');
+  assert.equal(md('   three'), '   three\n');
+});
