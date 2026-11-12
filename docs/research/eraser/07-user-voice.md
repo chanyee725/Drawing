@@ -113,7 +113,7 @@
 ## 7. 대안 비교에서 드러난 사용자 선택 기준
 
 - AlternativeTo에서 Eraser 대안 1위는 draw.io (Apache-2.0, self-hosted 가능), 다음은 Excalidraw, Mermaid 등. 오픈소스+self-host가 대안 목록의 핵심 필터: https://alternativeto.net/software/eraser-io
-- Eraser를 모방한 오픈소스 시도가 있음: HN의 "building something like eraser.io from excalidraw" (2024-02-01, 댓글 0, 재확인됨; 제목 원문은 "excaildraw" 오타): https://hn.algolia.com/api/v1/search?query=eraser.io&tags=story&hitsPerPage=15 , 소규모 프로젝트 Eido (페이지 열리지 않아 여전히 미확인): https://gh.r-mj.com/fish-not-phish/eido . 수요 신호는 약하지만 존재해요 (추정).
+- Eraser를 모방한 오픈소스 시도가 있음: HN의 "building something like eraser.io from excalidraw" (2024-02-01, 댓글 0, 재확인됨; 제목 원문은 "excaildraw" 오타): https://hn.algolia.com/api/v1/search?query=eraser.io&tags=story&hitsPerPage=15 , 소규모 프로젝트 Eido (미확인). 수요 신호는 약하지만 존재해요 (추정).
 
 ## 8. 시사점 (추정)
 
