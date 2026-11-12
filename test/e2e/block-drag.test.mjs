@@ -262,7 +262,9 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
   await page.keyboard.type('\nWeb > ');
-  await overlay.waitFor({ state: 'detached', timeout: 5000 });
+  // While the code panel is open the broken code does not end edit mode: the last picture stays, not editable.
+  await page.waitForTimeout(1200);
+  assert.equal(await overlay.count(), 1, 'overlay stays through a syntax error while the panel is open');
   await page.waitForTimeout(500);
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
@@ -272,8 +274,8 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await page.waitForTimeout(500);
   b = await saved();
   assert.equal(b.code, CODE.replace('// order', '// order two'));
-  await palette('레이아웃 편집');
-  await overlay.waitFor({ timeout: 5000 });
+  // The error is fixed before the panel closes: edit mode never ended and works again from the same spots.
+  assert.equal(await overlay.count(), 1, 'overlay stays after the error is fixed');
   n = await nodes();
   near(n.Web, left, 'Web after the error');
   near(n.API, settled.API, 'API after the error');
@@ -299,17 +301,20 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   near(zoomed.API, n.API, 'the node under the pointer stays put', 3);
   assert.ok(Math.hypot(zoomed.Web.x - zoomed.API.x, zoomed.Web.y - zoomed.API.y) > Math.hypot(n.Web.x - n.API.x, n.Web.y - n.API.y) * 1.05, 'zoomed in');
 
-  // Broken code refuses entry and says why.
-  await page.keyboard.press('Escape');
-  await overlay.waitFor({ state: 'detached', timeout: 5000 });
-  await page.keyboard.press('Enter');
+  // Closing the code panel on broken code is the verdict: edit mode ends and the bar says why.
+  await overlay.locator('[aria-label="레이아웃 편집"]').dblclick({ position: { x: 2, y: 2 } });
   await panel.locator('.cm-content').waitFor();
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
   await page.keyboard.type('\nWeb > ');
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(1200);
+  assert.equal(await overlay.count(), 1, 'overlay waits for the panel to close');
+  assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/, 'the bar says why nothing moves while the code is broken');
   await panel.getByRole('button', { name: '닫기' }).click();
-  await page.waitForTimeout(500);
+  await overlay.waitFor({ state: 'detached', timeout: 5000 });
+  assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/);
+
+  // Broken code refuses entry and says why.
   await palette('레이아웃 편집');
   await page.waitForTimeout(300);
   assert.equal(await overlay.count(), 0, 'broken code does not enter');
