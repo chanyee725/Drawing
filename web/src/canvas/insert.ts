@@ -28,7 +28,7 @@ const SHAPES: InsertItem[] = [
 /** Everything the menu offers: diagram blocks first (one per type, starting from its example), then shapes, text and frame. */
 export const INSERT_ITEMS: InsertItem[] = [
   ...DIAGRAM_TYPES.map(
-    (t): InsertItem => ({ id: `diagram:${t.id}`, kind: 'diagram', diagramType: t.id, title: `${t.label} 다이어그램`, hint: '코드로 그려요', keywords: ['diagram', 'code', '다이어그램', '코드', ...DIAGRAM_KEYWORDS[t.id]] }),
+    (t): InsertItem => ({ id: `diagram:${t.id}`, kind: 'diagram', diagramType: t.id, title: t.label, hint: '다이어그램', keywords: ['diagram', 'code', '다이어그램', '코드', ...DIAGRAM_KEYWORDS[t.id]] }),
   ),
   ...SHAPES,
 ];
