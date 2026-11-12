@@ -27,7 +27,8 @@ export interface LayoutBasis {
 export interface BlockLayout {
   v: number;
   basis?: LayoutBasis;
-  items: Record<string, LayoutItem>;
+  /** Optional per design §2.1; missing means no overrides yet. */
+  items?: Record<string, LayoutItem>;
 }
 
 /** What the layout depends on: diagram type, direction, and every node/group id with its parent group. */
@@ -71,10 +72,14 @@ export interface ReconcileResult {
   changed: boolean;
 }
 
-/** Apply §4.1 then §4.2. Never mutates `layout`; returns the same object when nothing changes. */
+/**
+ * Apply §4.1 then §4.2. Never mutates `layout`; returns the same object when nothing changes.
+ * An unknown version is left untouched (§2.1: ignored for drawing, never wiped on save).
+ */
 export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | undefined): ReconcileResult {
-  if (!layout) return { layout, dropped: [], changed: false };
-  const keys = Object.keys(layout.items);
+  if (!layout || layout.v !== 1) return { layout, dropped: [], changed: false };
+  const old = layout.items ?? {};
+  const keys = Object.keys(old);
   if (keys.length === 0) return { layout, dropped: [], changed: false };
   const s = structureOf(diagram);
   const basis = layout.basis;
@@ -84,7 +89,7 @@ export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | und
 
   const dropped = keys.filter((k) => {
     const parent = s.parents.get(k);
-    return parent === undefined || parent !== layout.items[k]!.parent;
+    return parent === undefined || parent !== old[k]!.parent;
   });
   if (keys.length >= 2 && dropped.length >= keys.length * RESET_DROP_RATIO) return wiped(keys, 'dropped');
   if (basis && basis.count > 0 && Math.abs(s.count - basis.count) > basis.count * RESET_COUNT_RATIO) return wiped(keys, 'count');
@@ -93,7 +98,7 @@ export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | und
   if (dropped.length === 0) return { layout, dropped, changed: false };
   const gone = new Set(dropped);
   const items: Record<string, LayoutItem> = {};
-  for (const k of keys) if (!gone.has(k)) items[k] = layout.items[k]!;
+  for (const k of keys) if (!gone.has(k)) items[k] = old[k]!;
   // Keep the old basis: it describes the structure the surviving items were made for.
   return { layout: { ...layout, items }, dropped, changed: true };
 }

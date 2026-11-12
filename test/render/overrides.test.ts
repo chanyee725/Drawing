@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parse } from '../../shared/dsl/index.ts';
 import type { GraphDiagram } from '../../shared/dsl/index.ts';
 import { basisOf, reconcileForSave, reconcileLayout, structureOf } from '../../shared/render/overrides.ts';
-import type { BlockLayout } from '../../shared/render/overrides.ts';
+import type { BlockLayout, LayoutItem } from '../../shared/render/overrides.ts';
 
 function ast(code: string): GraphDiagram {
   return parse(code, 'cloud-architecture').ast as GraphDiagram;
@@ -13,7 +13,7 @@ const BASE = 'VPC {\n  API [icon: server]\n  Cache\n}\nDB [icon: database]\nAPI 
 
 function layoutFor(code: string, keys: Record<string, string>): BlockLayout {
   const d = ast(code);
-  const items: BlockLayout['items'] = {};
+  const items: Record<string, LayoutItem> = {};
   for (const [k, parent] of Object.entries(keys)) items[k] = { cx: 10, cy: 20, parent };
   return { v: 1, basis: basisOf(d), items };
 }
@@ -30,6 +30,28 @@ test('no layout or empty items: nothing to do', () => {
   assert.deepEqual(reconcileLayout(ast(BASE), undefined), { layout: undefined, dropped: [], changed: false });
   const empty: BlockLayout = { v: 1, items: {} };
   assert.equal(reconcileLayout(ast(BASE), empty).layout, empty);
+});
+
+test('unknown layout version is returned as is, never wiped', () => {
+  // Every key is gone and the type differs: v1 rules would reset, but v2 must be left alone.
+  const v2 = { v: 2, basis: { type: 'flowchart', direction: 'down', count: 99 }, items: { Gone: { cx: 1, cy: 2, parent: 'X' }, Other: { cx: 3, cy: 4, parent: '' } } } as BlockLayout;
+  const r = reconcileLayout(ast(BASE), v2);
+  assert.equal(r.layout, v2);
+  assert.deepEqual(r.dropped, []);
+  assert.equal(r.changed, false);
+  assert.equal(r.reset, undefined);
+  const saved = reconcileForSave(parse(BASE, 'cloud-architecture') as never, v2);
+  assert.equal(saved.layout, v2);
+  assert.equal(saved.changed, false);
+});
+
+test('layout without items does not throw and counts as no keys', () => {
+  const bare: BlockLayout = { v: 1, basis: { type: 'flowchart', direction: 'down', count: 99 } };
+  const r = reconcileLayout(ast(BASE), bare);
+  assert.equal(r.layout, bare);
+  assert.deepEqual(r.dropped, []);
+  assert.equal(r.changed, false);
+  assert.equal(reconcileForSave(parse(BASE, 'cloud-architecture') as never, bare).layout, bare);
 });
 
 test('label, colour, icon, shape and edge edits keep every override', () => {
