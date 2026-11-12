@@ -92,9 +92,10 @@ async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
     shown.delete(key);
     return placeholder('이 종류는 아직 그릴 수 없어요', theme);
   }
-  const state = nextPreview(shown.get(key) ?? null, await outcomeFor(b, theme), b.type, theme);
+  const outcome = await outcomeFor(b, theme);
+  const state = nextPreview(shown.get(key) ?? null, outcome, b.type, theme);
   shown.set(key, state);
-  if (!state) return placeholder('그리지 못했어요. 코드를 확인해 주세요', theme);
+  if (!state) return { ...placeholder('그리지 못했어요. 코드를 확인해 주세요', theme), errors: outcome ? outcome.diagnostics.filter((d) => d.severity === 'error').length : 0 };
   if (!state.scene.items.length) return placeholder(b.code.trim() ? '그릴 내용이 없어요. 코드를 확인해 주세요' : '코드를 입력하면 여기에 그려져요', theme);
   return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length };
 }

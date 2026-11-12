@@ -60,3 +60,8 @@ test('a picture says how many errors the drawn code has', async () => {
   assert.ok(broken.errors > 0);
   assert.equal((await renderBlock(block('err1', GOOD), 'light')).errors, 0);
 });
+
+test('broken code with no earlier picture still reports its errors', async () => {
+  const p = await renderBlock(block('err2', BAD), 'light');
+  assert.ok(p.errors > 0);
+});
