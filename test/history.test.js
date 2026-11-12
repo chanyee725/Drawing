@@ -80,7 +80,7 @@ test('history: forced snapshot ignores the interval and skips identical content'
   });
 });
 
-test('history: hidden folder is not in the tree; move carries it, delete removes it', async () => {
+test('history: hidden folder is not in the tree; move carries it, delete moves it to the trash', async () => {
   await withStore({}, async ({ store, ws }) => {
     await store.createFolder('p');
     await store.createFile('p/a');
@@ -93,25 +93,134 @@ test('history: hidden folder is not in the tree; move carries it, delete removes
     await store.move('p', 'q', 'folder');
     assert.deepEqual(await titles(store, 'q/b'), [t0]);
     await store.removeFile('q/b');
-    assert.equal((await store.history('q/b')).versions.length, 0);
+    assert.equal((await store.history('q/b')).versions.length, 0); // not inherited by a new file at that path
+    assert.equal((await store.trash()).items.filter((i) => i.path === 'q/b.dpx.json').length, 1);
     await save(store, 'q/b', 'x').catch(() => {});
     await store.createFile('q/c');
     await save(store, 'q/c', 'one');
     await store.removeFolder('q');
     assert.equal((await store.history('q/c')).versions.length, 0);
     assert.equal(await stat(join(ws, '.drawing/history/q')).then(() => true, () => false), false);
+    assert.ok((await store.trash()).items.some((i) => i.path === 'q/c.dpx.json'));
   });
 });
 
-test('history: failures never break a save', async () => {
+const trashPaths = async (store) => (await store.trash()).items.map((i) => i.path);
+const DAY = 24 * 60 * MIN;
+
+test('trash: a deleted file is listed, restorable with its history, and purged after 30 days', async () => {
+  await withStore({}, async ({ store, clock }) => {
+    await store.createFile('a');
+    const t0 = (await store.readFile('a')).title;
+    await save(store, 'a', 'one');
+    await save(store, 'a', 'two');
+    await store.removeFile('a');
+    const { items } = await store.trash();
+    assert.deepEqual(items.map((i) => i.path), ['a.dpx.json']);
+    assert.equal(items[0].deletedAt, clock.now());
+    // a new file at the same path does not inherit the history
+    await store.createFile('a');
+    assert.equal((await store.history('a')).versions.length, 0);
+    await assert.rejects(store.restoreTrash(items[0].id), { status: 409 });
+    await store.removeFile('a');
+    const id = (await store.trash()).items.find((i) => i.id === items[0].id).id;
+    await store.restoreTrash(id);
+    const back = await store.readFile('a');
+    assert.equal(back.title, 'two');
+    assert.deepEqual(await titles(store, 'a'), [t0]); // one snapshot per 5 minutes
+    assert.ok((await store.trash()).items.every((i) => i.id !== id));
+    // 30 days later the rest is gone
+    await store.removeFile('a');
+    assert.equal((await store.trash()).items.length >= 1, true);
+    clock.advance(30 * DAY + 1);
+    assert.deepEqual((await store.trash()).items, []);
+  });
+});
+
+test('trash: deleting a folder keeps each file; restore recreates the folder', async () => {
+  await withStore({}, async ({ store }) => {
+    await store.createFolder('p/q');
+    await store.createFile('p/q/a');
+    await store.createFile('p/b');
+    await store.removeFolder('p');
+    assert.deepEqual((await trashPaths(store)).sort(), ['p/b.dpx.json', 'p/q/a.dpx.json']);
+    const item = (await store.trash()).items.find((i) => i.path === 'p/q/a.dpx.json');
+    await store.restoreTrash(item.id);
+    assert.equal((await store.readFile('p/q/a')).title, 'a');
+    assert.deepEqual(await trashPaths(store), ['p/b.dpx.json']);
+    await assert.rejects(store.restoreTrash('nope'), { status: 400 });
+    await assert.rejects(store.restoreTrash('1234567890123-deadbeef'), { status: 404 });
+  });
+});
+
+test('trash: a file deleted outside the app (watcher) hands its history to the trash, not to a new file', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-hist-'));
+  let fire;
+  const changes = [];
+  const store = createStore(ws, {
+    watchDebounceMs: 0,
+    watchFn: (_d, _o, cb) => ((fire = cb), { on() {}, close() {} }),
+    onExternalChange: (c) => changes.push(c),
+  });
+  try {
+    await store.createFile('a');
+    await save(store, 'a', 'one');
+    await store.startWatching();
+    await rm(join(ws, 'a.dpx.json'));
+    fire('change', 'a.dpx.json');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.ok(changes.some((c) => c.kind === 'delete'));
+    await store.createFile('a');
+    assert.equal((await store.history('a')).versions.length, 0);
+    assert.deepEqual(await trashPaths(store), ['a.dpx.json']);
+  } finally {
+    await store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test('history: a snapshot that is a symlink is not read', async () => {
   await withStore({}, async ({ store, ws }) => {
     await store.createFile('a');
-    // `.drawing/history` is a file, so snapshots cannot be written
-    await mkdir(join(ws, '.drawing'));
-    await (await import('node:fs/promises')).writeFile(join(ws, '.drawing/history'), 'x');
     await save(store, 'a', 'one');
-    assert.equal((await store.readFile('a')).title, 'one');
+    const { versions } = await store.history('a');
+    const snap = join(ws, '.drawing/history/a.dpx.json', `${versions[0].id}.json`);
+    const outside = await mkdtemp(join(tmpdir(), 'draw-out-'));
+    try {
+      await rm(snap);
+      await symlink(join(ws, 'a.dpx.json'), snap);
+      await assert.rejects(store.historyVersion('a', versions[0].id), { status: 404 });
+      assert.equal((await store.history('a')).versions.length, 0);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
+});
+
+test('trash API: list and restore over HTTP', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-hist-'));
+  const app = await createApp({ workspaceDir: ws }, { publicDir: ws, moduleList: modules });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const call = async (method, path, body) => {
+    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, body: await res.json() };
+  };
+  try {
+    await call('POST', '/api/file', { path: 'a', title: 'A' });
+    assert.equal((await call('DELETE', '/api/file?path=a')).status, 200);
+    const list = await call('GET', '/api/trash');
+    assert.equal(list.body.items.length, 1);
+    assert.equal(list.body.items[0].path, 'a.dpx.json');
+    assert.equal((await call('POST', '/api/trash/restore', {})).status, 400);
+    assert.equal((await call('POST', '/api/trash/restore', { id: '../x' })).status, 400);
+    assert.equal((await call('POST', '/api/trash/restore', { id: list.body.items[0].id })).status, 200);
+    assert.equal((await call('GET', '/api/file?path=a')).body.title, 'A');
+    assert.deepEqual((await call('GET', '/api/trash')).body.items, []);
+  } finally {
+    await app.close();
+    await rm(ws, { recursive: true, force: true });
+  }
 });
 
 test('history API: list, read, snapshot, traversal and bad ids are refused', async () => {
