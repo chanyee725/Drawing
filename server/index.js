@@ -35,7 +35,7 @@ app.server.on('error', async (err) => {
   process.exit(1);
 });
 app.server.listen(port, HOST, () => {
-  console.log(`Draw-Pipelines: http://${HOST}:${port}/  (workspace ${opts.workspaceDir})`);
+  console.log(`Drawing: http://${HOST}:${port}/  (workspace ${opts.workspaceDir})`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
