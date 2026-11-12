@@ -1,0 +1,19 @@
+title Billing
+notation crows-foot
+
+users [icon: user, color: blue] {
+  id string pk
+  email string unique not null
+  teamId string
+}
+teams [icon: users] {
+  id string pk
+  name string
+}
+products {
+  id int pk
+  format "enum(DVD, Blu-ray)"
+  price decimal(10,2)
+}
+
+users.teamId > teams.id: [color: green]
