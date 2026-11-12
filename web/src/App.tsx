@@ -14,6 +14,7 @@ import { migrateDocument } from './doc/model';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
+import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 
@@ -342,7 +343,7 @@ export function App() {
     setExportOpen(o);
   }, []);
   const blockExport = useCallback(
-    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, fileRef.current?.title ?? '')),
+    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, blockExportTitle(fileRef.current?.title ?? '', b, fileRef.current?.blocks ?? []))),
     [report],
   );
 
