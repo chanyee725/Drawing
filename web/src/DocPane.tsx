@@ -41,6 +41,8 @@ type Props = {
   onShow: (blockId: string) => void;
   /** Canvas frames and what sits in them, for frame embeds. */
   frameScene: CanvasEl[];
+  /** Diagram blocks inside canvas frames, with their position. */
+  frameBlocks: Block[];
   /** Show a canvas frame on the canvas. */
   onShowFrame: (frameId: string) => void;
   /** Export one embedded diagram. */
@@ -80,7 +82,7 @@ const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
  * Remounted per file (App keys it), so it reads `document` only when it starts. A document the
  * editor cannot read is never saved over: the pane shows an error and stays read-only.
  */
-export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, path, tree, onOpenFile, jump, onNotice, onDocument, onBlocks, onShow, frameScene, onShowFrame, onExportBlock }: Props) {
+export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, path, tree, onOpenFile, jump, onNotice, onDocument, onBlocks, onShow, frameScene, frameBlocks, onShowFrame, onExportBlock }: Props) {
   const getBlocksRef = useRef(getBlocks);
   getBlocksRef.current = getBlocks;
   const onDocumentRef = useRef(onDocument);
@@ -225,7 +227,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
   const [outlineOpen, setOutlineOpen] = useState(false);
   const outline = useEditorState({ editor, selector: (s) => (s.editor ? outlineOf(s.editor.getJSON()) : []) });
   const inTable = useEditorState({ editor, selector: (s) => !!s.editor?.isActive('table') });
-  const ctx = useMemo(() => ({ blocks, frameScene, dark, onShow, onShowFrame, onExport: onExportBlock }), [blocks, frameScene, dark, onShow, onShowFrame, onExportBlock]);
+  const ctx = useMemo(() => ({ blocks, frameScene, frameBlocks, dark, onShow, onShowFrame, onExport: onExportBlock }), [blocks, frameScene, frameBlocks, dark, onShow, onShowFrame, onExportBlock]);
 
   const tableActions: [string, () => boolean][] = [
     ['행 추가', () => editor.chain().focus().addRowAfter().run()],

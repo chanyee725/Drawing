@@ -14,12 +14,14 @@ export type DocCtx = {
   blocks: Block[];
   /** Canvas frames and what sits in them (see frameScene), for frame embeds. */
   frameScene: CanvasEl[];
+  /** Diagram blocks that sit inside a canvas frame, with their canvas position (see App). */
+  frameBlocks: Block[];
   dark: boolean;
   onShow: (blockId: string) => void;
   onShowFrame: (frameId: string) => void;
   onExport: (block: Block, kind: ImageKind) => void;
 };
-export const DocContext = createContext<DocCtx>({ blocks: [], frameScene: [], dark: false, onShow: () => {}, onShowFrame: () => {}, onExport: () => {} });
+export const DocContext = createContext<DocCtx>({ blocks: [], frameScene: [], frameBlocks: [], dark: false, onShow: () => {}, onShowFrame: () => {}, onExport: () => {} });
 
 export const typeLabel = (type: string) => DIAGRAM_TYPES.find((t) => t.id === type)?.label ?? type;
 

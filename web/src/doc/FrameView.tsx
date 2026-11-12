@@ -4,20 +4,23 @@ import { useContext, useEffect, useState } from 'react';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import { FrameEmbed } from './extensions';
 import { DocContext } from './DiagramView';
-import { frameSceneSig, framesOf, resolveFrame } from './model';
+import { blocksInFrame, frameLabel, frameSceneSig, framesOf, resolveFrame } from './model';
+import { drawSig } from '../canvas/sync';
 import { renderFrame, type FramePicture } from './framePreview';
 
 function FrameView({ node, selected }: ReactNodeViewProps) {
-  const { frameScene, dark, onShowFrame } = useContext(DocContext);
+  const { frameScene, frameBlocks, dark, onShowFrame } = useContext(DocContext);
   const id = typeof node.attrs.frameId === 'string' ? node.attrs.frameId : '';
   const saved = typeof node.attrs.name === 'string' ? node.attrs.name : '';
   const found = id ? resolveFrame(framesOf({ elements: frameScene }), id) : null;
   const [pic, setPic] = useState<FramePicture | null>(null);
-  const sig = frameSceneSig(frameScene);
+  const frameEl = frameScene.find((e) => e.id === id);
+  const mine = frameEl ? blocksInFrame({ x: frameEl.x ?? 0, y: frameEl.y ?? 0, width: frameEl.width ?? 0, height: frameEl.height ?? 0 }, frameBlocks) : [];
+  const sig = `${frameSceneSig(frameScene)}|${mine.map((b) => `${b.id}@${b.x},${b.y},${b.w},${b.h}:${drawSig(b)}`).join(';')}`;
   useEffect(() => {
     if (!found) return;
     let live = true;
-    renderFrame(frameScene, id, dark).then(
+    renderFrame(frameScene, id, dark, mine).then(
       (p) => live && setPic(p),
       () => live && setPic(null),
     );
@@ -28,8 +31,7 @@ function FrameView({ node, selected }: ReactNodeViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!found, id, sig, dark]);
 
-  const name = found?.name ?? saved ?? '';
-  const label = name ? `프레임 ${name}` : '프레임';
+  const label = found ? frameLabel(found) : saved ? `프레임 ${saved}` : '프레임';
   return (
     <NodeViewWrapper as="figure" className={`doc-diagram doc-frame${selected ? ' is-selected' : ''}`} data-frame-embed="" data-frame-id={id} contentEditable={false}>
       {found ? (
