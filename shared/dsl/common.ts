@@ -65,6 +65,16 @@ export class Cursor {
   warn(span: Span, message: string): void {
     this.report(span, message, 'warning');
   }
+  /**
+   * `a}b` (a `}` glued to text on both sides) is almost certainly a name or label that contains a brace.
+   * The brace ends the block there, so say how to keep it: put the text in quotes.
+   */
+  checkBraceInWord(t: Token): void {
+    const glued = (ch: string | undefined) => ch !== undefined && !/[\s{}\[\],:<>]/.test(ch);
+    if (glued(this.src[t.offset - 1]) && glued(this.src[t.offset + t.length])) {
+      this.warn(t, "'}' ends the block here. To use a '}' inside a name or label, put the text in quotes");
+    }
+  }
   /** Source text from the start of `a` to the end of `b`, whitespace collapsed. */
   slice(a: Token, b: Token): string {
     return this.src.slice(a.offset, b.offset + b.length).replace(/\s+/g, ' ');

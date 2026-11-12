@@ -122,7 +122,7 @@ export function createFileSession(deps: Deps) {
     dirty = false;
     conflicted = false;
     reloadStopped = false;
-    set({ conflict: null, path: null, file: null });
+    set({ conflict: null, path: null, file: null, status: '', statusAlert: false });
   };
 
   const flush = async () => {

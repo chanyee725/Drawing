@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { iconFor } from '../../shared/render/icons.ts';
 import { attributeCompletions, ICON_NAMES } from '../../web/src/dsl/completion.ts';
 
 const labels = (r: ReturnType<typeof attributeCompletions>) => r?.options.map((o) => o.label) ?? [];
@@ -32,6 +33,13 @@ test('icon values come from the icon list', () => {
   assert.ok(ICON_NAMES.includes('aws-ec2') && ICON_NAMES.includes('user'));
 });
 
+test('every suggested icon name resolves to a bundled icon, never the placeholder', () => {
+  for (const n of ICON_NAMES) assert.notEqual(iconFor(n).set, 'own', n);
+  assert.ok(ICON_NAMES.includes('postgresql') && ICON_NAMES.includes('house'));
+  assert.ok(!ICON_NAMES.includes('placeholder') && !ICON_NAMES.includes('balancer'));
+  assert.equal(new Set(ICON_NAMES).size, ICON_NAMES.length);
+});
+
 test('enum, color and connection values are offered', () => {
   assert.deepEqual(labels(attributeCompletions('flowchart', 'A [shape: ')).slice(0, 2), ['rectangle', 'circle']);
   assert.ok(labels(attributeCompletions('flowchart', 'A > B: [color: bl')).includes('blue'));
@@ -42,4 +50,21 @@ test('enum, color and connection values are offered', () => {
 test('free-text values (label, link) and finished values offer nothing', () => {
   assert.equal(attributeCompletions('flowchart', 'A [label: '), null);
   assert.equal(attributeCompletions('flowchart', 'A [color: blue '), null);
+});
+
+test('item lines inside a multi-line legend get the legend keys', () => {
+  const above = 'A > B\nlegend {\n  [color: red, label: "a}"]\n';
+  assert.ok(labels(attributeCompletions('flowchart', '  [', above)).includes('connection'));
+  assert.ok(labels(attributeCompletions('flowchart', '  [color: red, ', above)).includes('position'));
+  assert.ok(labels(attributeCompletions('flowchart', '  [connection: ', above)).includes('-->'));
+  // After the legend block closes, ordinary keys apply again.
+  assert.ok(!labels(attributeCompletions('flowchart', '[', 'legend {\n[color: red]\n}\n')).includes('connection'));
+  assert.ok(!labels(attributeCompletions('flowchart', 'A [', 'legend { }\n')).includes('connection'));
+  // A node line inside the block is not an item line.
+  assert.ok(!labels(attributeCompletions('flowchart', 'A [', 'B\n')).includes('connection'));
+});
+
+test('bpmn gets no attribute suggestions', () => {
+  assert.equal(attributeCompletions('bpmn', 'Open website ['), null);
+  assert.equal(attributeCompletions('bpmn', 'A [icon: '), null);
 });

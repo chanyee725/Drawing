@@ -79,6 +79,7 @@ export function parseErd(c: Cursor): ErdDiagram {
       }
       if (t.kind === 'newline') c.next();
       else if (t.kind === 'rbrace') {
+        c.checkBraceInWord(t);
         c.next();
         if (--depth === 0) return;
       } else if (parseFieldLine(depth === 1 ? entity : null)) depth++;
@@ -100,6 +101,7 @@ export function parseErd(c: Cursor): ErdDiagram {
       continue;
     }
     if (t.kind === 'rbrace') {
+      c.checkBraceInWord(t);
       c.error(t, "Unexpected '}' without a matching '{'");
       c.next();
       continue;

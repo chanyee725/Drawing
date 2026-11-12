@@ -82,6 +82,20 @@ test('outline, heading link and wikilink in a headless browser', { skip: !ON && 
   await page2.waitForSelector('.doc-editor h2');
   await page2.waitForFunction(() => document.querySelector('.doc-editor h2').getBoundingClientRect().top < 400);
 
+  // Following a heading link in this tab drops `&h=`, so the same link works a second time.
+  const hashOnly = link.slice(link.indexOf('#'));
+  for (let round = 0; round < 2; round++) {
+    await page.evaluate(() => document.querySelector('.doc-editor').scrollIntoView());
+    await page.evaluate(() => { for (const el of document.querySelectorAll('*')) if (el.scrollTop > 0) el.scrollTop = 0; });
+    await page.evaluate((h) => { location.hash = h; }, hashOnly);
+    await page.waitForFunction(() => location.hash === '#file=main');
+    await page.waitForFunction(() => document.querySelector('.doc-editor h2').getBoundingClientRect().top < 400);
+  }
+
+  // A link to a file that cannot be opened leaves the address bar on the open file.
+  await page.evaluate(() => { location.hash = '#file=does-not-exist'; });
+  await page.waitForFunction(() => location.hash === '#file=main');
+
   // `+` after a space offers headings and files; choosing a file inserts a link that opens it.
   await page.locator('.doc-editor p').last().click();
   await page.keyboard.press('End');

@@ -19,7 +19,7 @@ const sha = (text) => createHash('sha256').update(text).digest('hex');
 const MAX_TOMBSTONES = 1000;
 const isDpx = (name) => name.endsWith(FILE_EXT) && name.length > FILE_EXT.length;
 
-export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 60 } = {}) {
+export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 60, watchFn = watch } = {}) {
   const fsr = createResolver(workspaceDir);
   const known = new Map(); // rel file path -> { hash, revision } of the content we last wrote or saw
   const knownDirs = new Set();
@@ -345,7 +345,8 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
       await rm(abs, { recursive: true });
       forget(rel, true);
-      onExternalChange?.({ kind: 'tree', path: rel });
+      // `from`: other tabs with a file under this folder open must close it (same shape as a folder move).
+      onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       return { path: rel };
     });
   }
@@ -407,7 +408,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         onExternalChange?.({ kind: 'delete', path: rel });
       } else if (knownDirs.has(rel)) {
         forget(rel, true);
-        onExternalChange?.({ kind: 'tree', path: rel });
+        onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       }
       return;
     }
@@ -446,7 +447,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   async function startWatching() {
     await scan(fsr.root, '');
     try {
-      watcher = watch(fsr.root, { recursive: true }, (_ev, filename) => {
+      watcher = watchFn(fsr.root, { recursive: true }, (_ev, filename) => {
         if (!filename) return;
         const rel = String(filename).split('\\').join('/');
         clearTimeout(timers.get(rel));
@@ -455,7 +456,13 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
           reconcile(rel).catch(() => {});
         }, watchDebounceMs));
       });
-      watcher.on('error', () => {});
+      // Errors after start (the root removed, watch limit hit, ...) arrive here. Log the code once, no path.
+      let warned = false;
+      watcher.on('error', (err) => {
+        if (warned) return;
+        warned = true;
+        console.warn(`workspace: watching for outside changes failed (${err?.code ?? 'error'})`);
+      });
     } catch (err) {
       // EACCES, ENOSPC (watch limit), ...: the app still works, outside edits are just not noticed until a file is read or saved. No path in the log.
       console.warn(`workspace: not watching for outside changes (${err?.code ?? 'error'})`);
