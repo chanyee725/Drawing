@@ -51,3 +51,15 @@ test('free-text values (label, link) and finished values offer nothing', () => {
   assert.equal(attributeCompletions('flowchart', 'A [label: '), null);
   assert.equal(attributeCompletions('flowchart', 'A [color: blue '), null);
 });
+
+test('item lines inside a multi-line legend get the legend keys', () => {
+  const above = 'A > B\nlegend {\n  [color: red, label: "a}"]\n';
+  assert.ok(labels(attributeCompletions('flowchart', '  [', above)).includes('connection'));
+  assert.ok(labels(attributeCompletions('flowchart', '  [color: red, ', above)).includes('position'));
+  assert.ok(labels(attributeCompletions('flowchart', '  [connection: ', above)).includes('-->'));
+  // After the legend block closes, ordinary keys apply again.
+  assert.ok(!labels(attributeCompletions('flowchart', '[', 'legend {\n[color: red]\n}\n')).includes('connection'));
+  assert.ok(!labels(attributeCompletions('flowchart', 'A [', 'legend { }\n')).includes('connection'));
+  // A node line inside the block is not an item line.
+  assert.ok(!labels(attributeCompletions('flowchart', 'A [', 'B\n')).includes('connection'));
+});
