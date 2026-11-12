@@ -12,7 +12,22 @@ const outDir = fileURLToPath(new URL('../public', import.meta.url));
 const excalidrawFonts = fileURLToPath(new URL('../node_modules/@excalidraw/excalidraw/dist/prod/fonts', import.meta.url));
 const ASSET_BASE = '/excalidraw/';
 const FONT_PREFIX = `${ASSET_BASE}fonts/`;
-const FALLBACK_RE = /"ASSETS_FALLBACK_URL",`https:\/\/esm\.sh\/\$\{[^`]*`[^`]*`[^`]*\}\/dist\/prod\/`\)/;
+// Matches both the minified prod chunk and the readable dev chunk (`"X", \`...\``).
+const FALLBACK_RE = /"ASSETS_FALLBACK_URL",\s*`https:\/\/esm\.sh\/\$\{[^`]*`[^`]*`[^`]*\}\/dist\/prod\/`\)/;
+const EXCALIDRAW_DIST_RE = /[\\/]@excalidraw[\\/]excalidraw[\\/]dist[\\/](dev|prod)[\\/]/;
+
+/**
+ * Excalidraw always appends https://esm.sh/... as a second font source. Point that fallback at our
+ * own copy, so no font request can leave the machine. Throws if the code moves, so a dependency
+ * update cannot silently bring the CDN back.
+ */
+function stripCdnFallback(code: string, id: string): string | null {
+  if (!EXCALIDRAW_DIST_RE.test(id) || !code.includes('ASSETS_FALLBACK_URL')) return null;
+  if (!code.includes('https://esm.sh/')) return null;
+  const out = code.replace(FALLBACK_RE, `"ASSETS_FALLBACK_URL",window.location.origin+"${ASSET_BASE}")`);
+  if (out === code || out.includes('https://esm.sh/')) throw new Error('excalidraw-assets: CDN fallback URL not found; update FALLBACK_RE');
+  return out;
+}
 
 function excalidrawAssets(): Plugin {
   return {
@@ -27,13 +42,9 @@ function excalidrawAssets(): Plugin {
         createReadStream(file).pipe(res);
       });
     },
-    // Excalidraw always appends https://esm.sh/... as a second font source. Point that fallback at
-    // our own copy too, so no font request can leave the machine. Fails the build if the code moves.
     transform(code, id) {
-      if (!id.includes('/@excalidraw/excalidraw/dist/prod/') || !code.includes('ASSETS_FALLBACK_URL",`https://esm.sh/')) return null;
-      const out = code.replace(FALLBACK_RE, `"ASSETS_FALLBACK_URL",window.location.origin+"${ASSET_BASE}")`);
-      if (out === code) this.error('excalidraw-assets: CDN fallback URL not found; update FALLBACK_RE');
-      return { code: out, map: null };
+      const out = stripCdnFallback(code, id);
+      return out === null ? null : { code: out, map: null };
     },
     writeBundle() {
       cpSync(excalidrawFonts, join(outDir, FONT_PREFIX), { recursive: true });
@@ -45,6 +56,21 @@ export default defineConfig({
   root,
   plugins: [react(), tailwindcss(), excalidrawAssets()],
   publicDir: false,
+  // The dev server pre-bundles Excalidraw (dist/dev/) outside the plugin pipeline above, so the
+  // same rewrite runs inside the dependency optimizer too.
+  optimizeDeps: {
+    rolldownOptions: {
+      plugins: [
+        {
+          name: 'excalidraw-assets-deps',
+          transform(code: string, id: string) {
+            const out = stripCdnFallback(code, id);
+            return out === null ? null : { code: out, map: null };
+          },
+        },
+      ],
+    },
+  },
   define: { 'process.env.IS_PREACT': JSON.stringify('false') },
   build: {
     outDir,
