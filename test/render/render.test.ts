@@ -161,6 +161,8 @@ test('typeface rough embeds the bundled Shantell Sans and nothing external', asy
   assert.match(rough.svg, /font-family="&#39;Shantell Sans&#39;/);
   assert.doesNotMatch(rough.svg, /https?:\/\/(?!www\.w3\.org)/);
   assert.ok(rough.svg.length < 60_000, `rough svg is ${rough.svg.length} bytes`);
+  // Only the 400 face is bundled; declaring 400 alone lets the browser synthesise bold instead of drawing it light.
+  assert.match(rough.svg, /font-family:'Shantell Sans';font-weight:400;src:/);
 
   const clean = await renderDiagram('typeface clean\nA > B', { type: 'flowchart' });
   assert.doesNotMatch(clean.svg, /@font-face|Shantell/);

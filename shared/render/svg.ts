@@ -238,7 +238,7 @@ function itemMarkup(it: SceneItem, theme: Theme): string {
 }
 
 const ROUGH_FONT_STYLE =
-  `<style>@font-face{font-family:'Shantell Sans';font-weight:400 600;src:url(data:font/woff2;base64,${SHANTELL_SANS_WOFF2_BASE64}) format('woff2')}</style>`;
+  `<style>@font-face{font-family:'Shantell Sans';font-weight:400;src:url(data:font/woff2;base64,${SHANTELL_SANS_WOFF2_BASE64}) format('woff2')}</style>`;
 
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
