@@ -351,8 +351,12 @@ interface Delta {
 }
 
 const ZERO: Delta = { dx: 0, dy: 0, dw: 0, dh: 0 };
-const isZero = (d: Delta): boolean => d.dx === 0 && d.dy === 0 && d.dw === 0 && d.dh === 0;
-const sameShift = (a: Delta, b: Delta): boolean => a.dw === 0 && a.dh === 0 && b.dw === 0 && b.dh === 0 && a.dx === b.dx && a.dy === b.dy;
+/** Centre-to-corner arithmetic leaves float noise; anything below this is "not moved". */
+const EPS = 1e-6;
+const near = (a: number, b: number): boolean => Math.abs(a - b) < EPS;
+const isZero = (d: Delta): boolean => near(d.dx, 0) && near(d.dy, 0) && near(d.dw, 0) && near(d.dh, 0);
+const sameShift = (a: Delta, b: Delta): boolean =>
+  near(a.dw, 0) && near(a.dh, 0) && near(b.dw, 0) && near(b.dh, 0) && near(a.dx, b.dx) && near(a.dy, b.dy);
 
 /**
  * Apply `layout` to copies of the ELK rects: overridden nodes (and empty groups) move their centre,
