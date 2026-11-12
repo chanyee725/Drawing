@@ -1,63 +1,76 @@
 # Draw-Pipelines tickets
 
-Goal: a local web page that shows draw.io files **as they change**, and the AI agents (Dispatch sessions) that are editing them, with smooth Figma-like cursors on the part of the diagram each agent is working on.
+Goal: a local, internal-only technical diagramming tool that works and looks like Eraser.io: one file = a document and an infinite canvas side by side, diagram-as-code (Eraser-compatible syntax) auto-laid-out on the canvas, and free-form drawing on the same canvas.
 
-First user: the sim-studio handover diagrams (`~/ws/physical-ai/sim-studio/docs/handover/**/*.drawio`), edited by a Dispatch team on `http://127.0.0.1:4318`, each teammate in its own git worktree (`<project>/.dispatch/wt/<name>/`).
+The previous product in this repo (live draw.io viewer with Dispatch agent cursors, old T1–T7) is retired. Its code is removed in E0; git history keeps it.
 
-Order: T1 → T2 → (T3, T4 in parallel) → T5 → T6 → T7. Each ticket is one branch off `develop` and one PR-sized merge.
+Research is the spec: `docs/research/eraser/00-summary.md` first, then `01` (product, layout, flows), `02` (DSL grammar per diagram type, with examples), `03` (architecture, components, MVP), `04` (visual design), `05` (interactions and shortcuts), `08` (spike results and code in `research/spikes/`). Where a research file says (미확인), pick the simplest reasonable behaviour and note it in the PR.
 
----
+Internal-only, never distributed: matching Eraser's layout, palette and feel is allowed. Do not copy Eraser's name, logo, icon/illustration/font files or code (except the MIT-licensed `eraser-diagrams` code, with its notice kept). Fonts from their original OFL sources. No tldraw (licence). No external network requests at runtime: everything bundled or vendored.
 
-## T1. Project skeleton
-
-- `npm start -- <project-dir>` starts a server on 127.0.0.1 (default port 4330, `DRAW_PORT` to change) and prints the URL.
-- `server/` (Node ≥ 22, built-ins preferred like Dispatch; a dependency needs a reason in the PR), `web/` (Vite + React + TypeScript + Tailwind), `web` builds into `public/` which the server serves.
-- `npm test` runs `node --test`; `npm run build` builds the web.
-- Done when: an empty page loads from the server and `npm test` passes with one test.
-
-## T2. File watcher and change feed (server)
-
-- Watch every `*.drawio` / `*.drawio.xml` under the given dir (recursive), and under each Dispatch worktree of that project (`.dispatch/wt/*/` + the same relative paths) so edits show **before** they are merged. Each source is labelled (`main`, or the worktree's session name from the Dispatch API, falling back to the folder name).
-- Parse files into pages → cells (id, parent, value text, style, geometry, edge source/target). Handle uncompressed XML and the compressed `<diagram>` form (deflate + base64).
-- On every change compute a cell-level diff per page: added / removed / moved or resized / text changed / style changed. Debounce writes (a script writing a file in pieces must give one change).
-- Keep an in-memory history (last 500 changes per file) and serve: `GET /api/files`, `GET /api/files/<id>` (current XML per page), `GET /api/history?file=`, and an SSE stream `GET /api/events` (`file`, `change`, `agents`).
-- Done when: tests cover parse (both forms), diff kinds, debounce, and a worktree copy showing as its own source.
-
-## T3. Diagram view (web)
-
-- Render the selected file and page faithfully (shapes, text with HTML labels, edges, images). Recommended: the diagrams.net viewer/mxGraph renderer; check its licence and whether it works offline, and say in the PR which was picked and why.
-- File / page picker, source picker (main or a worktree), zoom and pan, fit to screen.
-- Live: a change from SSE updates the view without a reload and without losing zoom/pan; changed cells flash briefly (added green, changed amber, removed red ghost that fades).
-- Done when: the 7 pages of `sim-studio/docs/handover/handover.drawio` render, and editing a cell in a file updates the open page within a second.
-
-## T4. Agents feed (server)
-
-- Read the Dispatch server for the project (port from `<project>/.dispatch/server.port`, or `--dispatch <url>`): `GET /api/state` for sessions (name, role, model, status, branch, last line) and `GET /api/events` (SSE) for updates. Read only; never post to Dispatch.
-- Map each session to its worktree folder, so a file change in that folder is attributed to that agent.
-- Per agent keep: status, the last activity line, the file/page/cells it last changed and when.
-- Push `agents` events to the web. Store no transcripts, tokens or personal data, only names, roles, status and what changed.
-- Done when: tests cover the session → worktree mapping and attribution of a change.
-
-## T5. Live cursors and activity (web)
-
-- One cursor per active agent, coloured by role, with a name tag (name · role) and its current activity line, positioned on the centre (or last edited corner) of the cells it last changed on the page being viewed.
-- Movement is smooth like Figma: interpolate positions (spring or critically damped easing, 60 fps via `requestAnimationFrame`), no jumps when several changes arrive at once; an idle agent's cursor fades after a while; an agent working on another page shows as a chip at the page tab instead.
-- A side panel lists agents (status dot, activity, file/page, time since last change); clicking one jumps to its page and cursor.
-- Done when: two agents changing different cells show two cursors gliding to the right places, checked in a headless browser recording or screenshots.
-
-## T6. Change history
-
-- Timeline panel per file: newest first, each entry = time, source/agent, page, a one-line summary ("3 cells added, 1 text changed").
-- Clicking an entry shows that version of the page with its diff highlighted; a scrubber replays changes in order.
-- Also read the file's git history (`git log --follow` in the main checkout) so merged versions appear with commit subjects.
-- Done when: replay steps through at least 10 recorded changes correctly.
-
-## T7. Docs and launch
-
-- `README.md` (Korean): what it is, install, `npm start -- <project-dir>`, screenshots, how agents are attributed.
-- A one-line note in sim-studio `docs/handover/README.md` on how to open the live view is the user's call; propose it, do not edit sim-studio.
-- Done when: a fresh clone runs with `npm install && npm start -- <dir>`.
+Order: E0 → (E1, E2 in parallel) → (E3, E4 in parallel) → E5 → E6 → E7 → E8. One branch off `develop` per ticket, one review, merged back into `develop`.
 
 ---
 
-Out of scope for now: editing diagrams in the browser, remote access (127.0.0.1 only), authentication.
+## E0. Clean slate
+
+- Remove the old app: `server/watch`, `server/agents`, `server/history`, `web/src/{view,agents,history,data}`, their tests, the vendored diagrams.net viewer, old README sections, `research/spikes` stays.
+- Keep the skeleton: Node ≥ 22 HTTP server bound to 127.0.0.1 with host check and static serving, SSE hub if useful, Vite + React + TypeScript + Tailwind building into `public/`, `npm test` / `npm run build`.
+- `npm start -- <workspace-dir>` serves the app for that folder (default port 4330, `DRAW_PORT`).
+- Done when: an empty Eraser-like shell (sidebar, top bar, empty canvas area) loads and `npm test` passes.
+
+## E1. Workspace and file storage (server)
+
+- A workspace is a folder. Each file is one JSON file (e.g. `*.dpx.json`) holding: title, document (rich text as JSON), canvas elements (free-form), and diagram blocks (`{ id, type, code, x, y, w, h }`). Folders map to sub-folders.
+- API: list / create / rename / move / delete files and folders, read, write (whole-file save with a revision number; reject a stale write), and an SSE event when a file changes on disk from outside.
+- Autosave from the web is debounced; writes are atomic (temp file + rename).
+- Done when: tests cover CRUD, stale-write rejection, atomic write, external change event, and path traversal refusal.
+
+## E2. Diagram-as-code parser (shared, pure TS)
+
+- Eraser-compatible grammar for **cloud architecture / flowchart** first (they share nodes, groups, connections), per `02`: nodes with `[icon:, color:, label:, shape:]`, nested groups `{}`, connections `>`, `<`, `<>`, `-`, `--`, `-->` with labels, chained connections, `direction`, `title`, global styles, comments.
+- Then **sequence** and **ERD** (separate small parsers sharing a tokenizer).
+- Output: an AST + diagnostics with line/column; never throws on bad input; partial results for live preview.
+- Done when: every example in `02` for these four types parses, and tests cover errors with positions.
+
+## E3. Layout and render (shared)
+
+- ELK.js layout for architecture/flowchart (groups as compound nodes, `direction`, orthogonal edges, edge labels); LCA coordinate fix from the `08` spike. Sequence and ERD get their own deterministic layout.
+- Render to SVG matching Eraser's look (`04`): node shapes, group boxes, colours, icons (own or permissively licensed set; missing icon → neutral placeholder), labels, arrows. `styleMode`/`typeface: rough` can come later.
+- Deterministic: same code → same SVG. Fast enough for live preview (< 150 ms for 100 nodes).
+- Done when: snapshot tests for each type, and a headless screenshot of each type looks right.
+
+## E4. Editor shell and diagram-as-code editor (web)
+
+- Eraser-like layout (`01`, `04`): left sidebar (workspace files, folders, search), top bar (file title, view toggle 문서 / 둘 다 / 캔버스, export), split document | canvas with a draggable divider.
+- Diagram block editor: CodeMirror 6 with syntax highlight for the DSL, live preview, error markers from E2, diagram type picker, templates from `02` examples.
+- Light and dark themes. UI copy Korean 해요체.
+- Done when: create a file, write an architecture diagram, see it render live, reload and it is still there.
+
+## E5. Canvas (web)
+
+- Excalidraw (MIT, self-hosted assets, no CDN) as the infinite canvas: shapes, arrows, text, freehand, frames, zoom/pan, selection, undo/redo.
+- Diagram blocks live on the canvas as movable/resizable elements rendered from E3; double-click opens the code editor; edits re-render in place.
+- Canvas state saves into the file (E1).
+- Done when: free-form shapes and two diagram blocks coexist on one canvas, survive reload, and editing a block's code updates it on the canvas.
+
+## E6. Document editor (web)
+
+- Rich-text document pane (TipTap/ProseMirror, MIT): headings, lists, checklists, code blocks, tables, links, `/` command menu, markdown shortcuts.
+- Embed a canvas diagram block in the document (live, read-only preview that jumps to the canvas).
+- Done when: a document with headings, a code block and an embedded diagram saves and reloads.
+
+## E7. Export and shortcuts
+
+- Export a diagram block or the canvas selection to SVG and PNG; copy as image; export the document to Markdown.
+- Keyboard shortcuts from `05` (P0 subset: tool keys, zoom, undo/redo, duplicate, delete, select all, command palette `Ctrl/Cmd+K`).
+- Done when: exports open correctly and shortcuts are covered by a headless test.
+
+## E8. Docs and launch
+
+- `README.md` (Korean): what it is, install, `npm start -- <dir>`, screenshots, DSL cheat sheet, what is not supported.
+- Done when: a fresh clone runs with `npm install && npm run build && npm start -- <dir>`.
+
+---
+
+Out of scope for now: multi-user realtime collaboration (Yjs later; keep the file model easy to move onto Yjs), AI generation, BPMN/swimlane, remote access, authentication.
