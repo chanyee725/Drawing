@@ -28,6 +28,19 @@ export function docShapeProblem(document: unknown): string | null {
 export const isEmptyDoc = (document: unknown) => !docShapeProblem(document) && !(document as DocJSON).content?.length;
 
 /**
+ * The document as the editor should start it: ending in a paragraph. StarterKit's TrailingNode adds that
+ * paragraph on the editor's first transaction otherwise (the focus of the first click), and a click on a
+ * diagram at the end then selects it in the document from before that insert: ProseMirror throws
+ * "Selection passed to setSelection must point at the current document". Other documents come back unchanged.
+ */
+export function withTrailingParagraph(document: unknown): unknown {
+  if (docShapeProblem(document)) return document;
+  const content = (document as DocJSON).content ?? [];
+  if (!content.length || content[content.length - 1].type === 'paragraph') return document;
+  return { ...(document as DocJSON), content: [...content, { type: 'paragraph' }] };
+}
+
+/**
  * The document of a file written before the document editor existed (version < 2). Back then the
  * document pane listed every diagram block, so an empty document gets one embed per block. This
  * happens once: the next save stores version 2 and the document as it is then. Anything else,

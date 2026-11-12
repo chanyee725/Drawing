@@ -10,7 +10,7 @@ import { DiagramEmbedView, DocContext, typeLabel } from './doc/DiagramView';
 import { SlashCommands } from './doc/SlashMenu';
 import { renderBlock } from './canvas/render';
 import type { ImageKind } from './export/actions';
-import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, SLASH_ITEMS, type SlashItem } from './doc/model';
+import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
 
 type Props = {
   document: unknown;
@@ -113,8 +113,8 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
 
   const editor = useEditor({
     extensions,
-    // Empty documents start as one empty paragraph (TipTap's own empty content passes its check).
-    content: broken || isEmptyDoc(document) ? '' : (document as object),
+    // Empty documents start as one empty paragraph (TipTap's own empty content passes its check); others end in one.
+    content: broken || isEmptyDoc(document) ? '' : (withTrailingParagraph(document) as object),
     editable: !broken,
     enableContentCheck: true,
     onContentError: ({ error }) => {

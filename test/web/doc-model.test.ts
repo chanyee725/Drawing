@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blockItems, blocksAfterHistory, newBlockGeometry, docShapeProblem, embeddedBlockIds, filterSlash, migrateDocument, SLASH_ITEMS } from '../../web/src/doc/model.ts';
+import { blockItems, blocksAfterHistory, newBlockGeometry, docShapeProblem, embeddedBlockIds, filterSlash, migrateDocument, SLASH_ITEMS, withTrailingParagraph } from '../../web/src/doc/model.ts';
 
 const blocks = [{ id: 'a', type: 'architecture' }, { id: 'b', type: 'sequence' }];
 
@@ -98,4 +98,15 @@ test('a diagram made in the document is placed clear of placed blocks and drawin
   // No size yet: left for the canvas to place.
   assert.deepEqual(newBlockGeometry(null, placed, canvas), { x: 0, y: 0, w: 0, h: 0 });
   assert.deepEqual(newBlockGeometry({ width: 10, height: 10 }, [], null), { x: 0, y: 0, w: 10, h: 10 });
+});
+
+test('the editor starts a document ending in a diagram with a paragraph after it, so its first click does not change the document', () => {
+  const d = { type: 'doc', content: [{ type: 'paragraph' }, { type: 'diagram', attrs: { blockId: 'a' } }] };
+  assert.deepEqual(withTrailingParagraph(d), { type: 'doc', content: [...d.content, { type: 'paragraph' }] });
+  assert.equal(d.content.length, 2, 'the stored document is not touched');
+  const ends = { type: 'doc', content: [{ type: 'diagram', attrs: { blockId: 'a' } }, { type: 'paragraph' }] };
+  assert.equal(withTrailingParagraph(ends), ends);
+  assert.equal(withTrailingParagraph(EMPTY), EMPTY);
+  const broken = { type: 'page', content: [] };
+  assert.equal(withTrailingParagraph(broken), broken);
 });
