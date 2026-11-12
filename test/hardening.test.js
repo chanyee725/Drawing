@@ -26,7 +26,7 @@ function get(port, path, host) {
 async function startApp(moduleList = []) {
   const pub = await mkdtemp(join(tmpdir(), 'draw-pub-'));
   await writeFile(join(pub, 'index.html'), '<!doctype html><div id="root"></div>');
-  const app = await createApp({ projectDir: pub }, { publicDir: pub, moduleList });
+  const app = await createApp({ workspaceDir: pub }, { publicDir: pub, moduleList });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const port = app.server.address().port;
   return { app, pub, port, async stop() { await app.close(); await rm(pub, { recursive: true, force: true }); } };
@@ -87,24 +87,18 @@ test('modules are closed in reverse setup order', async () => {
   assert.deepEqual(order, ['c', 'b', 'a']);
 });
 
-test('cli: --dispatch needs a value, unknown flags and extra args are rejected', () => {
-  assert.deepEqual(parseArgs(['/p', '--dispatch', 'http://127.0.0.1:4318']), {
-    projectDir: '/p',
-    dispatch: 'http://127.0.0.1:4318',
-  });
-  assert.equal(parseArgs(['--dispatch=http://x', '/p']).dispatch, 'http://x');
-  assert.throws(() => parseArgs(['/p', '--dispatch']), /--dispatch needs a URL/);
-  assert.throws(() => parseArgs(['/p', '--dispatch', '--x']), /--dispatch needs a URL/);
+test('cli: one workspace dir, unknown flags and extra args are rejected', () => {
+  assert.deepEqual(parseArgs(['/p']), { workspaceDir: '/p' });
   assert.throws(() => parseArgs(['/p', '--port', '1']), /Unknown option: --port/);
   assert.throws(() => parseArgs(['/p', '/q']), /Unexpected argument/);
-  assert.throws(() => parseArgs([]), /Missing <project-dir>/);
+  assert.throws(() => parseArgs([]), /Missing <workspace-dir>/);
 });
 
 test('cli: port in use prints a hint and exits 1', async () => {
   const blocker = createServer();
   await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
   const port = blocker.address().port;
-  const dir = await mkdtemp(join(tmpdir(), 'draw-proj-'));
+  const dir = await mkdtemp(join(tmpdir(), 'draw-ws-'));
   try {
     const child = spawn(process.execPath, [INDEX, dir], { env: { ...process.env, DRAW_PORT: String(port) } });
     let stderr = '';

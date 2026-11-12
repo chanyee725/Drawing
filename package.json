@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Live view of draw.io files and the Dispatch agents editing them",
+  "description": "Local Eraser-like diagramming tool: document + infinite canvas per file",
   "engines": {
     "node": ">=22.18"
   },

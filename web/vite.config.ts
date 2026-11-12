@@ -8,8 +8,7 @@ const root = fileURLToPath(new URL('.', import.meta.url));
 export default defineConfig({
   root,
   plugins: [react(), tailwindcss()],
-  // Copied as-is into public/ (vendored diagrams.net viewer lives in static/vendor/drawio).
-  publicDir: 'static',
+  publicDir: false,
   build: {
     outDir: fileURLToPath(new URL('../public', import.meta.url)),
     emptyOutDir: true,
