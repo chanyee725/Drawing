@@ -15,6 +15,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
+import { dropTarget, pathAfterMove, renameTarget } from './movePaths';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
@@ -277,6 +278,11 @@ export function App() {
       } catch {
         return;
       }
+      // This tab's own move already renames the open file; the echo must not close it.
+      if (e.kind === 'tree' && e.from !== undefined && ownMoves.current.delete(e.from)) {
+        void refreshTree();
+        return;
+      }
       if (session.external(e, (p) => api.readFile(p), load) === 'close') {
         setHashPath(null);
         setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
@@ -285,6 +291,45 @@ export function App() {
     });
     return () => es.close();
   }, [session, load, refreshTree]);
+
+  // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
+  const ownMoves = useRef(new Set<string>());
+  // `title`: a renamed file takes the new name as its title too, because the sidebar shows the title.
+  const move = async (n: TreeNode, to: string, title?: string) => {
+    const from = n.path;
+    ownMoves.current.add(from);
+    setTimeout(() => ownMoves.current.delete(from), 5000);
+    try {
+      await session.flush();
+      const r = await api.move(from, to, n.type);
+      const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
+      if (next) {
+        session.rename(next);
+        setHashPath(next);
+      }
+      if (title) {
+        const dest = (r as { path?: string }).path ?? to;
+        if (next) session.edit({ title });
+        else {
+          const f = await api.readFile(dest);
+          await api.saveFile(dest, { ...f, title });
+        }
+      }
+      await refreshTree();
+    } catch (e) {
+      ownMoves.current.delete(from);
+      setError(e instanceof ApiError && e.status === 409 ? '같은 이름이 이미 있어요' : e instanceof Error ? e.message : '옮기지 못했어요');
+    }
+  };
+  const moveInto = (n: TreeNode, dir: string) => {
+    const to = dropTarget(n, dir);
+    if (to) void move(n, to);
+  };
+  const rename = (n: TreeNode, name: string) => {
+    const to = renameTarget(n, name);
+    if (to) void move(n, to, n.type === 'file' ? fileStem(name) : undefined);
+    else if (name.trim() && /[\\/]/.test(name)) setError('이름에 /를 넣을 수 없어요');
+  };
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
@@ -415,6 +460,8 @@ export function App() {
       onNewFile={() => void newFile()}
       onNewFolder={() => void newFolder()}
       onDelete={(n) => void remove(n)}
+      onMove={moveInto}
+      onRename={rename}
       theme={theme}
       onToggleTheme={toggleTheme}
     />

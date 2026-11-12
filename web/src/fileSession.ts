@@ -173,6 +173,10 @@ export function createFileSession(deps: Deps) {
       set({ conflict: null, path: p, file: { ...f, document: migrateDocument(f) }, loadSeq: state.loadSeq + 1, status: '', statusAlert: false });
     },
     close,
+    /** The open file was renamed or moved by this tab: keep its content and pending save, write to the new path from now on. */
+    rename(p: string) {
+      if (state.path) set({ path: p });
+    },
     /**
      * A server `workspace` event (other tabs, outside edits). 'close': the open file was deleted or moved
      * away and has been dropped. 'reload': it changed on disk with nothing unsaved, so once queued saves are
