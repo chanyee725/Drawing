@@ -2,11 +2,12 @@
 // Each resolves with a short Korean message for the status line and rejects with an Error whose message is shown as is.
 import type { Block } from '../api';
 import { download, copyPng, svgBlob, svgSize, svgToPng } from './image';
+import { printDocument, printSvg } from './print';
 import { documentToMarkdown, exportName } from './markdown';
 import { DEFAULT_EXPORT, exportBackground, exportSuffix, withSvgBackground, type ExportOptions } from './options';
 import type { CanvasHandle } from './types';
 
-export type ImageKind = 'svg' | 'png' | 'copy';
+export type ImageKind = 'svg' | 'png' | 'copy' | 'pdf';
 
 const NOTHING = '내보낼 내용이 없어요';
 
@@ -15,6 +16,12 @@ export async function exportCanvas(handle: CanvasHandle | null, kind: ImageKind,
   if (!handle) throw new Error('캔버스를 연 뒤에 내보낼 수 있어요');
   const { selected } = handle.scope();
   const what = selected ? '선택한 것을' : '캔버스를';
+  if (kind === 'pdf') {
+    // Printed on white paper: light colours, opaque background.
+    const r = await handle.svg({ ...o, dark: false, transparent: false });
+    if (!r) throw new Error(NOTHING);
+    return printSvg(r.svg, title);
+  }
   if (kind === 'svg') {
     const r = await handle.svg(o);
     if (!r) throw new Error(NOTHING);
@@ -35,7 +42,8 @@ export async function exportCanvas(handle: CanvasHandle | null, kind: ImageKind,
 export async function exportBlock(block: Block, kind: ImageKind, title: string, o: ExportOptions = DEFAULT_EXPORT): Promise<string> {
   // Loaded on use: the renderer (ELK) is big and only needed once something is drawn.
   const { renderBlock } = await import('../canvas/render');
-  const pic = await renderBlock(block, o.dark ? 'dark' : 'light');
+  const pic = await renderBlock(block, kind === 'pdf' ? 'light' : o.dark ? 'dark' : 'light');
+  if (kind === 'pdf') return printSvg(withSvgBackground(pic.svg, '#ffffff'), title);
   const { width, height } = svgSize(pic.svg);
   if (kind === 'svg') {
     // Without a background a dark export (light text) would vanish on a white page.
@@ -54,4 +62,9 @@ export async function exportBlock(block: Block, kind: ImageKind, title: string, 
 export function exportMarkdown(title: string, document: unknown, blocks: readonly Block[]): string {
   download(new Blob([documentToMarkdown(title, document, blocks)], { type: 'text/markdown;charset=utf-8' }), exportName(title, 'md'));
   return '문서를 Markdown으로 내보냈어요';
+}
+
+/** The document column only (with its diagrams), through the browser's print dialog. */
+export function exportDocumentPdf(): string {
+  return printDocument();
 }

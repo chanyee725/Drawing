@@ -60,6 +60,7 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
               ['svg', 'SVG'],
               ['png', 'PNG'],
               ['copy', '이미지 복사'],
+              ['pdf', 'PDF'],
             ] as const
           ).map(([kind, text]) => (
             <button key={kind} type="button" data-export-block={kind} onClick={() => onExport(block, kind)}>

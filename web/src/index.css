@@ -198,3 +198,19 @@ body {
 }
 .canvas-insert input:focus { border-color: var(--accent); }
 .doc-frame .doc-diagram-pic img { background: #fff; }
+
+/* PDF export (print dialog): only the document column is printed while <html> has .print-doc. */
+@media print {
+  html.print-doc body * { visibility: hidden !important; }
+  html.print-doc section[aria-label='문서'], html.print-doc section[aria-label='문서'] * { visibility: visible !important; }
+  html.print-doc, html.print-doc body, html.print-doc #root, html.print-doc #root div { height: auto !important; overflow: visible !important; position: static !important; }
+  html.print-doc section[aria-label='문서'] { position: absolute !important; left: 0; top: 0; width: 100%; max-width: none; padding: 0; }
+  html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions { display: none !important; }
+  html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
+  /* Light tokens on paper; [data-theme] repeats so this outranks :root[data-theme='dark']. */
+  html.print-doc, html.print-doc[data-theme] { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; }
+  html.print-doc body { background: #fff !important; color: #1b1b1f !important; }
+  /* Paper is light: dark-theme pictures are flipped back (the same filter the canvas uses), and the on-screen hint goes. */
+  html.print-doc[data-theme='dark'] .doc-diagram-pic img { filter: invert(93%) hue-rotate(180deg); }
+  html.print-doc .doc-diagram figcaption { display: none !important; }
+}
