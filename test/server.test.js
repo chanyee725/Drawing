@@ -12,7 +12,7 @@ test('server serves index.html, unknown API is 404, module routes are mounted', 
     name: 'demo',
     setup: async () => ({ routes: [{ method: 'GET', path: '/api/demo', handler: (req, res) => res.end('ok') }] }),
   };
-  const app = await createApp({ projectDir: pub }, { publicDir: pub, moduleList: [mod] });
+  const app = await createApp({ workspaceDir: pub }, { publicDir: pub, moduleList: [mod] });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   try {

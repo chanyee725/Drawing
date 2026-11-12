@@ -15,9 +15,9 @@ const TYPES = {
   '.map': 'application/json; charset=utf-8',
 };
 
-// Only this server's origin: the vendored viewer must never reach a CDN, and
-// diagram content (HTML labels, images) cannot pull in or send anything out.
-// 'unsafe-inline' styles: the viewer writes style attributes into the SVG/HTML it builds.
+// Only this server's origin: nothing may reach a CDN, and diagram content
+// (HTML labels, images) cannot pull in or send anything out.
+// 'unsafe-inline' styles: React and the canvas libraries write style attributes.
 export const CSP = [
   "default-src 'self'",
   "script-src 'self'",

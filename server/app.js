@@ -13,12 +13,12 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
  *   Route = { method: 'GET', path: '/api/x' | RegExp, handler(req, res, ctx, match, url) }
  *   match is the RegExp match (or [pathname] for a string path); url is the parsed URL.
  * Modules are closed in reverse setup order.
- * ctx = { projectDir, dispatch, hub, modules } where modules holds each module's
- * setup() result by name, so later modules can use earlier ones (e.g. agents uses watch).
+ * ctx = { workspaceDir, hub, modules } where modules holds each module's
+ * setup() result by name, so later modules can use earlier ones.
  */
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
   const hub = createHub();
-  const ctx = { projectDir: opts.projectDir, dispatch: opts.dispatch ?? null, hub, modules: {} };
+  const ctx = { workspaceDir: opts.workspaceDir, hub, modules: {} };
   const routes = [{ method: 'GET', path: '/api/events', handler: (req, res, _ctx, _match, url) => hub.attach(req, res, url) }];
   const closers = [];
 
