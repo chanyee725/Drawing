@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test",
+    "test": "node --test \"test/**/*.test.*\"",
     "build": "tsc -p shared && tsc -p web && vite build --config web/vite.config.ts",
     "dev:web": "vite --config web/vite.config.ts"
   },

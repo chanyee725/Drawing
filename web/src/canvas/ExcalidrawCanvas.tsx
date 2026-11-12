@@ -9,6 +9,7 @@ import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram } from '../dsl/adapter';
+import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, picturesFor, rectOf, sameDrawing, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
@@ -60,7 +61,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
   const [blockSelected, setBlockSelected] = useState(false);
   // Blocks whose code has errors (they show their last good picture), for the notice on the canvas.
-  const [broken, setBroken] = useState<{ id: string; errors: number }[]>([]);
+  const [broken, setBroken] = useState<BrokenBlock[]>([]);
   // Picture size per file id, to keep a block's scale when its picture changes.
   const sizes = useRef(new Map<string, { width: number; height: number }>());
   // The picture each block shows, so a block whose code did not change is not rendered again.
@@ -131,7 +132,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const blocks = blocksRef.current;
     void draw(blocks).then((pics) => {
       if (!live) return;
-      setBroken(pics.flatMap((p, i) => (p.errors > 0 ? [{ id: blocks[i]!.id, errors: p.errors }] : [])));
+      setBroken(pics.flatMap((p, i) => (p.errors > 0 || p.failed ? [{ id: blocks[i]!.id, type: blocks[i]!.type, errors: p.errors, lastGood: p.lastGood, failed: p.failed }] : [])));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
       const add = pics.filter((p) => !files[p.fileId]).map(fileData);
@@ -328,7 +329,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
           {broken.map((b) => (
             <button key={b.id} type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setEditing(b.id)}>
-              오류 {b.errors}개 · 마지막으로 그린 모습이에요. 눌러서 코드를 고쳐요
+              {brokenNotice(b, blockLabel(b, blocks, DIAGRAM_TYPES.find((t) => t.id === b.type)?.label ?? b.type))}
             </button>
           ))}
         </div>

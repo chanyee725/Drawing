@@ -5,6 +5,7 @@ import { sameDrawing } from './canvas/sync';
 import { Sidebar } from './Sidebar';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
+import { type WorkspaceEvent } from './externalChange';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 // TipTap and the diagram renderer are big; they load when a file is first opened.
@@ -237,16 +238,39 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
+  // The open file is gone (deleted or moved away): drop it and its pending save.
+  const closeOpenFile = useCallback(() => {
+    session.close();
+    setHashPath(null);
+  }, [session]);
+
+  // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource('/api/events');
+    es.addEventListener('workspace', (m) => {
+      let e: WorkspaceEvent;
+      try {
+        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
+      } catch {
+        return;
+      }
+      if (session.external(e, (p) => api.readFile(p), load) === 'close') {
+        setHashPath(null);
+        setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
+      }
+      void refreshTree();
+    });
+    return () => es.close();
+  }, [session, load, refreshTree]);
+
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
     if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) {
-        session.close();
-        setHashPath(null);
-      }
+      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');

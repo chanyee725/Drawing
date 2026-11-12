@@ -1,8 +1,10 @@
 // The open file and its saving, outside React. Components subscribe to the slice they draw
 // (useSession), so an edit that only moves a block re-renders the canvas and nothing else.
 // Saving: edits are debounced, saves run one at a time, retryable failures back off, 409 stops for a choice.
+// Outside changes (server SSE events) close or reload the open file through `external`.
 import { ApiError, type DpxFile } from './api.ts';
-import { isRetryableSaveError } from './saveRetry.ts';
+import { externalAction, type WorkspaceEvent } from './externalChange.ts';
+import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry.ts';
 import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model.ts';
 
 export const SAVE_DELAY = 700;
@@ -49,6 +51,10 @@ export function createFileSession(deps: Deps) {
   let inFlight = false;
   let retryDelay = 0;
   let conflicted = false;
+  // Set when a reload was stopped because the save failed: that notice stays until a save succeeds.
+  let reloadStopped = false;
+  // An outside-change reload is already running.
+  let reloading = false;
 
   const setStatus = (status: string, statusAlert = false) => set({ status, statusAlert });
   const clearTimer = () => {
@@ -71,7 +77,7 @@ export function createFileSession(deps: Deps) {
       if (!p || !f || !dirty || conflicted) return;
       const seq = editSeq;
       inFlight = true;
-      setStatus('저장 중이에요…');
+      if (!reloadStopped) setStatus('저장 중이에요…');
       try {
         const saved = await deps.saveFile(p, f, keepalive);
         if (state.path !== p) return;
@@ -79,24 +85,27 @@ export function createFileSession(deps: Deps) {
         retryDelay = 0;
         if (editSeq === seq) {
           dirty = false;
+          reloadStopped = false;
           setStatus('저장했어요');
         }
         deps.onSaved?.();
       } catch (e) {
         if (state.path !== p) return;
+        // A retry or refusal must not hide the notice that the reload was stopped.
+        const problem = (text: string) => setStatus(saveProblemText(text, reloadStopped), true);
         if (e instanceof ApiError && e.status === 409) {
           clearTimer();
           conflicted = true;
           set({ conflict: { revision: e.revision } });
-          setStatus('다른 곳에서 바뀌었어요', true);
+          problem('다른 곳에서 바뀌었어요');
         } else if (!isRetryableSaveError(e)) {
           // The server refused this request (4xx); retrying the same body would fail forever.
           // Keep a pending edit timer: a newer edit may already have fixed the body.
           const newer = e instanceof ApiError && e.status === 422 && (state.file?.version ?? 1) > DOC_FORMAT_VERSION;
-          setStatus(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
+          problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
         } else {
           retryDelay = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay * 2));
-          setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요', true);
+          problem('저장하지 못했어요. 잠시 뒤 다시 시도할게요');
           // A pending edit timer will save sooner; otherwise back off and retry.
           if (timer === null) schedule(retryDelay);
         }
@@ -106,6 +115,15 @@ export function createFileSession(deps: Deps) {
     });
     return saving;
   }
+
+  // The open file is gone (deleted or moved away): drop it and its pending save, or the timer would write to a path that no longer exists.
+  const close = () => {
+    clearTimer();
+    dirty = false;
+    conflicted = false;
+    reloadStopped = false;
+    set({ conflict: null, path: null, file: null });
+  };
 
   const flush = async () => {
     clearTimer();
@@ -133,7 +151,8 @@ export function createFileSession(deps: Deps) {
     async flushForReload() {
       await flush();
       if (!dirty && !conflicted) return true;
-      setStatus('저장하지 못해서 새로고침을 멈추었어요', true);
+      reloadStopped = true;
+      setStatus(RELOAD_STOPPED, true);
       return false;
     },
     edit(patch: FilePatch) {
@@ -141,7 +160,7 @@ export function createFileSession(deps: Deps) {
       set({ file: { ...state.file, ...patch } });
       dirty = true;
       editSeq += 1;
-      if (!conflicted) setStatus('');
+      if (!conflicted && !reloadStopped) setStatus('');
       schedule(SAVE_DELAY);
     },
     load(p: string, f: DpxFile) {
@@ -149,15 +168,33 @@ export function createFileSession(deps: Deps) {
       dirty = false;
       retryDelay = 0;
       conflicted = false;
+      reloadStopped = false;
       // A file from before the document editor gets its diagrams listed in the document (once: saves store version 2).
       set({ conflict: null, path: p, file: { ...f, document: migrateDocument(f) }, loadSeq: state.loadSeq + 1, status: '', statusAlert: false });
     },
-    /** The open file is gone (deleted): drop it without saving. */
-    close() {
-      clearTimer();
-      dirty = false;
-      conflicted = false;
-      set({ conflict: null, path: null, file: null });
+    close,
+    /**
+     * A server `workspace` event (other tabs, outside edits). 'close': the open file was deleted or moved
+     * away and has been dropped. 'reload': it changed on disk with nothing unsaved, so once queued saves are
+     * done it is re-read and handed to `onReload` if still clean and newer. The caller refreshes the file list.
+     */
+    external(e: WorkspaceEvent, read: (p: string) => Promise<DpxFile>, onReload: (p: string, f: DpxFile) => void) {
+      const act = externalAction(e, state.path, dirty || inFlight);
+      if (act === 'close') close();
+      else if (act === 'reload' && !reloading) {
+        const p = state.path!;
+        reloading = true;
+        void saving
+          .then(() => (dirty || state.path !== p ? null : read(p)))
+          .then((f) => {
+            if (f && !dirty && state.path === p && f.revision > (state.file?.revision ?? 0)) onReload(p, f);
+          })
+          .catch(() => {})
+          .finally(() => {
+            reloading = false;
+          });
+      }
+      return act;
     },
     /** 409 choice: re-send local edits against the server's revision. */
     async overwrite() {

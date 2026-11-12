@@ -7,3 +7,10 @@ export function isRetryableSaveError(e: unknown): boolean {
   if (status === 408 || status === 429) return true;
   return !(typeof status === 'number' && status >= 400 && status < 500);
 }
+
+export const RELOAD_STOPPED = '저장하지 못해서 새로고침을 멈추었어요';
+
+/** The notice for a failed save: the "reload stopped" notice stays until a save succeeds, so a retry message never replaces it. */
+export function saveProblemText(text: string, reloadStopped: boolean): string {
+  return reloadStopped ? RELOAD_STOPPED : text;
+}

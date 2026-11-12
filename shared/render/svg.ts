@@ -4,6 +4,7 @@
 import { round } from './common.ts';
 import { GLYPHS, glyphFor } from './icons.ts';
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
+import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
 import { FONT_FAMILY, linesWidth } from './text.ts';
 import { THEMES, resolvePaint, strokeOf } from './theme.ts';
 import type { Theme } from './theme.ts';
@@ -236,13 +237,19 @@ function itemMarkup(it: SceneItem, theme: Theme): string {
   }
 }
 
+const ROUGH_FONT_STYLE =
+  `<style>@font-face{font-family:'Shantell Sans';font-weight:400;src:url(data:font/woff2;base64,${SHANTELL_SANS_WOFF2_BASE64}) format('woff2')}</style>`;
+
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
   const bg = options.background ? `<rect width="${scene.width}" height="${scene.height}" fill="${t.background}"/>` : '';
   const body = scene.items.map((it) => itemMarkup(it, theme)).join('');
+  // An SVG shown as an <img> or exported cannot see page fonts, so the hand-drawn face travels inside it.
+  const usesRough = scene.items.some((it) => it.kind === 'text' && it.font === 'rough' && it.lines.length > 0);
+  const style = usesRough ? ROUGH_FONT_STYLE : '';
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.width}" height="${scene.height}" viewBox="0 0 ${scene.width} ${scene.height}" ` +
-    `font-family="${esc(FONT_FAMILY.clean)}" data-diagram="${scene.type}" data-theme="${theme}">${bg}${body}</svg>`
+    `font-family="${esc(FONT_FAMILY.clean)}" data-diagram="${scene.type}" data-theme="${theme}">${style}${bg}${body}</svg>`
   );
 }

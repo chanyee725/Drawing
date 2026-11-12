@@ -1,6 +1,7 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createFileSession, RETRY_MAX, SAVE_DELAY } from '../../web/src/fileSession.ts';
+import { RELOAD_STOPPED } from '../../web/src/saveRetry.ts';
 import { ApiError, type DpxFile } from '../../web/src/api.ts';
 
 const file = (over: Partial<DpxFile> = {}): DpxFile => ({ version: 2, title: 't', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1, ...over });
@@ -209,4 +210,67 @@ test('moving a block notifies subscribers but keeps the other slices identical',
   s.setStatus('');
   assert.equal(calls, 1);
   off();
+});
+
+test('the "reload stopped" notice survives retries and edits until a save succeeds', async (t) => {
+  const { s, server } = setup(t);
+  s.edit({ title: 'x' });
+  const stopped = s.flushForReload();
+  await settle();
+  server.fail(new ApiError(503, 'busy'));
+  assert.equal(await stopped, false);
+  assert.equal(s.getState().status, RELOAD_STOPPED);
+  assert.equal(s.getState().statusAlert, true);
+  // The scheduled retry fails again: the notice stays.
+  t.mock.timers.tick(1000);
+  await settle();
+  assert.equal(s.getState().status, RELOAD_STOPPED);
+  server.fail(new ApiError(503, 'busy'));
+  await settle();
+  assert.equal(s.getState().status, RELOAD_STOPPED);
+  s.edit({ title: 'y' });
+  assert.equal(s.getState().status, RELOAD_STOPPED);
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  server.ok(2);
+  await settle();
+  assert.equal(s.getState().status, '저장했어요');
+});
+
+test('an outside delete or move closes the open file and cancels its pending save', async (t) => {
+  const { s, server } = setup(t);
+  s.edit({ title: 'x' });
+  const act = s.external({ kind: 'delete', path: 'a.dpx' }, () => assert.fail('no read'), () => assert.fail('no reload'));
+  assert.equal(act, 'close');
+  assert.equal(s.getState().path, null);
+  assert.equal(s.getState().file, null);
+  t.mock.timers.tick(SAVE_DELAY * 2);
+  await settle();
+  assert.equal(server.calls.length, 0);
+  s.load('d/b.dpx', file());
+  assert.equal(s.external({ kind: 'tree', path: 'e', from: 'd' }, () => assert.fail('no read'), () => {}), 'close');
+  assert.equal(s.getState().path, null);
+});
+
+test('an outside change reloads a clean file once, but only refreshes a dirty one', async (t) => {
+  const { s, server } = setup(t);
+  const reads: string[] = [];
+  const reloaded: number[] = [];
+  const read = async (p: string) => {
+    reads.push(p);
+    return file({ revision: 5, title: 'theirs' });
+  };
+  const onReload = (_p: string, f: DpxFile) => reloaded.push(f.revision);
+  assert.equal(s.external({ kind: 'change', path: 'a.dpx', revision: 5 }, read, onReload), 'reload');
+  // A second event while the first reload runs does not read twice.
+  s.external({ kind: 'change', path: 'a', revision: 5 }, read, onReload);
+  await settle();
+  assert.deepEqual(reads, ['a.dpx']);
+  assert.deepEqual(reloaded, [5]);
+  s.edit({ title: 'mine' });
+  assert.equal(s.external({ kind: 'change', path: 'a.dpx', revision: 6 }, read, onReload), 'refresh');
+  assert.equal(s.external({ kind: 'change', path: 'other.dpx' }, read, onReload), 'refresh');
+  await settle();
+  assert.deepEqual(reads, ['a.dpx']);
+  void server;
 });
