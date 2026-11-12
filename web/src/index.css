@@ -209,4 +209,7 @@ body {
   html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
   html.print-doc { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; }
   html.print-doc body { background: #fff !important; color: #1b1b1f !important; }
+  /* Paper is light: dark-theme pictures are flipped back (the same filter the canvas uses), and the on-screen hint goes. */
+  html.print-doc[data-theme='dark'] .doc-diagram-pic img { filter: invert(93%) hue-rotate(180deg); }
+  html.print-doc .doc-diagram figcaption { display: none !important; }
 }

@@ -101,6 +101,9 @@ test('PDF export prints the document or one picture', { skip: !ON && 'set DRAW_E
     assert.ok(p[0].docVisible && p[0].docHasImg, 'document and its diagram are printed');
     assert.ok(!p[0].headerVisible, 'toolbar hidden');
     assert.ok(!p[0].sidebarVisible, 'sidebar hidden');
+    // The stubbed print() returns at once; print mode stays until the browser says printing is over.
+    assert.equal(await page.evaluate(() => document.documentElement.classList.contains('print-doc')), true, 'print mode lasts until afterprint');
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
     assert.equal(await page.evaluate(() => document.documentElement.classList.contains('print-doc')), false, 'print mode is cleared afterwards');
   });
 

@@ -7,14 +7,10 @@ export const PRINT_HINT = "인쇄 창에서 '대상'을 'PDF로 저장'으로 �
 export function printDocument(): string {
   const root = document.documentElement;
   root.classList.add(PRINT_DOC_CLASS);
-  const done = () => root.classList.remove(PRINT_DOC_CLASS);
-  window.addEventListener('afterprint', done, { once: true });
-  try {
-    window.print();
-  } finally {
-    // print() blocks while the dialog is open in most browsers; either way, do not leave the page in print mode.
-    done();
-  }
+  // The class only matters to print media, so it can stay until the browser says printing is over
+  // (some browsers return from print() before the page is laid out for paper).
+  window.addEventListener('afterprint', () => root.classList.remove(PRINT_DOC_CLASS), { once: true });
+  window.print();
   return PRINT_HINT;
 }
 
