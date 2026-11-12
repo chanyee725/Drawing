@@ -1,9 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
-import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
+import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
+import { sameDrawing } from './canvas/sync';
 import { Sidebar } from './Sidebar';
-import { externalAction, type WorkspaceEvent } from './externalChange';
-import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry';
+import { createFileSession, type FilePatch, type FileSession } from './fileSession';
+import { useSession } from './useSession';
+import { type WorkspaceEvent } from './externalChange';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 // TipTap and the diagram renderer are big; they load when a file is first opened.
@@ -13,7 +15,6 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
@@ -21,9 +22,6 @@ import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 
-const SAVE_DELAY = 700;
-const RETRY_MIN = 1000;
-const RETRY_MAX = 30000;
 const NARROW = '(max-width: 767px)';
 
 // The open file lives in the URL hash so a reload reopens it. Only the workspace-relative path is kept.
@@ -52,28 +50,76 @@ function useNarrow() {
   return narrow;
 }
 
+const NO_BLOCKS: Block[] = [];
+
+// The panes read the file from the session themselves, so a canvas drag or a keystroke in the document
+// re-renders only the pane that changed, not the whole app.
+type DocSlotProps = {
+  session: FileSession;
+  dark: boolean;
+  onShow: (blockId: string) => void;
+  onExportBlock: (b: Block, kind: ImageKind) => void;
+  onFail: () => Promise<boolean>;
+};
+const DocSlot = memo(function DocSlot({ session, dark, onShow, onExportBlock, onFail }: DocSlotProps) {
+  const key = useSession(session, (s) => `${s.path}#${s.loadSeq}`);
+  // Blocks as drawn: a new array only when a block's id, type or code changes, not when it moves.
+  const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS, sameDrawing);
+  const getBlocks = useCallback(() => session.getState().file?.blocks ?? NO_BLOCKS, [session]);
+  const getCanvas = useCallback(() => session.getState().file?.canvas, [session]);
+  const onDocument = useCallback((d: unknown) => session.edit({ document: d }), [session]);
+  const onBlocks = useCallback((b: Block[]) => session.edit({ blocks: b }), [session]);
+  return (
+    <LazyBoundary key={key} onFail={onFail}>
+      <Suspense
+        fallback={
+          <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+            문서를 불러오는 중이에요…
+          </p>
+        }
+      >
+        <DocPane
+          key={key}
+          // Read once when the pane starts (it is remounted per load).
+          document={session.getState().file?.document}
+          blocks={blocks}
+          getBlocks={getBlocks}
+          getCanvas={getCanvas}
+          dark={dark}
+          onDocument={onDocument}
+          onBlocks={onBlocks}
+          onShow={onShow}
+          onExportBlock={onExportBlock}
+        />
+      </Suspense>
+    </LazyBoundary>
+  );
+});
+
+type CanvasSlotProps = {
+  session: FileSession;
+  focus: CanvasFocus | null;
+  dark: boolean;
+  handle: { current: CanvasHandle | null };
+  onFail: () => Promise<boolean>;
+};
+const CanvasSlot = memo(function CanvasSlot({ session, focus, dark, handle, onFail }: CanvasSlotProps) {
+  const fileKey = useSession(session, (s) => (s.file && s.path ? `${s.path}#${s.loadSeq}` : null));
+  const canvas = useSession(session, (s) => s.file?.canvas);
+  const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS);
+  const onChange = useCallback((patch: { canvas?: CanvasData; blocks?: Block[] }) => session.edit(patch), [session]);
+  return <CanvasPane fileKey={fileKey} canvas={canvas} blocks={blocks} focus={focus} dark={dark} onChange={onChange} handle={handle} onFail={onFail} />;
+});
+
 export function App() {
   const [theme, toggleTheme] = useTheme();
   const narrow = useNarrow();
   const [navOpen, setNavOpen] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
-  const [path, setPath] = useState<string | null>(null);
-  const [file, setFile] = useState<DpxFile | null>(null);
   const [view, setView] = useState<View>('both');
   const [ratio, setRatio] = useState(0.45);
-  const [status, setStatusText] = useState('');
-  // True while the status is a problem (failed save or conflict), so the top bar shows it on narrow screens too.
-  const [statusAlert, setStatusAlert] = useState(false);
-  const setStatus = useCallback((text: string, alert = false) => {
-    setStatusText(text);
-    setStatusAlert(alert);
-  }, []);
   const [error, setError] = useState<string | null>(null);
-  // Set when a save got 409: the server's current revision, so "overwrite" can re-send against it.
-  const [conflict, setConflict] = useState<{ revision?: number } | null>(null);
-  // Bumped on every load from disk so the canvas restarts from the loaded content.
-  const [loadSeq, setLoadSeq] = useState(0);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
   const [focus, setFocus] = useState<CanvasFocus | null>(null);
 
@@ -83,21 +129,6 @@ export function App() {
   // Set by the canvas while it is mounted (export, palette commands).
   const canvasHandle = useRef<CanvasHandle | null>(null);
 
-  const fileRef = useRef<DpxFile | null>(null);
-  const pathRef = useRef<string | null>(null);
-  const timer = useRef<number | null>(null);
-  const saving = useRef<Promise<void>>(Promise.resolve());
-  // dirty: local edits not yet on disk. editSeq tells a finished save whether newer edits arrived meanwhile.
-  const dirty = useRef(false);
-  const editSeq = useRef(0);
-  const inFlight = useRef(false);
-  const retryDelay = useRef(0);
-  const conflictRef = useRef(false);
-  // Set when a reload was stopped because the save failed: that notice stays until a save succeeds.
-  const reloadStopped = useRef(false);
-  fileRef.current = file;
-  pathRef.current = path;
-
   const refreshTree = useCallback(async () => {
     try {
       setTree(await api.tree());
@@ -106,125 +137,32 @@ export function App() {
     }
   }, []);
 
-  const clearTimer = () => {
-    if (timer.current !== null) window.clearTimeout(timer.current);
-    timer.current = null;
-  };
+  // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
+  // slices it shows, never blocks, canvas or document.
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree() }));
+  const path = useSession(session, (s) => s.path);
+  const hasFile = useSession(session, (s) => !!s.file);
+  const title = useSession(session, (s) => s.file?.title ?? '');
+  const status = useSession(session, (s) => s.status);
+  const statusAlert = useSession(session, (s) => s.statusAlert);
+  const conflict = useSession(session, (s) => s.conflict);
+  const setStatus = session.setStatus;
+  const edit = useCallback((patch: FilePatch) => session.edit(patch), [session]);
+  const flushForReload = useCallback(() => session.flushForReload(), [session]);
 
-  const saveRef = useRef<(keepalive?: boolean) => Promise<void>>(async () => {});
-  const schedule = useCallback((ms: number) => {
-    clearTimer();
-    timer.current = window.setTimeout(() => {
-      timer.current = null;
-      void saveRef.current();
-    }, ms);
-  }, []);
-
-  const save = useCallback(
-    (keepalive = false) => {
-      // Saves run one at a time so each PUT carries the revision returned by the previous one.
-      saving.current = saving.current.then(async () => {
-        const p = pathRef.current;
-        const f = fileRef.current;
-        if (!p || !f || !dirty.current || conflictRef.current) return;
-        const seq = editSeq.current;
-        inFlight.current = true;
-        if (!reloadStopped.current) setStatus('저장 중이에요…');
-        try {
-          const saved = await api.saveFile(p, f, keepalive);
-          if (pathRef.current !== p) return;
-          setFile((cur) => (cur ? { ...cur, revision: saved.revision } : cur));
-          if (fileRef.current) fileRef.current = { ...fileRef.current, revision: saved.revision };
-          retryDelay.current = 0;
-          if (editSeq.current === seq) {
-            dirty.current = false;
-            reloadStopped.current = false;
-            setStatus('저장했어요');
-          }
-          void refreshTree();
-        } catch (e) {
-          if (pathRef.current !== p) return;
-          // A retry or refusal must not hide the notice that the reload was stopped.
-          const problem = (text: string) => setStatus(saveProblemText(text, reloadStopped.current), true);
-          if (e instanceof ApiError && e.status === 409) {
-            clearTimer();
-            conflictRef.current = true;
-            setConflict({ revision: e.revision });
-            problem('다른 곳에서 바뀌었어요');
-          } else if (!isRetryableSaveError(e)) {
-            // The server refused this request (4xx); retrying the same body would fail forever.
-            // Keep a pending edit timer: a newer edit may already have fixed the body.
-            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > DOC_FORMAT_VERSION;
-            problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
-          } else {
-            retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
-            problem('저장하지 못했어요. 잠시 뒤 다시 시도할게요');
-            // A pending edit timer will save sooner; otherwise back off and retry.
-            if (timer.current === null) schedule(retryDelay.current);
-          }
-        } finally {
-          inFlight.current = false;
-        }
-      });
-      return saving.current;
+  const load = useCallback(
+    (p: string, f: DpxFile) => {
+      session.load(p, f);
+      setFocus(null);
+      setHashPath(p);
     },
-    [refreshTree, schedule],
+    [session],
   );
-  saveRef.current = save;
-
-  const flush = useCallback(async () => {
-    clearTimer();
-    await save();
-  }, [save]);
-
-  // Save before a lazy-chunk reload. False (and a notice) when edits are still unsaved or in conflict.
-  const flushForReload = useCallback(async () => {
-    await flush();
-    if (!dirty.current && !conflictRef.current) return true;
-    reloadStopped.current = true;
-    setStatus(RELOAD_STOPPED, true);
-    return false;
-  }, [flush, setStatus]);
-
-  const edit = useCallback(
-    (patch: Partial<Pick<DpxFile, 'title' | 'document' | 'blocks' | 'canvas'>>) => {
-      setFile((cur) => {
-        if (!cur) return cur;
-        const next = { ...cur, ...patch };
-        fileRef.current = next;
-        return next;
-      });
-      dirty.current = true;
-      editSeq.current += 1;
-      if (!conflictRef.current && !reloadStopped.current) setStatus('');
-      schedule(SAVE_DELAY);
-    },
-    [schedule],
-  );
-
-  const load = useCallback((p: string, f: DpxFile) => {
-    clearTimer();
-    dirty.current = false;
-    retryDelay.current = 0;
-    conflictRef.current = false;
-    reloadStopped.current = false;
-    setConflict(null);
-    setPath(p);
-    pathRef.current = p;
-    // A file from before the document editor gets its diagrams listed in the document (once: saves store version 2).
-    f = { ...f, document: migrateDocument(f) };
-    setFile(f);
-    fileRef.current = f;
-    setLoadSeq((n) => n + 1);
-    setFocus(null);
-    setStatus('');
-    setHashPath(p);
-  }, []);
 
   const open = useCallback(
     async (p: string) => {
-      await flush();
-      if (dirty.current && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return;
+      await session.flush();
+      if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return;
       setError(null);
       try {
         load(p, await api.readFile(p));
@@ -233,7 +171,7 @@ export function App() {
         setError(e instanceof Error ? e.message : '파일을 열지 못했어요');
       }
     },
-    [flush, load, narrow],
+    [session, load, narrow],
   );
 
   useEffect(() => {
@@ -249,56 +187,39 @@ export function App() {
 
   // 409 choices: drop local edits and re-read, or re-send local edits against the server's revision.
   const reload = async () => {
-    const p = pathRef.current;
+    const p = session.getState().path;
     if (!p) return;
-    await saving.current;
+    await session.idle();
     try {
       load(p, await api.readFile(p));
     } catch (e) {
       setError(e instanceof Error ? e.message : '파일을 불러오지 못했어요');
     }
   };
-  const overwrite = async () => {
-    await saving.current;
-    const f = fileRef.current;
-    if (!f || conflict?.revision === undefined) return;
-    const next = { ...f, revision: conflict.revision };
-    fileRef.current = next;
-    setFile(next);
-    conflictRef.current = false;
-    setConflict(null);
-    dirty.current = true;
-    clearTimer();
-    await save();
-  };
+  const overwrite = () => void session.overwrite();
 
   // Warn before leaving with unsaved edits; on pagehide send them with keepalive.
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
-      if (dirty.current || inFlight.current) {
+      if (session.hasUnsaved()) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
-    const hide = () => {
-      // Skip when a PUT is already running: it holds the same revision, so a second one would only 409.
-      if (!dirty.current || inFlight.current || conflictRef.current) return;
-      clearTimer();
-      void save(true);
-    };
+    const hide = () => session.saveOnHide();
     window.addEventListener('beforeunload', before);
     window.addEventListener('pagehide', hide);
     return () => {
       window.removeEventListener('beforeunload', before);
       window.removeEventListener('pagehide', hide);
     };
-  }, [save]);
+  }, [session]);
 
   const newFile = async () => {
     const name = window.prompt('새 파일 이름을 입력해 주세요');
     const p = name ? fileStem(name) : '';
     if (!p) return;
-    await flush();
+    await session.flush();
     try {
       await api.createFile(p, p.split('/').pop() ?? p);
       await refreshTree();
@@ -317,25 +238,16 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
-  // The open file is gone (deleted or moved away): drop it and its pending save, or the timer would write to a path that no longer exists.
+  // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
-    clearTimer();
-    dirty.current = false;
-    conflictRef.current = false;
-    reloadStopped.current = false;
-    setConflict(null);
-    setPath(null);
-    pathRef.current = null;
-    setFile(null);
-    fileRef.current = null;
+    session.close();
     setHashPath(null);
-  }, []);
+  }, [session]);
 
   // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
   useEffect(() => {
     if (typeof EventSource === 'undefined') return;
     const es = new EventSource('/api/events');
-    let busy = false;
     es.addEventListener('workspace', (m) => {
       let e: WorkspaceEvent;
       try {
@@ -343,27 +255,14 @@ export function App() {
       } catch {
         return;
       }
-      const act = externalAction(e, pathRef.current, dirty.current || inFlight.current);
-      if (act === 'close') {
-        closeOpenFile();
+      if (session.external(e, (p) => api.readFile(p), load) === 'close') {
+        setHashPath(null);
         setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
-      } else if (act === 'reload' && !busy) {
-        const p = pathRef.current!;
-        busy = true;
-        void saving.current
-          .then(() => (dirty.current || pathRef.current !== p ? null : api.readFile(p)))
-          .then((f) => {
-            if (f && !dirty.current && pathRef.current === p && f.revision > (fileRef.current?.revision ?? 0)) load(p, f);
-          })
-          .catch(() => {})
-          .finally(() => {
-            busy = false;
-          });
       }
       void refreshTree();
     });
     return () => es.close();
-  }, [closeOpenFile, load, refreshTree]);
+  }, [session, load, refreshTree]);
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
@@ -392,9 +291,9 @@ export function App() {
       ),
     [setStatus],
   );
-  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, fileRef.current?.title ?? ''));
+  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, session.getState().file?.title ?? ''));
   const markdownExport = () => {
-    const f = fileRef.current;
+    const f = session.getState().file;
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
   };
   const openExport = useCallback((o: boolean) => {
@@ -402,14 +301,17 @@ export function App() {
     setExportOpen(o);
   }, []);
   const blockExport = useCallback(
-    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, blockExportTitle(fileRef.current?.title ?? '', b, fileRef.current?.blocks ?? []))),
-    [report],
+    (b: Block, kind: ImageKind) => {
+      const f = session.getState().file;
+      void report(exportBlock(b, kind, blockExportTitle(f?.title ?? '', b, f?.blocks ?? [])));
+    },
+    [report, session],
   );
 
   // Global shortcuts (capture phase, so they win over the canvas and the editor): Ctrl/Cmd+K palette,
   // Ctrl/Cmd+E export, Shift+Alt+C copy as image. Tool keys, zoom, undo/redo, duplicate, delete and
   // select all are the canvas's own keys, active while the canvas has focus.
-  const fileOpen = !!file;
+  const fileOpen = hasFile;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
@@ -432,24 +334,24 @@ export function App() {
       } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen && !editing) {
         e.preventDefault();
         e.stopPropagation();
-        void report(exportCanvas(canvasHandle.current, 'copy', fileRef.current?.title ?? ''));
+        void report(exportCanvas(canvasHandle.current, 'copy', session.getState().file?.title ?? ''));
       }
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [fileOpen, openExport, report]);
+  }, [fileOpen, openExport, report, session]);
 
   const commands = (): Command[] => {
     const h = canvasHandle.current;
     const key = (k: Parameters<CanvasHandle['key']>[0]) => () => canvasHandle.current?.key(IS_MAC && k.ctrl ? { ...k, ctrl: false, meta: true } : k);
-    const needCanvas = !h || !file;
+    const needCanvas = !h || !hasFile;
     const M = IS_MAC ? '⌘' : 'Ctrl+';
     const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[] = []): Command => ({ id, title, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
     return [
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
       { id: 'export-copy', title: '이미지로 복사', keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
-      { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !file, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
+      { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
       { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
@@ -476,41 +378,9 @@ export function App() {
     ];
   };
 
-  const doc = file && path && (
-    <LazyBoundary key={`${path}#${loadSeq}`} onFail={flushForReload}>
-    <Suspense
-      fallback={
-        <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
-          문서를 불러오는 중이에요…
-        </p>
-      }
-    >
-      <DocPane
-        key={`${path}#${loadSeq}`}
-        document={file.document}
-        blocks={file.blocks}
-        canvas={file.canvas}
-        dark={theme === 'dark'}
-        onDocument={(d) => edit({ document: d })}
-        onBlocks={(b: Block[]) => edit({ blocks: b })}
-        onShow={showBlock}
-        onExportBlock={blockExport}
-      />
-    </Suspense>
-    </LazyBoundary>
-  );
-  const canvas = (
-    <CanvasPane
-      fileKey={file && path ? `${path}#${loadSeq}` : null}
-      canvas={file?.canvas}
-      blocks={file?.blocks ?? []}
-      focus={focus}
-      dark={theme === 'dark'}
-      onChange={edit}
-      handle={canvasHandle}
-      onFail={flushForReload}
-    />
-  );
+  const dark = theme === 'dark';
+  const doc = hasFile && path && <DocSlot session={session} dark={dark} onShow={showBlock} onExportBlock={blockExport} onFail={flushForReload} />;
+  const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
   const sidebar = (
     <Sidebar
@@ -538,8 +408,8 @@ export function App() {
           )}
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          title={file?.title ?? ''}
-          hasFile={!!file}
+          title={title}
+          hasFile={hasFile}
           status={status}
           statusAlert={statusAlert}
           view={view}
@@ -550,7 +420,7 @@ export function App() {
             <ExportMenu
               open={exportOpen}
               onOpen={openExport}
-              disabled={!file}
+              disabled={!hasFile}
               canvasReady={showCanvas}
               selected={exportSelected}
               onImage={imageExport}
@@ -570,7 +440,7 @@ export function App() {
               disabled={conflict.revision === undefined}
               className="h-7 rounded-md px-3 font-medium text-white disabled:opacity-50"
               style={{ background: 'var(--accent)' }}
-              onClick={() => void overwrite()}
+              onClick={overwrite}
             >
               내 것으로 덮어쓰기
             </button>
@@ -584,7 +454,7 @@ export function App() {
             </button>
           </div>
         )}
-        {!file ? (
+        {!hasFile ? (
           <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-muted)' }}>
             <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
           </main>

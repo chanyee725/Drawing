@@ -214,3 +214,11 @@ DRAW_E2E=1 CHROME=/path/to/chrome-headless-shell PLAYWRIGHT_CORE=/path/to/node_m
   - Virgil: OFL-1.1
   - Xiaolai (LXGW 기반): OFL-1.1
 - 다이어그램의 손글씨 글꼴(`typeface: rough`)로 Shantell Sans(OFL-1.1)를 써요. `@fontsource/shantell-sans` 5.3.0(원본 arrowtype/shantell-sans)에서 받아 영문·숫자·기본 문장부호의 보통 굵기만 골라 담았어요(약 25KB). 파일과 라이선스 전문은 `shared/render/fonts/`에 있고, 그림(SVG)에 글꼴이 같이 들어가서 밖으로 요청을 보내지 않아요. 한글은 시스템 글꼴로 보여요.
+- 다이어그램 아이콘은 npm 패키지에서 고른 것만 `shared/render/icon-data.ts`에 넣어요(`npm run icons`로 다시 만들어요). 전문은 `NOTICE.md`에 있어요.
+
+  | 묶음 | 쓰는 곳 | 라이선스 |
+  | --- | --- | --- |
+  | Lucide (`lucide-static`) | 일반 아이콘 (`users`, `server`, `key` …), `aws-*`·`gcp-*`·`azure-*` 이름의 대체 아이콘 | ISC (Feather에서 온 일부는 MIT) |
+  | Simple Icons (`simple-icons`) | 기술 로고 (`postgres`, `k8s`, `redis` …) | CC0-1.0 (개별 라이선스가 따로 붙은 로고는 넣지 않아요) |
+
+  로고는 각 회사의 상표예요. AWS·Google Cloud·Azure 공식 아이콘은 넣지 않았어요. 모르는 이름은 점선 상자로 그려요.

@@ -12,7 +12,7 @@ import { analyzeDiagram } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, picturesFor, rectOf, sameDrawing, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 /** Show (scroll to and select) this block's image; a new `n` is a new request. */
@@ -64,6 +64,9 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const [broken, setBroken] = useState<BrokenBlock[]>([]);
   // Picture size per file id, to keep a block's scale when its picture changes.
   const sizes = useRef(new Map<string, { width: number; height: number }>());
+  // The picture each block shows, so a block whose code did not change is not rendered again.
+  const picCache = useRef<PictureCache<BlockPicture>>(new Map());
+  const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
   const wrap = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   const canvasRef = useRef(canvas);
@@ -100,7 +103,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // Built once per mount (CanvasPane remounts on file switch/reload).
   const initialData = useMemo(
     () => async () => {
-      const pics = await Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME)));
+      const pics = await draw(blocks);
       for (const p of pics) sizes.current.set(p.fileId, p);
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
@@ -117,15 +120,17 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   );
 
   // What the images depend on: which blocks exist and their type and code, not where they sit. Dragging a
-  // block changes `blocks` on every frame; this key stays the same, so nothing below runs.
-  const drawKey = useMemo(() => JSON.stringify(blocks.map((b) => [b.id, b.type, b.code])), [blocks]);
+  // block changes `blocks` on every frame; `drawn` keeps its identity then, so nothing below runs.
+  const drawnRef = useRef(blocks);
+  if (!sameDrawing(drawnRef.current, blocks)) drawnRef.current = blocks;
+  const drawn = drawnRef.current;
 
   // Keep block images in step with the block list: new code → new picture, new block → new image, removed block → gone.
   useEffect(() => {
     if (!api) return;
     let live = true;
     const blocks = blocksRef.current;
-    void Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME))).then((pics) => {
+    void draw(blocks).then((pics) => {
       if (!live) return;
       setBroken(pics.flatMap((p, i) => (p.errors > 0 || p.failed ? [{ id: blocks[i]!.id, type: blocks[i]!.type, errors: p.errors, lastGood: p.lastGood, failed: p.failed }] : [])));
       for (const p of pics) sizes.current.set(p.fileId, p);
@@ -171,7 +176,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, drawKey, tryFocus]);
+  }, [api, drawn, draw, tryFocus]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);

@@ -189,3 +189,36 @@ export function findCopies(elements: readonly SceneEl[], owners: Map<string, str
   }
   return copies;
 }
+
+/**
+ * Same pictures: the same blocks in the same order with the same type and code; where they sit does not
+ * count. Unchanged code keeps its string, so this is cheap on every drag frame.
+ */
+export function sameDrawing(a: readonly Pick<BlockLike, 'id' | 'type' | 'code'>[], b: readonly Pick<BlockLike, 'id' | 'type' | 'code'>[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i].id !== b[i].id || a[i].type !== b[i].type || a[i].code !== b[i].code) return false;
+  return true;
+}
+
+/** Per block id: the type+code last drawn and its picture. Owned by one canvas. */
+export type PictureCache<P> = Map<string, { sig: string; pic: Promise<P> }>;
+
+/**
+ * Pictures for `blocks`, calling `render` only for blocks whose type or code changed since the last call
+ * with this cache. Blocks no longer in the list are dropped from the cache.
+ */
+export function picturesFor<B extends Pick<BlockLike, 'id' | 'type' | 'code'>, P>(blocks: readonly B[], cache: PictureCache<P>, render: (b: B) => Promise<P>): Promise<P[]> {
+  const ids = new Set(blocks.map((b) => b.id));
+  for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id);
+  return Promise.all(
+    blocks.map((b) => {
+      const sig = `${b.type}\n${b.code}`;
+      const hit = cache.get(b.id);
+      if (hit?.sig === sig) return hit.pic;
+      const pic = render(b);
+      cache.set(b.id, { sig, pic });
+      return pic;
+    }),
+  );
+}

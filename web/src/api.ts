@@ -1,5 +1,13 @@
 // Client for the E1 workspace API (docs/workspace-api.md).
-export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number };
+// Node position overrides for a block (docs/design/block-drag-edit.md §2.1). Keys of `items` are node or empty-group names.
+export type BlockLayout = {
+  v: number;
+  basis?: { type: string; direction: string; count: number };
+  items?: Record<string, { cx: number; cy: number; parent: string }>;
+};
+// Newest file format this web build understands; a 422 on a file above it means a newer app wrote it.
+export const FILE_FORMAT_VERSION = 3;
+export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout };
 export type DpxFile = {
   version: number;
   title: string;
@@ -13,8 +21,12 @@ export type TreeNode =
   | { type: 'file'; name: string; path: string; title: string; revision: number | null };
 
 export class ApiError extends Error {
-  constructor(public status: number, message: string, public revision?: number) {
+  status: number;
+  revision?: number;
+  constructor(status: number, message: string, revision?: number) {
     super(message);
+    this.status = status;
+    this.revision = revision;
   }
 }
 
