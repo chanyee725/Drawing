@@ -122,7 +122,7 @@ export function createFileSession(deps: Deps) {
     dirty = false;
     conflicted = false;
     reloadStopped = false;
-    set({ conflict: null, path: null, file: null });
+    set({ conflict: null, path: null, file: null, status: '', statusAlert: false });
   };
 
   const flush = async () => {
@@ -169,7 +169,7 @@ export function createFileSession(deps: Deps) {
       retryDelay = 0;
       conflicted = false;
       reloadStopped = false;
-      // A file from before the document editor gets its diagrams listed in the document (once: saves store version 2).
+      // A file from before the document editor gets its diagrams listed in the document (once: the next save stores the current format version).
       set({ conflict: null, path: p, file: { ...f, document: migrateDocument(f) }, loadSeq: state.loadSeq + 1, status: '', statusAlert: false });
     },
     close,

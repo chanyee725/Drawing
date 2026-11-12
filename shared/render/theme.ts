@@ -125,6 +125,11 @@ export function resolvePaint(paint: Paint, theme: Theme, soft = false): Resolved
   return { fill: mix(stroke, t.background, paint.mode === 'bold' ? amount * 2 : amount), stroke, text: t.text };
 }
 
+/** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 function contrastText(fill: string): string {
-  return luminance(fill) > 0.45 ? '#1f2329' : '#ffffff';
+  const l = luminance(fill);
+  const dark = luminance('#1f2329');
+  const onDark = (l + 0.05) / (dark + 0.05);
+  const onWhite = 1.05 / (l + 0.05);
+  return onDark >= onWhite ? '#1f2329' : '#ffffff';
 }

@@ -10,11 +10,12 @@ import { BlockEditor } from '../BlockEditor';
 import { BlockProps } from '../BlockProps';
 import { CanvasInsertMenu } from './CanvasInsertMenu';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
-import { analyzeDiagram } from '../dsl/adapter';
+import { analyzeDiagram, prunedLayout } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, picturesFor, rectOf, sameDrawing, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 /** Show (scroll to and select) this block's image; a new `n` is a new request. */
@@ -64,6 +65,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const [blockSelected, setBlockSelected] = useState(false);
   // Blocks whose code has errors (they show their last good picture), for the notice on the canvas.
   const [broken, setBroken] = useState<BrokenBlock[]>([]);
+  // Blocks drawn with their saved layout left out because the code changed a lot (design §4.2).
+  const [resets, setResets] = useState<ReadonlySet<string>>(new Set());
   // Picture size per file id, to keep a block's scale when its picture changes.
   const sizes = useRef(new Map<string, { width: number; height: number }>());
   // The picture each block shows, so a block whose code did not change is not rendered again.
@@ -81,6 +84,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const graveyard = useRef(new Map<string, Block>());
   // Block id → the one image element that shows it; other images with that block id are copies.
   const owners = useRef(new Map<string, string>());
+  // Block id → layout text last seen on its image's customData; a block takes the image's layout only when that changes (an undo).
+  const seenLayouts = useRef(new Map<string, string>());
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   apiRef.current = api;
   const focusRef = useRef(focus);
@@ -107,6 +112,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     () => async () => {
       const pics = await draw(blocks);
       for (const p of pics) sizes.current.set(p.fileId, p);
+      for (const b of blocks) seenLayouts.current.set(b.id, layoutSig(b.layout));
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
       // Placed blocks first, so blocks still to place keep clear of them.
@@ -135,6 +141,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     void draw(blocks).then((pics) => {
       if (!live) return;
       setBroken(pics.flatMap((p, i) => (p.errors > 0 || p.failed ? [{ id: blocks[i]!.id, type: blocks[i]!.type, errors: p.errors, lastGood: p.lastGood, failed: p.failed }] : [])));
+      setResets(new Set(pics.flatMap((p, i) => (p.layoutReset ? [blocks[i]!.id] : []))));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
       const add = pics.filter((p) => !files[p.fileId]).map(fileData);
@@ -154,12 +161,22 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         shown.add(bid);
         const p = pics[i];
         const img = el as ExcalidrawImageElement;
-        if (img.fileId === p.fileId) return el;
+        // The image carries the block's layout, so undo of a layout edit comes back through it (design §5.6).
+        const want = blocks[i]!.layout;
+        const layoutStale = layoutSig(img.customData?.layout as never) !== layoutSig(want);
+        if (img.fileId === p.fileId && !layoutStale) return el;
         changed = true;
+        const { layout: _old, ...rest } = img.customData ?? {};
+        const customData = want ? { ...rest, layout: want } : rest;
+        seenLayouts.current.set(bid, layoutSig(want));
+        if (img.fileId === p.fileId) return newElementWith(img, { customData });
         // Keep the zoom the block was shown at, so a bigger diagram takes more room instead of shrinking.
         const old = sizes.current.get(img.fileId ?? '');
         const scale = old && old.width > 0 ? img.width / old.width : 1;
-        return newElementWith(img, { fileId: p.fileId as FileId, width: p.width * scale, height: p.height * scale });
+        // When only the layout changed, its origin stays where it was on screen, so moving a node left does not push
+        // the whole block right. Code edits, resets and error pictures leave the block where it is.
+        const at = shiftForOrigin(img, old, p);
+        return newElementWith(img, { fileId: p.fileId as FileId, width: p.width * scale, height: p.height * scale, ...at, customData });
       });
       const missing = blocks.filter((b) => !shown.has(b.id));
       if (missing.length) {
@@ -208,7 +225,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     const split = splitScene(elements as unknown as readonly SceneEl[]);
     for (const b of cur) if (split.deleted.has(b.id)) graveyard.current.set(b.id, b);
-    let next = applyScene(cur, split);
+    let next = applyScene(cur, split, layoutsFromImages(split.layouts, seenLayouts.current));
     // An image came back (undo) for a block that was deleted on the canvas.
     const back = [...split.geometry.keys()].filter((id) => !cur.some((b) => b.id === id) && graveyard.current.has(id));
     if (back.length) {
@@ -279,23 +296,24 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       const sel = picked.length ? all.filter((e) => ids.has(e.id) || (e.type === 'text' && e.containerId && ids.has(e.containerId))) : [];
       return { selected: sel.length > 0, elements: sel.length ? sel : all };
     };
-    const opts = () => ({ exportBackground: true, viewBackgroundColor: '#ffffff', exportWithDarkMode: false });
+    // Excalidraw inverts the white background itself in dark mode; a transparent export skips the background.
+    const opts = (o: ExportOptions) => ({ exportBackground: !o.transparent, viewBackgroundColor: '#ffffff', exportWithDarkMode: o.dark });
     handle.current = {
       scope: () => {
         const s = scope();
         return { selected: s.selected, count: s.elements.length };
       },
-      svg: async () => {
+      svg: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        const el = await exportToSvg({ elements, appState: opts(), files: api.getFiles(), exportPadding: 16 });
+        const el = await exportToSvg({ elements, appState: opts(o), files: api.getFiles(), exportPadding: 16 });
         el.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         return { svg: new XMLSerializer().serializeToString(el), width: parseFloat(el.getAttribute('width') ?? '0'), height: parseFloat(el.getAttribute('height') ?? '0') };
       },
-      png: async () => {
+      png: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        return await exportToBlob({ elements, appState: opts(), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16 });
+        return await exportToBlob({ elements, appState: opts(o), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
       },
       key: ({ key, code, ctrl, meta, shift, alt }) => {
         const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');
@@ -313,6 +331,16 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   useEffect(() => {
     if (editing && !block) setEditing(null);
   }, [editing, block]);
+  // Closing the code panel (or opening another block's) tidies the layout of the block it showed (design §4.3).
+  const prevEditing = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevEditing.current;
+    prevEditing.current = editing;
+    if (!prev || prev === editing) return;
+    const b = blocksRef.current.find((x) => x.id === prev);
+    const pruned = b && prunedLayout(b);
+    if (pruned) onChangeRef.current({ blocks: blocksRef.current.map((x) => (x.id === prev ? pruned : x)) });
+  }, [editing]);
   const patchBlock = (p: Partial<Block>) => onChangeRef.current({ blocks: blocksRef.current.map((b) => (b.id === editing ? { ...b, ...p } : b)) });
 
   return (
@@ -389,6 +417,11 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>
+          {resets.has(block.id) && (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              코드가 많이 바뀌어서 자동 배치로 그려요. 패널을 닫으면 옮긴 배치가 지워져요
+            </p>
+          )}
           {!analyzeDiagram(block.type, block.code).parsed && (
             <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
               이 종류는 아직 문법 검사를 지원하지 않아요.

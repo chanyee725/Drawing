@@ -4,8 +4,11 @@
 // points at the block. The block (file.blocks) is the source of truth for code and geometry; the
 // image element is rebuilt on load and never written into file.canvas.elements.
 
+import { layoutProblem, type BlockLayout } from '../../../shared/render/block-layout.ts';
+
 export type BlockGeom = { x: number; y: number; w: number; h: number };
-export type BlockLike = BlockGeom & { id: string; type: string; code: string };
+export type BlockLike = BlockGeom & { id: string; type: string; code: string; layout?: BlockLayout };
+type DrawKey = Pick<BlockLike, 'id' | 'type' | 'code' | 'layout'>;
 
 /** The subset of an Excalidraw element this module reads. */
 export type SceneEl = {
@@ -35,8 +38,41 @@ export function hash(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+// Layouts are never mutated, so their text form is computed once per object (handleChange compares them on every frame).
+const sigs = new WeakMap<object, string>();
+
+/** Stable text form of a layout ("" for none), for cache keys and for comparing layouts. */
+export function layoutSig(l: BlockLayout | undefined | null): string {
+  if (!l) return '';
+  let s = sigs.get(l);
+  if (s === undefined) {
+    s = JSON.stringify(l);
+    sigs.set(l, s);
+  }
+  return s;
+}
+
+/** What the picture depends on: type, code and layout (not where the block sits). */
+export const drawSig = (b: Pick<BlockLike, 'type' | 'code' | 'layout'>): string => `${b.type}\n${b.code}\n${layoutSig(b.layout)}`;
+
 /** File id of a rendered block image: changes whenever the picture would change. */
-export const fileIdFor = (b: Pick<BlockLike, 'id' | 'type' | 'code'>, theme: string) => `blk_${b.id}_${hash(`${theme}\n${b.type}\n${b.code}`)}`;
+export const fileIdFor = (b: DrawKey, theme: string) => `blk_${b.id}_${hash(`${theme}\n${drawSig(b)}`)}`;
+
+const checked = new WeakMap<object, boolean>();
+
+/**
+ * A layout read back from an image's `customData`. Anything the server would refuse counts as none (same rules,
+ * `layoutProblem`), so a bad value never reaches a save. The object is kept as is, checked once.
+ */
+export function asLayout(v: unknown): BlockLayout | undefined {
+  if (v === null || typeof v !== 'object') return undefined;
+  let ok = checked.get(v);
+  if (ok === undefined) {
+    ok = layoutProblem(v) === null;
+    checked.set(v, ok);
+  }
+  return ok ? (v as BlockLayout) : undefined;
+}
 
 export type SplitScene<E extends SceneEl> = {
   /** Free-form elements to save in file.canvas.elements (deleted ones dropped). */
@@ -45,12 +81,15 @@ export type SplitScene<E extends SceneEl> = {
   geometry: Map<string, BlockGeom>;
   /** Block ids whose image was deleted on the canvas. */
   deleted: Set<string>;
+  /** `customData.layout` of live block images, by block id (undefined: the image carries none). */
+  layouts: Map<string, BlockLayout | undefined>;
 };
 
 export function splitScene<E extends SceneEl>(elements: readonly E[]): SplitScene<E> {
   const free: E[] = [];
   const geometry = new Map<string, BlockGeom>();
   const deleted = new Set<string>();
+  const layouts = new Map<string, BlockLayout | undefined>();
   for (const el of elements) {
     const bid = blockIdOf(el);
     if (bid === null) {
@@ -59,10 +98,11 @@ export function splitScene<E extends SceneEl>(elements: readonly E[]): SplitScen
       if (!geometry.has(bid)) deleted.add(bid);
     } else {
       geometry.set(bid, { x: el.x, y: el.y, w: el.width, h: el.height });
+      layouts.set(bid, asLayout(el.customData?.layout));
       deleted.delete(bid);
     }
   }
-  return { free, geometry, deleted };
+  return { free, geometry, deleted, layouts };
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -72,7 +112,12 @@ const same = (a: BlockGeom, b: BlockGeom) => round(a.x) === round(b.x) && round(
  * Apply canvas moves/resizes/deletes to the block list. Returns the same array when nothing changed,
  * so callers can skip a save.
  */
-export function applyScene<B extends BlockLike>(blocks: readonly B[], split: Pick<SplitScene<SceneEl>, 'geometry' | 'deleted'>): readonly B[] {
+export function applyScene<B extends BlockLike>(
+  blocks: readonly B[],
+  split: Pick<SplitScene<SceneEl>, 'geometry' | 'deleted'>,
+  /** Layouts to take from images (see `layoutsFromImages`); a block id with `undefined` has its layout cleared. */
+  layouts?: ReadonlyMap<string, BlockLayout | undefined>,
+): readonly B[] {
   let changed = false;
   const out: B[] = [];
   for (const b of blocks) {
@@ -81,12 +126,60 @@ export function applyScene<B extends BlockLike>(blocks: readonly B[], split: Pic
       continue;
     }
     const g = split.geometry.get(b.id);
-    if (g && !same(g, b)) {
-      changed = true;
-      out.push({ ...b, x: round(g.x), y: round(g.y), w: round(g.w), h: round(g.h) });
-    } else out.push(b);
+    let nb = b;
+    if (g && !same(g, b)) nb = { ...nb, x: round(g.x), y: round(g.y), w: round(g.w), h: round(g.h) };
+    if (layouts?.has(b.id)) {
+      const l = layouts.get(b.id);
+      if (layoutSig(l) !== layoutSig(b.layout)) {
+        const { layout: _drop, ...rest } = nb;
+        nb = (l ? { ...rest, layout: l } : rest) as B;
+      }
+    }
+    if (nb !== b) changed = true;
+    out.push(nb);
   }
   return changed ? out : blocks;
+}
+
+/**
+ * Layouts that changed on their image since `seen` (block id → layout text last seen on that image).
+ * The block is the source of truth, so an image only wins when its own `customData.layout` moved
+ * (a layout edit or its undo), not when it merely lags behind a block change. Updates `seen` in place.
+ */
+export function layoutsFromImages(layouts: ReadonlyMap<string, BlockLayout | undefined>, seen: Map<string, string>): Map<string, BlockLayout | undefined> {
+  const changed = new Map<string, BlockLayout | undefined>();
+  for (const [id, l] of layouts) {
+    const sig = layoutSig(l);
+    if (seen.get(id) === sig) continue;
+    seen.set(id, sig);
+    changed.set(id, l);
+  }
+  return changed;
+}
+
+/**
+ * Where the layout origin sits in a picture (picture = layout + origin), for a picture that is a real drawing of the
+ * code with the block's layout applied (or none). `key` names what was drawn apart from the layout: theme, type, code.
+ * Placeholders, last-good pictures kept for broken code and pictures whose layout was reset have no anchor.
+ */
+export type OriginAnchor = { key: string; x: number; y: number };
+
+/**
+ * Where a block image should sit after its picture changed. When only the layout changed (a node was dragged and the
+ * bounds moved), the layout origin must not move on screen (design §5.6), so the image shifts by the origin change,
+ * scaled like the picture: `x' = x + s * (origin.x - origin'.x)`. Any other change (code, theme, an error picture,
+ * an automatic reset) leaves the block where it is.
+ */
+export function shiftForOrigin(
+  el: { x: number; y: number; width: number },
+  oldPic: { width: number; anchor?: OriginAnchor } | undefined,
+  newPic: { anchor?: OriginAnchor },
+): { x: number; y: number } {
+  const a = oldPic?.anchor;
+  const b = newPic.anchor;
+  if (!a || !b || a.key !== b.key || !(oldPic!.width > 0)) return { x: el.x, y: el.y };
+  const s = el.width / oldPic!.width;
+  return { x: round(el.x + s * (a.x - b.x)), y: round(el.y + s * (a.y - b.y)) };
 }
 
 /** Cheap fingerprint of the free-form elements, to tell real edits from scroll/selection changes. */
@@ -127,7 +220,7 @@ export function blockImageSkeleton(b: BlockLike, fileId: string, id: string) {
     fileId,
     scale: [1, 1] as [number, number],
     crop: null,
-    customData: { blockId: b.id },
+    customData: b.layout ? { blockId: b.id, layout: b.layout } : { blockId: b.id },
   };
 }
 
@@ -191,13 +284,16 @@ export function findCopies(elements: readonly SceneEl[], owners: Map<string, str
 }
 
 /**
- * Same pictures: the same blocks in the same order with the same type and code; where they sit does not
+ * Same pictures: the same blocks in the same order with the same type, code and layout; where they sit does not
  * count. Unchanged code keeps its string, so this is cheap on every drag frame.
  */
-export function sameDrawing(a: readonly Pick<BlockLike, 'id' | 'type' | 'code'>[], b: readonly Pick<BlockLike, 'id' | 'type' | 'code'>[]): boolean {
+export function sameDrawing(a: readonly DrawKey[], b: readonly DrawKey[]): boolean {
   if (a === b) return true;
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i].id !== b[i].id || a[i].type !== b[i].type || a[i].code !== b[i].code) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i].id !== b[i].id || a[i].type !== b[i].type || a[i].code !== b[i].code) return false;
+    if (a[i].layout !== b[i].layout && layoutSig(a[i].layout) !== layoutSig(b[i].layout)) return false;
+  }
   return true;
 }
 
@@ -208,12 +304,12 @@ export type PictureCache<P> = Map<string, { sig: string; pic: Promise<P> }>;
  * Pictures for `blocks`, calling `render` only for blocks whose type or code changed since the last call
  * with this cache. Blocks no longer in the list are dropped from the cache.
  */
-export function picturesFor<B extends Pick<BlockLike, 'id' | 'type' | 'code'>, P>(blocks: readonly B[], cache: PictureCache<P>, render: (b: B) => Promise<P>): Promise<P[]> {
+export function picturesFor<B extends DrawKey, P>(blocks: readonly B[], cache: PictureCache<P>, render: (b: B) => Promise<P>): Promise<P[]> {
   const ids = new Set(blocks.map((b) => b.id));
   for (const id of cache.keys()) if (!ids.has(id)) cache.delete(id);
   return Promise.all(
     blocks.map((b) => {
-      const sig = `${b.type}\n${b.code}`;
+      const sig = drawSig(b);
       const hit = cache.get(b.id);
       if (hit?.sig === sig) return hit.pic;
       const pic = render(b);

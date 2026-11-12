@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from '../../shared/dsl/index.ts';
@@ -40,7 +41,11 @@ test('deterministic: same code renders the same SVG twice', async () => {
   }
 });
 
-test('performance: 100-node architecture diagram lays out in under 150 ms', async () => {
+/** Timing bound in ms: tight on a quiet machine, loose on CI or when the machine is busy (other sessions share it). */
+const timingBudget = (quiet: number, loose: number): number =>
+  process.env.CI || os.loadavg()[0]! > os.availableParallelism() / 2 ? loose : quiet;
+
+test('performance: 100-node architecture diagram lays out in under 150 ms (450 ms when the machine is busy)', async () => {
   const lines: string[] = [];
   for (let g = 0; g < 5; g++) {
     lines.push(`G${g} [icon: aws] {`);
@@ -58,7 +63,7 @@ test('performance: 100-node architecture diagram lays out in under 150 ms', asyn
     assert.equal(r.scene.items.filter((it) => it.kind === 'icon').length, 105);
   }
   times.sort((a, b) => a - b);
-  assert.ok(times[2]! < (process.env.CI ? 450 : 150), `median ${times[2]!.toFixed(1)} ms`);
+  assert.ok(times[2]! < timingBudget(150, 450), `median ${times[2]!.toFixed(1)} ms`);
 });
 
 test('colour values cannot inject markup', async () => {
@@ -177,4 +182,24 @@ test('the embedded rough font is the bundled OFL file', async () => {
   assert.ok(bytes.length < 40_000);
   const license = readFileSync(fileURLToPath(new URL('shantell-sans-OFL.txt', dir)), 'utf8');
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/i);
+});
+
+test('the diagram title follows the global typeface', async () => {
+  const titleFont = async (code: string) => {
+    const { scene } = await renderDiagram(code, { type: 'flowchart' });
+    const t = scene.items.find((it) => it.kind === 'text' && it.lines[0] === 'My title');
+    assert.ok(t && t.kind === 'text');
+    return t.font;
+  };
+  assert.equal(await titleFont('title My title\nA > B'), 'clean');
+  assert.equal(await titleFont('typeface rough\ntitle My title\nA > B'), 'rough');
+  assert.equal(await titleFont('typeface mono\ntitle My title\nA > B'), 'mono');
+});
+
+test('the legend follows the global typeface like the title', async () => {
+  const code = 'typeface mono\nA > B\nlegend { [color: red, label: Error] }';
+  const { svg } = await renderDiagram(code, { type: 'flowchart' });
+  const legendText = /<text[^>]*font-family="([^"]*)"[^>]*>(?:(?!<\/text>).)*Error/.exec(svg);
+  assert.ok(legendText, 'legend label is drawn');
+  assert.match(legendText![1]!, /mono|Mono/i);
 });
