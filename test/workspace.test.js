@@ -223,7 +223,7 @@ function sseReader(base) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test('external edits emit a workspace SSE event; our own writes do not', async () => {
+test('external edits emit a workspace SSE event; our own saves and creates do not', async () => {
   await withApp(async ({ ws, base, call }) => {
     await call('POST', '/api/file', { path: 'a' });
     const sse = sseReader(base);
@@ -233,10 +233,19 @@ test('external edits emit a workspace SSE event; our own writes do not', async (
       await call('PUT', `/api/file?path=${q('a')}`, { title: 'mine', revision: 1 });
       await call('POST', '/api/file', { path: 'b' });
       await call('POST', '/api/folder', { path: 'dir' });
-      await call('POST', '/api/move', { from: 'b', to: 'dir/b' });
-      await call('DELETE', `/api/file?path=${q('dir/b')}`);
       await sleep(400);
       assert.deepEqual(sse.events, []);
+
+      // moves and deletes through the API tell other tabs
+      await call('POST', '/api/move', { from: 'b', to: 'dir/b' });
+      assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json')).kind, 'tree');
+      await call('DELETE', `/api/file?path=${q('dir/b')}`);
+      assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json' && e.kind === 'delete')).kind, 'delete');
+      await call('POST', '/api/folder', { path: 'tmpdir' });
+      await call('DELETE', `/api/folder?path=${q('tmpdir')}`);
+      await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree');
+      await sleep(400); // the watcher then sees nothing new
+      sse.events.length = 0;
 
       // outside edit of an existing file
       const cur = JSON.parse(await readFile(join(ws, 'a.dpx.json'), 'utf8'));
@@ -532,4 +541,46 @@ test('reading a newer-format file after an outside edit leaves it untouched, and
     assert.equal(stale.status, 422);
     assert.equal(await readFile(file, 'utf8'), edited);
   });
+});
+
+test('a typed .dpx suffix is dropped: demo.dpx is the file demo.dpx.json', async () => {
+  await withApp(async ({ ws, call }) => {
+    const r = await call('POST', '/api/file', { path: 'a/demo.dpx', title: 'Demo' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.path, 'a/demo.dpx.json');
+    assert.deepEqual(await readdir(join(ws, 'a')), ['demo.dpx.json']);
+    assert.equal((await call('GET', `/api/file?path=${q('a/demo.dpx')}`)).status, 200);
+    assert.equal((await call('POST', '/api/file', { path: 'a/demo' })).status, 409);
+  });
+});
+
+test('names like a:memo are fine; only drive paths are refused', async () => {
+  await withApp(async ({ call }) => {
+    assert.equal((await call('POST', '/api/file', { path: 'a:memo' })).status, 201);
+    assert.equal((await call('GET', `/api/file?path=${q('a:memo')}`)).status, 200);
+    if (process.platform !== 'win32') assert.equal((await call('POST', '/api/file', { path: 'C:/x' })).status, 400);
+  });
+});
+
+test('the revision floors of deleted files are bounded, newest kept', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const store = createStore(ws, {});
+  try {
+    for (const name of ['old', 'recent']) {
+      await store.createFile(name, {});
+      const f = await store.readFile(name);
+      await store.writeFile(name, { ...f, revision: f.revision });
+    }
+    await store.removeFile('old');
+    for (let i = 0; i < 1100; i++) {
+      await store.createFile(`x${i}`, {});
+      await store.removeFile(`x${i}`);
+    }
+    await store.removeFile('recent');
+    assert.equal((await store.createFile('old', {})).revision, 1, 'the oldest floor was dropped');
+    assert.equal((await store.createFile('recent', {})).revision, 3, 'a recent deletion keeps its floor');
+  } finally {
+    store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
 });

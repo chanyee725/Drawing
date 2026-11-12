@@ -43,7 +43,7 @@ function globalAt(d: DiagramBase, key: string, line: number): string | undefined
 
 /**
  * Element attrs win over global styles. Defaults follow the spec except `typeface`: we default to `clean`
- * until the hand-drawn font is bundled (rough is accepted and rendered with a fallback stack).
+ * (the hand-drawn face is bundled and embedded in the SVG; whether it should be the default is a product call).
  */
 export function styleFor(d: DiagramBase, attrs: Attrs, line: number): ElementStyle {
   const get = (key: string): string | undefined => attrs[key] ?? globalAt(d, key, line);

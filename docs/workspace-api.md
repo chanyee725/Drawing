@@ -21,7 +21,9 @@ Paths are relative to the workspace, `/`-separated. No `..`, absolute paths, hid
 
 - Every save bumps `revision`. A stale save gets 409 with the current revision.
 - If a file is edited outside without raising its `revision`, the server raises it (`known revision + 1`) the next time it sees the change (watcher, GET or PUT). So a client holding the old revision gets 409, and re-reading gives the new revision.
-- SSE `workspace` events (`create`, `change`, `delete`, `tree`) are sent only for outside changes; `change` carries the raised `revision`.
+- SSE `workspace` events (`create`, `change`, `delete`, `tree`): outside changes send all of them (`change` carries the raised `revision`). Through the API only deletes (`delete` for a file, `tree` for a folder) and moves (`tree`, with `path` = the new path and `from` = the old one) send an event, so other tabs update; saves and creates stay silent.
+- Saving rewrites the file from the fields the server knows (`normalizeContent`), so fields added by a newer version or by hand are dropped. A file with a newer `version` is never rewritten.
+- If the server cannot watch the folder (for example EACCES or the OS watch limit), it logs one line and goes on without outside-change events.
 
 ## Errors
 
