@@ -16,7 +16,7 @@ test('normalizeExport repairs bad input', () => {
 
 test('background is white, dark, or none when transparent', () => {
   assert.equal(exportBackground({ scale: 1, transparent: false, dark: false }), '#ffffff');
-  assert.equal(exportBackground({ scale: 1, transparent: false, dark: true }), '#18181b');
+  assert.equal(exportBackground({ scale: 1, transparent: false, dark: true }), '#17191d');
   assert.equal(exportBackground({ scale: 1, transparent: true, dark: true }), null);
 });
 
@@ -29,4 +29,11 @@ test('file name suffix marks non-default choices; svg ignores scale', () => {
 test('describeExport is a short Korean summary', () => {
   assert.equal(describeExport({ scale: 2, transparent: false, dark: false }), '2배 · 라이트 · 배경 있음');
   assert.equal(describeExport({ scale: 3, transparent: true, dark: true }), '3배 · 다크 · 투명 배경');
+});
+
+test('withSvgBackground paints a plate behind the drawing, or leaves it transparent', async () => {
+  const { withSvgBackground } = await import('../../web/src/export/options.ts');
+  const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><g/></svg>';
+  assert.equal(withSvgBackground(svg, null), svg);
+  assert.equal(withSvgBackground(svg, '#17191d'), '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="100%" height="100%" fill="#17191d"/><g/></svg>');
 });

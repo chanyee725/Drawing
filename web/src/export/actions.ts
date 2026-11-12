@@ -3,7 +3,7 @@
 import type { Block } from '../api';
 import { download, copyPng, svgBlob, svgSize, svgToPng } from './image';
 import { documentToMarkdown, exportName } from './markdown';
-import { DEFAULT_EXPORT, exportBackground, exportSuffix, type ExportOptions } from './options';
+import { DEFAULT_EXPORT, exportBackground, exportSuffix, withSvgBackground, type ExportOptions } from './options';
 import type { CanvasHandle } from './types';
 
 export type ImageKind = 'svg' | 'png' | 'copy';
@@ -38,7 +38,8 @@ export async function exportBlock(block: Block, kind: ImageKind, title: string, 
   const pic = await renderBlock(block, o.dark ? 'dark' : 'light');
   const { width, height } = svgSize(pic.svg);
   if (kind === 'svg') {
-    download(svgBlob(pic.svg), exportName(title + exportSuffix(o, 'svg'), 'svg'));
+    // Without a background a dark export (light text) would vanish on a white page.
+    download(svgBlob(withSvgBackground(pic.svg, exportBackground(o))), exportName(title + exportSuffix(o, 'svg'), 'svg'));
     return '다이어그램을 SVG로 내보냈어요';
   }
   const png = await svgToPng(pic.svg, width, height, o.scale, exportBackground(o));

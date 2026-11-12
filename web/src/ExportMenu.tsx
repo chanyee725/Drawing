@@ -55,7 +55,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
       </button>
       {open && (
         <div role="menu" aria-label="내보내기" className="absolute right-0 top-9 z-30 w-64 rounded-lg border p-1 shadow-lg" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-          <fieldset data-export-options className="m-1 flex flex-col gap-1.5 border-b pb-2 text-sm" style={{ borderColor: 'var(--border)' }} disabled={!canvasReady}>
+          <fieldset data-export-options className="m-1 flex flex-col gap-1.5 border-b pb-2 text-sm" style={{ borderColor: 'var(--border)' }}>
             <legend className="sr-only">이미지 옵션</legend>
             <div className="flex items-center gap-1" role="group" aria-label="PNG 크기">
               <span className="mr-auto px-1 text-xs" style={{ color: 'var(--text-muted)' }}>PNG 크기</span>
