@@ -8,6 +8,7 @@ test('failed dynamic imports are recognised in each browser wording', () => {
     'error loading dynamically imported module: http://x/a.js', // Firefox
     'Importing a module script failed.', // Safari
     'Loading chunk 7 failed.',
+    'Unable to preload CSS for /assets/DocPane-abc.css', // Vite, one CSS chunk
   ])
     assert.equal(isChunkLoadError(new TypeError(m)), true, m);
   const named = new Error('x');

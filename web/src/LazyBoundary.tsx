@@ -2,8 +2,8 @@ import { Component, type ReactNode } from 'react';
 import { noticeFor } from './chunkError';
 
 type Props = {
-  /** Called when a child fails (and again before reloading): save the open file here. */
-  onFail?: () => unknown;
+  /** Called when a child fails (and again before reloading): save the open file here. Resolve false when edits are still unsaved. */
+  onFail?: () => Promise<boolean | void> | boolean | void;
   children: ReactNode;
 };
 type State = { error: unknown; failed: boolean };
@@ -21,11 +21,14 @@ export class LazyBoundary extends Component<Props, State> {
   }
 
   private reload = async () => {
+    let saved: boolean | void = true;
     try {
-      await this.props.onFail?.();
+      saved = await this.props.onFail?.();
     } catch {
-      // The pagehide handler still tries to save on the way out.
+      saved = false;
     }
+    // Reloading with unsaved edits (failed PUT, conflict) would lose them.
+    if (saved === false) return;
     window.location.reload();
   };
 

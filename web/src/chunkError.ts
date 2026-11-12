@@ -4,7 +4,7 @@ export function isChunkLoadError(e: unknown): boolean {
   const { name, message } = e as { name?: unknown; message?: unknown };
   if (name === 'ChunkLoadError') return true;
   const m = typeof message === 'string' ? message : '';
-  return /dynamically imported module|importing a module script failed|loading chunk|loading css chunk/i.test(m);
+  return /dynamically imported module|importing a module script failed|loading chunk|loading css chunk|unable to preload css/i.test(m);
 }
 
 export const CHUNK_MESSAGE = '새 버전이 있어요. 새로고침해 주세요';

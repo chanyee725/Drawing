@@ -169,6 +169,14 @@ export function App() {
     await save();
   }, [save]);
 
+  // Save before a lazy-chunk reload. False (and a notice) when edits are still unsaved or in conflict.
+  const flushForReload = useCallback(async () => {
+    await flush();
+    if (!dirty.current && !conflictRef.current) return true;
+    setStatus('저장하지 못해서 새로고침을 멈추었어요', true);
+    return false;
+  }, [flush, setStatus]);
+
   const edit = useCallback(
     (patch: Partial<Pick<DpxFile, 'title' | 'document' | 'blocks' | 'canvas'>>) => {
       setFile((cur) => {
@@ -419,7 +427,7 @@ export function App() {
   };
 
   const doc = file && path && (
-    <LazyBoundary onFail={flush}>
+    <LazyBoundary key={`${path}#${loadSeq}`} onFail={flushForReload}>
     <Suspense
       fallback={
         <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -450,7 +458,7 @@ export function App() {
       dark={theme === 'dark'}
       onChange={edit}
       handle={canvasHandle}
-      onFail={flush}
+      onFail={flushForReload}
     />
   );
 
