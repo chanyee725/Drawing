@@ -5,7 +5,7 @@ import type { Point, Scene, SceneBox, SceneEdge, SceneText, ShapeKind } from '..
 import { THEMES, resolvePaint, strokeOf } from '../../../shared/render/theme.ts';
 
 /** Where the block image sits on the canvas, and the picture width it was drawn at. */
-export type Placement = { x: number; y: number; width: number };
+export type Placement = { x: number; y: number; width: number; height?: number };
 export type Skeleton = Record<string, unknown> & { id: string; type: string };
 export type ArrowBinding = { arrowId: string; startId: string | null; endId: string | null };
 export type Freeform = { skeletons: Skeleton[]; bindings: ArrowBinding[] };
@@ -37,9 +37,12 @@ function nodeAt(p: Point, nodes: SceneBox[]) {
  * like the block pictures.
  */
 export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string): Freeform {
-  const k = scene.width > 0 ? at.width / scene.width : 1;
-  const X = (x: number) => at.x + x * k;
-  const Y = (y: number) => at.y + y * k;
+  // The block picture may be stretched unevenly (Shift-drag), so each axis has its own scale; text and strokes use the smaller.
+  const kx = scene.width > 0 ? at.width / scene.width : 1;
+  const ky = scene.height > 0 && at.height ? at.height / scene.height : kx;
+  const k = Math.min(kx, ky);
+  const X = (x: number) => at.x + x * kx;
+  const Y = (y: number) => at.y + y * ky;
   const drawn = scene.items.filter((i): i is SceneBox => i.kind === 'box');
   // Architecture nodes are an icon and a label with no box: their hit box stands in for the shape.
   const boxed = new Set(drawn.filter((b) => b.role === 'node').map((b) => b.id));
@@ -70,6 +73,8 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
   const skeletons: Skeleton[] = [];
   const bindings: ArrowBinding[] = [];
   const ids = new Map<SceneBox, string>();
+  const groupBoxes = boxes.filter((b) => b.role === 'group' || b.role === 'frame');
+  const groupOf = new Map<SceneBox, string>();
   const textOf = (txs: SceneText[] | undefined) => (txs ?? []).map((x) => x.lines.join('\n')).join('\n');
   const sizeOf = (txs: SceneText[] | undefined) => Math.round((txs?.[0]?.size ?? 14) * k);
 
@@ -77,6 +82,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
     const id = newId();
     ids.set(b, id);
     const group = b.role === 'group' || b.role === 'frame';
+    if (group) groupOf.set(b, `${id}-g`);
     const p = resolvePaint(b.paint, 'light', group);
     const label = b.role === 'node' ? textOf(nodeLabel.get(b)) : '';
     skeletons.push({
@@ -84,8 +90,8 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       type: b.role === 'node' ? (SHAPE[b.shape] ?? 'rectangle') : 'rectangle',
       x: X(b.x),
       y: Y(b.y),
-      width: b.w * k,
-      height: b.h * k,
+      width: b.w * kx,
+      height: b.h * ky,
       strokeColor: p.stroke,
       backgroundColor: p.fill === 'none' ? 'transparent' : p.fill,
       fillStyle: 'solid',
@@ -93,6 +99,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       strokeStyle: group || b.dashed ? 'dashed' : 'solid',
       roughness: 0,
       roundness: SHAPE[b.shape] ? null : { type: 3 },
+      ...(group ? { groupIds: [groupOf.get(b)!] } : {}),
       ...(label ? { label: { text: label, fontSize: sizeOf(nodeLabel.get(b)), strokeColor: p.text } } : {}),
     });
   }
@@ -108,7 +115,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       type: 'arrow',
       x: X(o.x),
       y: Y(o.y),
-      points: e.points.map((q) => [(q.x - o.x) * k, (q.y - o.y) * k]),
+      points: e.points.map((q) => [(q.x - o.x) * kx, (q.y - o.y) * ky]),
       strokeColor: color,
       strokeWidth: 1,
       strokeStyle: e.dashed ? 'dashed' : 'solid',
@@ -126,10 +133,13 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
   for (const tx of free) {
     const size = Math.round(tx.size * k);
     const w = Math.max(...tx.lines.map((l) => l.length)) * size * 0.6;
-    const left = tx.anchor === 'middle' ? tx.x - w / 2 / k : tx.anchor === 'end' ? tx.x - w / k : tx.x;
+    const left = tx.anchor === 'middle' ? tx.x - w / 2 / kx : tx.anchor === 'end' ? tx.x - w / kx : tx.x;
+    // A title that sits in a group box moves with it.
+    const owner = groupBoxes.filter((g) => inside({ x: tx.x, y: tx.y }, g)).sort((a, b) => area(a) - area(b))[0];
     skeletons.push({
       id: newId(),
       type: 'text',
+      ...(owner ? { groupIds: [groupOf.get(owner)!] } : {}),
       x: X(left),
       y: Y(tx.y),
       text: tx.lines.join('\n'),

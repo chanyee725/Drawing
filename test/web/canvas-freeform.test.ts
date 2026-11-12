@@ -77,3 +77,23 @@ test('architecture nodes (icon and label, no box) become rectangles from their h
   assert.equal(skeletons.filter((s) => s.type === 'text').length, 0, 'labels are inside the shapes, not loose');
   assert.ok(bindings.every((b) => b.startId && b.endId), JSON.stringify(bindings));
 });
+
+test('a block stretched taller than wide scales each axis on its own', () => {
+  // Scene 400x200 drawn into 800x600: x2 across, x3 down.
+  const { skeletons } = sceneToFreeform(SCENE, { x: 1000, y: 500, width: 800, height: 600 }, counter());
+  const a = skeletons[1];
+  assert.deepEqual([a.x, a.y, a.width, a.height], [1040, 650, 200, 120]);
+  const arrow = skeletons[3];
+  assert.deepEqual(arrow.points, [[0, 0], [160, 0], [160, 6], [320, 6]]);
+  // Without a height the width scale applies to both, as before.
+  const same = sceneToFreeform(SCENE, { x: 1000, y: 500, width: 800 }, counter()).skeletons[1];
+  assert.deepEqual([same.y, same.height], [600, 80]);
+});
+
+test('a group title shares groupIds with its dashed rectangle so they move together', () => {
+  const [group, a, , , title] = sceneToFreeform(SCENE, { x: 0, y: 0, width: 400 }, counter()).skeletons;
+  const ids = group.groupIds as string[];
+  assert.equal(ids.length, 1);
+  assert.deepEqual(title.groupIds, ids);
+  assert.equal(a.groupIds, undefined);
+});
