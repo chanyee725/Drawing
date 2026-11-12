@@ -1,7 +1,7 @@
 // The infinite canvas: Excalidraw (MIT) with diagram blocks shown as image elements.
 // Loaded lazily from CanvasPane so the editor shell does not wait for it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CaptureUpdateAction, Excalidraw, exportToBlob, exportToSvg, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, Excalidraw, convertToExcalidrawElements, exportToBlob, exportToSvg, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
 import type { AppState, ExcalidrawImperativeAPI, BinaryFileData } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
@@ -19,6 +19,7 @@ import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, hash, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
+import { bindArrows, sceneToFreeform } from './freeform';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -71,6 +72,7 @@ const withLayout = (cd: Record<string, unknown> | undefined, layout: BlockLayout
   const { layout: _old, ...rest } = cd ?? {};
   return layout ? { ...rest, layout } : rest;
 };
+const isGraphType = (type: string | undefined) => type === 'architecture' || type === 'flowchart';
 const BAR_BTN = 'h-7 rounded-md border px-2.5';
 
 export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle }: Props) {
@@ -225,6 +227,30 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     if (reason) return setNotice({ blockId: id, text: reason });
     if (selRef.current === id) enterEdit(id, null);
   }, [enterEdit, exitEdit]);
+
+  /** Palette and bar `자유 도형으로 바꾸기`: replace the selected graph block with plain shapes, as one undo step (#38). */
+  const toFreeform = useCallback(async () => {
+    if (editRef.current) exitEdit(false);
+    const xapi = apiRef.current;
+    const id = selRef.current;
+    const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
+    if (!xapi || !id || !b) return;
+    const s = await openLayoutSession(b);
+    if ('reason' in s) return setNotice({ blockId: id, text: s.reason.replace('노드를 옮길', '자유 도형으로 바꿀').replace('옮길 수', '바꿀 수').replace('옮길 노드가', '바꿀 노드가') });
+    const els = xapi.getSceneElementsIncludingDeleted();
+    const img = imageOf(els, id);
+    if (!img) return;
+    const { scene } = s.compose(b.layout);
+    const { skeletons, bindings } = sceneToFreeform(scene, { x: img.x, y: img.y, width: img.width }, () => Math.random().toString(36).slice(2, 12));
+    const made = bindArrows(convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as ExcalidrawElement[], bindings);
+    const fresh = made.filter((e) => !(e as { containerId?: string }).containerId).map((e) => e.id);
+    xapi.updateScene({
+      elements: [...els.map((e) => (e === img ? newElementWith(img, { isDeleted: true }) : e)), ...made],
+      appState: { selectedElementIds: Object.fromEntries(fresh.map((x) => [x, true])) },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+    focusCanvas(wrap.current);
+  }, [exitEdit]);
 
   // Show the requested block once its image is on the canvas (a new block's image arrives after its picture is drawn).
   const tryFocus = useCallback(() => {
@@ -591,6 +617,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           return { block: !!b, editing: !!editRef.current, moved: !!b?.layout };
         },
         edit: () => void tryEdit(),
+        freeform: () => void toFreeform(),
         reset: () => {
           const id = editRef.current?.blockId ?? selRef.current;
           if (id) resetLayout(id);
@@ -600,7 +627,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     return () => {
       handle.current = null;
     };
-  }, [api, handle, tryEdit, resetLayout]);
+  }, [api, handle, tryEdit, resetLayout, toFreeform]);
 
   const block = editing ? blocks.find((b) => b.id === editing) : undefined;
   useEffect(() => {
@@ -658,6 +685,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         broken={!!(edit && sess && sess.blockId === edit.blockId && 'reason' in sess.s)}
         moved={!!(editBlock ?? (selBlock ? blocks.find((b) => b.id === selBlock) : undefined))?.layout}
         notice={!edit && notice && notice.blockId === selBlock ? notice.text : null}
+        convertible={!edit && !!selBlock && isGraphType(blocks.find((b) => b.id === selBlock)?.type)}
+        onFreeform={() => void toFreeform()}
         onReset={() => {
           const id = edit?.blockId ?? selBlock;
           if (id) resetLayout(id);
@@ -740,8 +769,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
 }
 
 /** Bottom-centre bar for layout edit mode (design §5.5): what the mode does, or that a block has a moved layout, or why it cannot be edited. */
-function LayoutBar({ editing, broken, moved, notice, onReset, onDone }: { editing: boolean; broken: boolean; moved: boolean; notice: string | null; onReset: () => void; onDone: () => void }) {
-  if (!editing && !notice && !moved) return null;
+function LayoutBar({ editing, broken, moved, notice, convertible, onReset, onDone, onFreeform }: { editing: boolean; broken: boolean; moved: boolean; notice: string | null; convertible: boolean; onReset: () => void; onDone: () => void; onFreeform: () => void }) {
+  if (!editing && !notice && !moved && !convertible) return null;
   return (
     <div
       role="status"
@@ -749,10 +778,15 @@ function LayoutBar({ editing, broken, moved, notice, onReset, onDone }: { editin
       className="absolute bottom-16 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
-      <span>{editing ? (broken ? '코드 오류를 고치면 옮길 수 있어요' : '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요') : (notice ?? '직접 옮긴 배치예요')}</span>
+      {(editing || notice || moved) && <span>{editing ? (broken ? '코드 오류를 고치면 옮길 수 있어요' : '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요') : (notice ?? '직접 옮긴 배치예요')}</span>}
       {(editing || (!notice && moved)) && (
         <button type="button" className={BAR_BTN} style={{ borderColor: 'var(--border)' }} disabled={!moved} onClick={onReset}>
           레이아웃 초기화
+        </button>
+      )}
+      {convertible && !notice && (
+        <button type="button" className={BAR_BTN} style={{ borderColor: 'var(--border)' }} onClick={onFreeform}>
+          자유 도형으로 바꾸기
         </button>
       )}
       {editing && (
