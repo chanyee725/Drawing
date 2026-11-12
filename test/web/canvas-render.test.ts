@@ -84,3 +84,26 @@ test('a render that throws shows a placeholder and says it failed', async () => 
   assert.equal(p.failed, true);
   assert.match(svgOf(p.dataURL), /그리지 못했어요/);
 });
+
+test('a block with a layout draws with it; basis uses the AST type so nothing resets', async () => {
+  const { basisOf } = await import('../../shared/render/overrides.ts');
+  const { analyzeDiagram, prunedLayout } = await import('../../web/src/dsl/adapter.ts');
+  const code = 'a [icon: aws-ec2]\nb [icon: aws-s3]\na > b\n';
+  const ast = analyzeDiagram('architecture', code).ast as never;
+  const layout = { v: 1, basis: basisOf(ast), items: { a: { cx: 400, cy: 300, parent: '' } } };
+  const plain = await renderBlock(block('lay1', code), 'light');
+  const moved = await renderBlock({ ...block('lay1', code), layout }, 'light');
+  assert.notEqual(moved.fileId, plain.fileId);
+  assert.equal(moved.layoutReset, undefined);
+  assert.ok(moved.origin);
+  // Saved against the editor type instead of the AST type: every render would drop it.
+  const wrong = await renderBlock({ ...block('lay2', code), layout: { ...layout, basis: { ...layout.basis, type: 'architecture' } } }, 'light');
+  assert.equal(wrong.layoutReset, 'type');
+  assert.equal(wrong.dataURL, plain.dataURL);
+  // Pruning: clean code with nothing to drop leaves the file alone; a big change clears the layout; errors leave it be.
+  assert.equal(prunedLayout({ type: 'architecture', code, layout }), null);
+  assert.equal('layout' in prunedLayout({ type: 'architecture', code: 'x\ny\nz\nw\nv\nx > y', layout })!, false);
+  assert.equal(prunedLayout({ type: 'architecture', code: 'a >> > {{{', layout }), null);
+  assert.equal('layout' in prunedLayout({ type: 'sequence', code: 'a > b: hi', layout })!, false);
+  assert.equal(prunedLayout({ type: 'architecture', code, layout: undefined }), null);
+});

@@ -1,14 +1,18 @@
 // Render a diagram block to an SVG data URL for the canvas (E3 renderer via the E4 preview seam).
 // Like the E4 preview, a block whose code has errors keeps showing its last good picture.
 import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOutcome } from '../dsl/adapter.ts';
-import { fileIdFor, hash, type BlockLike } from './sync.ts';
+import type { ReconcileReason } from '../../../shared/render/overrides.ts';
+import { drawSig, fileIdFor, hash, type BlockLike } from './sync.ts';
 
 export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number;
   /** Number of errors in the code that is drawn now; when above 0 the picture is the last good one (or a placeholder). */ errors: number;
   /** The picture is an earlier good one, kept because the current code could not be drawn. */ lastGood: boolean;
-  /** The renderer itself failed (threw) on the current code. */ failed: boolean };
+  /** The renderer itself failed (threw) on the current code. */ failed: boolean;
+  /** Translation the renderer applied: picture = layout + origin. Lets the canvas keep a moved layout still on screen (design §5.6). */
+  origin?: { x: number; y: number };
+  /** The code changed so much that the saved layout was left out of this picture (design §4.2). */ layoutReset?: ReconcileReason };
 
-type Drawn = { svg: string; width: number; height: number; errors?: number; lastGood?: boolean; failed?: boolean };
+type Drawn = { svg: string; width: number; height: number; errors?: number; lastGood?: boolean; failed?: boolean; origin?: { x: number; y: number }; layoutReset?: ReconcileReason };
 
 const MIN = 40;
 const MAX_PICTURES = 200;
@@ -49,7 +53,7 @@ function outcomeFor(b: BlockLike, theme: 'light' | 'dark') {
   const key = fileIdFor(b, theme);
   let p = outcomes.get(key);
   if (!p) {
-    p = renderPreview(b.type, b.code, theme);
+    p = renderPreview(b.type, b.code, theme, b.layout);
     outcomes.set(key, p);
     // Keep the cache bounded: renders for old code are not needed again.
     if (outcomes.size > 200) outcomes.delete(outcomes.keys().next().value!);
@@ -61,15 +65,16 @@ function picture(blockId: string, r: Drawn): BlockPicture {
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false };
+    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false, origin: r.origin };
     pictures.set(fileId, p);
     if (pictures.size > MAX_PICTURES) pictures.delete(pictures.keys().next().value!);
   }
-  // The same picture can be shown for good code and, later, for broken code: these belong to the call.
+  // The same picture can be shown for good code and, later, for broken code (or with a layout left out): these belong to the call.
   const errors = r.errors ?? 0;
   const lastGood = r.lastGood ?? false;
   const failed = r.failed ?? false;
-  return errors === p.errors && lastGood === p.lastGood && failed === p.failed ? p : { ...p, errors, lastGood, failed };
+  const layoutReset = r.layoutReset;
+  return errors === p.errors && lastGood === p.lastGood && failed === p.failed && layoutReset === p.layoutReset ? p : { ...p, errors, lastGood, failed, layoutReset };
 }
 
 /**
@@ -78,8 +83,8 @@ function picture(blockId: string, r: Drawn): BlockPicture {
  */
 export function renderBlock(b: BlockLike, theme: 'light' | 'dark'): Promise<BlockPicture> {
   const key = `${b.id}\n${theme}`;
-  const sig = `${b.type}\n${b.code}`;
-  // Same code as the latest call (a drag or resize calls again with only the position changed): reuse it.
+  const sig = drawSig(b);
+  // Same drawing as the latest call (a drag or resize calls again with only the position changed): reuse it.
   const latest = latestCall.get(key);
   if (latest?.sig === sig) return latest.result;
   const run = (queue.get(key) ?? Promise.resolve())
@@ -107,5 +112,5 @@ async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
   shown.set(key, state);
   if (!state) return { ...placeholder('그리지 못했어요. 코드를 확인해 주세요', theme), errors: outcome ? outcome.diagnostics.filter((d) => d.severity === 'error').length : 0, failed: !outcome };
   if (!state.scene.items.length) return placeholder(b.code.trim() ? '그릴 내용이 없어요. 코드를 확인해 주세요' : '코드를 입력하면 여기에 그려져요', theme);
-  return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length, lastGood: state.stale, failed: state.failed };
+  return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length, lastGood: state.stale, failed: state.failed, origin: state.scene.origin, layoutReset: state.stale ? undefined : outcome?.reset };
 }

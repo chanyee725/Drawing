@@ -43,7 +43,7 @@ export function withTrailingParagraph(document: unknown): unknown {
 /**
  * The document of a file written before the document editor existed (version < 2). Back then the
  * document pane listed every diagram block, so an empty document gets one embed per block. This
- * happens once: the next save stores version 2 and the document as it is then. Anything else,
+ * happens once: the next save stores the current format version and the document as it is then. Anything else,
  * including a broken document, comes back unchanged.
  */
 export function migrateDocument(file: { version?: number; document: unknown; blocks: readonly Pick<Block, 'id'>[] }): unknown {

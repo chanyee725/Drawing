@@ -124,3 +124,51 @@ test('findCopies ignores deleted images and hands ownership to a live one', () =
   assert.deepEqual(findCopies([img('a', 0, { isDeleted: true }), img('a', 5, { id: 'pasted' })], owners), []);
   assert.equal(owners.get('a'), 'pasted');
 });
+
+const L1 = { v: 1, basis: { type: 'flowchart', direction: 'right', count: 2 }, items: { A: { cx: 1, cy: 2, parent: '' } } };
+const L2 = { v: 1, basis: { type: 'flowchart', direction: 'right', count: 2 }, items: { A: { cx: 9, cy: 2, parent: '' } } };
+
+test('layout is part of the picture identity but not of where the block sits', async () => {
+  const { sameDrawing, layoutSig } = await import('../../web/src/canvas/sync.ts');
+  const a = { ...block('a'), layout: L1 };
+  assert.notEqual(fileIdFor(a, 'light'), fileIdFor({ ...a, layout: L2 }, 'light'));
+  assert.notEqual(fileIdFor(a, 'light'), fileIdFor(block('a'), 'light'));
+  assert.equal(fileIdFor(a, 'light'), fileIdFor({ ...a, layout: JSON.parse(layoutSig(L1)) }, 'light'));
+  assert.equal(sameDrawing([a], [{ ...a, x: 50 }]), true);
+  assert.equal(sameDrawing([a], [{ ...a, layout: L2 }]), false);
+  assert.equal(sameDrawing([a], [{ ...a, layout: JSON.parse(layoutSig(L1)) }]), true);
+});
+
+test('the image carries the layout and applyScene takes it back, only when the image changed', async () => {
+  const { layoutsFromImages } = await import('../../web/src/canvas/sync.ts');
+  const b = { ...block('a'), layout: L1 };
+  assert.deepEqual((blockImageSkeleton(b, 'f', 'e').customData as { layout?: unknown }).layout, L1);
+  assert.equal('layout' in blockImageSkeleton(block('a'), 'f', 'e').customData, false);
+  const seen = new Map([['a', JSON.stringify(L1)]]);
+  // The image still shows the old layout while the block moved on (a code-panel cleanup): the block wins.
+  const lagging = splitScene([img('a', 0, { customData: { blockId: 'a', layout: L1 } })]);
+  const cleaned = { ...b, layout: undefined };
+  const list = [cleaned];
+  const none = layoutsFromImages(lagging.layouts, seen);
+  assert.equal(none.size, 0);
+  assert.equal(applyScene(list, lagging, none), list);
+  // The image's layout changed (an edit or its undo): the block follows.
+  const moved = splitScene([img('a', 0, { customData: { blockId: 'a', layout: L2 } })]);
+  const out = applyScene([b], moved, layoutsFromImages(moved.layouts, seen));
+  assert.deepEqual(out[0]!.layout, L2);
+  // An image without a layout clears it.
+  const bare = splitScene([img('a', 0)]);
+  const cleared = applyScene([{ ...b, layout: L2 }], bare, layoutsFromImages(bare.layouts, seen));
+  assert.equal('layout' in cleared[0]!, false);
+  // A junk customData.layout counts as none.
+  assert.equal(splitScene([img('a', 0, { customData: { blockId: 'a', layout: 'x' } })]).layouts.get('a'), undefined);
+});
+
+test('shiftForOrigin keeps the layout origin still on screen, scaled like the picture', async () => {
+  const { shiftForOrigin } = await import('../../web/src/canvas/sync.ts');
+  const el = { x: 100, y: 50, width: 400 };
+  // Picture 200 wide shown at 400: scale 2. The origin moved from (10,10) to (30,0): shift (-40, +20).
+  assert.deepEqual(shiftForOrigin(el, { width: 200, origin: { x: 10, y: 10 } }, { x: 30, y: 0 }), { x: 60, y: 70 });
+  assert.deepEqual(shiftForOrigin(el, { width: 200 }, { x: 30, y: 0 }), { x: 100, y: 50 });
+  assert.deepEqual(shiftForOrigin(el, undefined, { x: 30, y: 0 }), { x: 100, y: 50 });
+});
