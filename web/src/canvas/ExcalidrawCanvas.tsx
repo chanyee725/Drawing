@@ -59,6 +59,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const [editing, setEditing] = useState<string | null>(null);
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
   const [blockSelected, setBlockSelected] = useState(false);
+  // Blocks whose code has errors (they show their last good picture), for the notice on the canvas.
+  const [broken, setBroken] = useState<{ id: string; errors: number }[]>([]);
   // Picture size per file id, to keep a block's scale when its picture changes.
   const sizes = useRef(new Map<string, { width: number; height: number }>());
   const wrap = useRef<HTMLDivElement>(null);
@@ -124,6 +126,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const blocks = blocksRef.current;
     void Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME))).then((pics) => {
       if (!live) return;
+      setBroken(pics.flatMap((p, i) => (p.errors > 0 ? [{ id: blocks[i]!.id, errors: p.errors }] : [])));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
       const add = pics.filter((p) => !files[p.fileId]).map(fileData);
@@ -316,6 +319,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         validateEmbeddable={NO_EMBEDS}
         aiEnabled={false}
       />
+      {broken.length > 0 && !block && (
+        <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+          {broken.map((b) => (
+            <button key={b.id} type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setEditing(b.id)}>
+              오류 {b.errors}개 · 마지막으로 그린 모습이에요. 눌러서 코드를 고쳐요
+            </button>
+          ))}
+        </div>
+      )}
       {block && (
         <aside
           aria-label="다이어그램 코드"

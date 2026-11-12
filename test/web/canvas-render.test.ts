@@ -53,3 +53,10 @@ test('a call with unchanged code returns the same pending result, even when the 
   assert.notEqual(c, a);
   assert.notEqual((await c).fileId, (await a).fileId);
 });
+
+test('a picture says how many errors the drawn code has', async () => {
+  assert.equal((await renderBlock(block('err1', GOOD), 'light')).errors, 0);
+  const broken = await renderBlock(block('err1', BAD), 'light');
+  assert.ok(broken.errors > 0);
+  assert.equal((await renderBlock(block('err1', GOOD), 'light')).errors, 0);
+});
