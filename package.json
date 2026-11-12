@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server/index.js",
     "test": "node --test",
-    "build": "tsc -p web && vite build --config web/vite.config.ts",
+    "build": "tsc -p shared && tsc -p web && vite build --config web/vite.config.ts",
     "dev:web": "vite --config web/vite.config.ts"
   },
   "dependencies": {

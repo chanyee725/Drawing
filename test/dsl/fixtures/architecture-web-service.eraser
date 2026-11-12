@@ -1,0 +1,19 @@
+title Web service
+direction right
+
+Users [icon: users]
+VPC {
+  Public Subnet {
+    LB [icon: aws-elb]
+    Web [icon: aws-ec2, color: blue]
+  }
+  Private Subnet {
+    DB [icon: aws-rds]
+    Queue [icon: aws-sqs]
+  }
+}
+
+Users > LB: HTTPS
+LB > Web
+Web > DB: SQL [color: green]
+Web > Queue
