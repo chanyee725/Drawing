@@ -7,7 +7,8 @@ import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalid
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
-import { DIAGRAM_TYPES, isDiagramType } from '../dsl/templates';
+import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
+import { analyzeDiagram } from '../dsl/adapter';
 import { renderBlock, type BlockPicture } from './render';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
 
@@ -287,6 +288,19 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
                 </option>
               ))}
             </select>
+            {isDiagramType(block.type) && (
+              <button
+                type="button"
+                className="h-8 rounded-md border px-3"
+                style={{ borderColor: 'var(--border)' }}
+                onClick={() => {
+                  const t = TEMPLATES[block.type as DiagramType];
+                  if (!block.code.trim() || block.code === t || window.confirm('지금 코드를 예시로 바꿀까요?')) patchBlock({ code: t });
+                }}
+              >
+                예시 넣기
+              </button>
+            )}
             <button type="button" className="ml-auto h-8 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => setEditing(null)}>
               닫기
             </button>
@@ -294,6 +308,11 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>
+          {!analyzeDiagram(block.type, block.code).parsed && (
+            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+              이 종류는 아직 문법 검사를 지원하지 않아요.
+            </p>
+          )}
         </aside>
       )}
     </div>
