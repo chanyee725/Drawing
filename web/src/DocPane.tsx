@@ -1,78 +1,123 @@
+// The document side of a file: a rich-text editor (TipTap, MIT) saved as ProseMirror JSON in `file.document`.
+import { useMemo, useRef } from 'react';
+import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react';
+import type { Range } from '@tiptap/core';
+import { Placeholder } from '@tiptap/extensions';
 import type { Block } from './api';
-import { BlockEditor } from './BlockEditor';
-import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from './dsl/templates';
-import { analyzeDiagram } from './dsl/adapter';
+import { TEMPLATES } from './dsl/templates';
+import { docExtensions } from './doc/extensions';
+import { DiagramEmbedView, DocContext, typeLabel } from './doc/DiagramView';
+import { SlashCommands } from './doc/SlashMenu';
+import { blockItems, diagramNode, initialDocument, normalizeLink, SLASH_ITEMS, type SlashItem } from './doc/model';
 
-type Props = { blocks: Block[]; dark: boolean; onBlocks: (b: Block[]) => void };
+type Props = {
+  document: unknown;
+  blocks: Block[];
+  dark: boolean;
+  onDocument: (doc: unknown) => void;
+  onBlocks: (b: Block[]) => void;
+  /** Show a diagram block on the canvas. */
+  onShow: (blockId: string) => void;
+};
 
 const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
 
-export function DocPane({ blocks, dark, onBlocks }: Props) {
-  const patch = (id: string, p: Partial<Block>) => onBlocks(blocks.map((b) => (b.id === id ? { ...b, ...p } : b)));
-  const add = () => {
-    const type: DiagramType = 'architecture';
-    // w = 0 marks a block not yet on the canvas; the canvas gives it the picture's size and a free spot.
-    onBlocks([...blocks, { id: newId(), type, code: TEMPLATES[type], x: 0, y: 0, w: 0, h: 0 }]);
-  };
+/** Remounted per file (App keys it), so it reads `document` only when it starts. */
+export function DocPane({ document, blocks, dark, onDocument, onBlocks, onShow }: Props) {
+  const blocksRef = useRef(blocks);
+  const onDocumentRef = useRef(onDocument);
+  const onBlocksRef = useRef(onBlocks);
+  blocksRef.current = blocks;
+  onDocumentRef.current = onDocument;
+  onBlocksRef.current = onBlocks;
+
+  const extensions = useMemo(() => {
+    const run = (editor: Editor, range: Range, item: SlashItem) => {
+      const chain = () => editor.chain().focus().deleteRange(range);
+      switch (item.command) {
+        case 'h1':
+        case 'h2':
+        case 'h3':
+          return chain().setNode('heading', { level: Number(item.command[1]) }).run();
+        case 'bullet':
+          return chain().toggleBulletList().run();
+        case 'ordered':
+          return chain().toggleOrderedList().run();
+        case 'task':
+          return chain().toggleTaskList().run();
+        case 'code':
+          return chain().setCodeBlock().run();
+        case 'quote':
+          return chain().setBlockquote().run();
+        case 'rule':
+          return chain().setHorizontalRule().run();
+        case 'table':
+          return chain().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+        case 'link': {
+          const typed = window.prompt('링크 주소를 입력해 주세요');
+          if (typed === null) return chain().run();
+          const href = normalizeLink(typed);
+          if (!href) {
+            window.alert('http, https, mailto 주소만 넣을 수 있어요');
+            return chain().run();
+          }
+          return chain()
+            .insertContent([{ type: 'text', text: typed.trim(), marks: [{ type: 'link', attrs: { href } }] }, { type: 'text', text: ' ' }])
+            .run();
+        }
+        case 'diagram': {
+          let id = item.blockId;
+          if (!id) {
+            id = newId();
+            // w = 0 marks a block not yet on the canvas; the canvas gives it the picture's size and a free spot.
+            onBlocksRef.current([...blocksRef.current, { id, type: 'architecture', code: TEMPLATES.architecture, x: 0, y: 0, w: 0, h: 0 }]);
+          }
+          // The embed is an atom: leave the cursor in a new line below it, so typing goes on instead of replacing it.
+          return chain().insertContent(diagramNode(id)).createParagraphNear().run();
+        }
+      }
+    };
+    return [
+      ...docExtensions(DiagramEmbedView),
+      Placeholder.configure({ placeholder: ({ editor }) => (editor.isEmpty ? '여기에 적어 보세요. /를 누르면 제목, 표, 다이어그램을 넣을 수 있어요' : '') }),
+      SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(blocksRef.current, typeLabel)], run }),
+    ];
+  }, []);
+
+  const editor = useEditor({
+    extensions,
+    content: initialDocument(document, blocks),
+    immediatelyRender: true,
+    shouldRerenderOnTransaction: false,
+    editorProps: { attributes: { class: 'doc-editor', 'aria-label': '문서 내용' } },
+    onUpdate: ({ editor: e }) => onDocumentRef.current(e.getJSON()),
+  });
+
+  const inTable = useEditorState({ editor, selector: (s) => !!s.editor?.isActive('table') });
+  const ctx = useMemo(() => ({ blocks, dark, onShow }), [blocks, dark, onShow]);
+
+  const tableActions: [string, () => boolean][] = [
+    ['행 추가', () => editor.chain().focus().addRowAfter().run()],
+    ['열 추가', () => editor.chain().focus().addColumnAfter().run()],
+    ['행 지우기', () => editor.chain().focus().deleteRow().run()],
+    ['열 지우기', () => editor.chain().focus().deleteColumn().run()],
+    ['표 지우기', () => editor.chain().focus().deleteTable().run()],
+  ];
+
   return (
-    <section className="mx-auto flex max-w-3xl flex-col gap-6 p-6" aria-label="문서">
-      {blocks.length === 0 && (
-        <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
-          아직 다이어그램이 없어요. 아래 버튼으로 추가해 보세요.
-        </p>
-      )}
-      {blocks.map((b, i) => (
-        <article key={b.id} aria-label={`다이어그램 ${i + 1}`} className="flex flex-col gap-2">
-          <div className="flex items-center gap-2 text-sm">
-            <label className="flex items-center gap-2">
-              <span style={{ color: 'var(--text-muted)' }}>종류</span>
-              <select
-                value={b.type}
-                onChange={(e) => patch(b.id, { type: e.target.value })}
-                className="h-8 rounded-md border px-2"
-                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-              >
-                {!isDiagramType(b.type) && <option value={b.type}>{b.type}</option>}
-                {DIAGRAM_TYPES.map((t) => (
-                  <option key={t.id} value={t.id}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {isDiagramType(b.type) && (
-              <button
-                type="button"
-                className="h-8 rounded-md border px-3"
-                style={{ borderColor: 'var(--border)' }}
-                onClick={() => {
-                  if (!b.code.trim() || b.code === TEMPLATES[b.type as DiagramType] || window.confirm('지금 코드를 예시로 바꿀까요?'))
-                    patch(b.id, { code: TEMPLATES[b.type as DiagramType] });
-                }}
-              >
-                예시 넣기
-              </button>
-            )}
-            <button
-              type="button"
-              className="ml-auto h-8 rounded-md px-3"
-              style={{ color: 'var(--text-muted)' }}
-              onClick={() => window.confirm('이 다이어그램을 지울까요?') && onBlocks(blocks.filter((x) => x.id !== b.id))}
-            >
-              지우기
+    <section className="mx-auto flex max-w-3xl flex-col gap-2 px-6 py-6" aria-label="문서">
+      {inTable && (
+        <div role="toolbar" aria-label="표" className="doc-table-bar">
+          {tableActions.map(([label, act]) => (
+            <button key={label} type="button" onMouseDown={(e) => e.preventDefault()} onClick={act}>
+              {label}
             </button>
-          </div>
-          <BlockEditor code={b.code} type={b.type} dark={dark} onChange={(code) => patch(b.id, { code })} />
-          {!analyzeDiagram(b.type, b.code).parsed && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-              이 종류는 아직 문법 검사를 지원하지 않아요.
-            </p>
-          )}
-        </article>
-      ))}
-      <button type="button" onClick={add} className="h-9 self-start rounded-md border px-4 text-sm" style={{ borderColor: 'var(--border)' }}>
-        + 다이어그램 추가
-      </button>
+          ))}
+        </div>
+      )}
+      <DocContext.Provider value={ctx}>
+        <EditorContent editor={editor} />
+      </DocContext.Provider>
     </section>
   );
 }

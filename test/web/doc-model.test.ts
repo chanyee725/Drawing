@@ -45,3 +45,15 @@ test('canvas diagrams become / menu entries that embed that block', () => {
   assert.deepEqual(items.map((i) => [i.title, i.blockId]), [['다이어그램 넣기: architecture 1', 'a'], ['다이어그램 넣기: 시퀀스 2', 'b']]);
   assert.deepEqual(filterSlash(items, 'sequence').map((i) => i.blockId), ['b']);
 });
+
+test('links keep web and mail addresses, add https to bare hosts, refuse other schemes', async () => {
+  const { normalizeLink } = await import('../../web/src/doc/model.ts');
+  assert.equal(normalizeLink(' https://a.b/c '), 'https://a.b/c');
+  assert.equal(normalizeLink('mailto:x@y.z'), 'mailto:x@y.z');
+  assert.equal(normalizeLink('a.b/c'), 'https://a.b/c');
+  assert.equal(normalizeLink('localhost:4330/x'), 'https://localhost:4330/x');
+  assert.equal(normalizeLink('javascript:alert(1)'), null);
+  assert.equal(normalizeLink('data:text/html,x'), null);
+  assert.equal(normalizeLink(''), null);
+  assert.equal(normalizeLink('a b'), null);
+});

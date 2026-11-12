@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
+import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
@@ -55,6 +56,8 @@ export function App() {
   const [conflict, setConflict] = useState<{ revision?: number } | null>(null);
   // Bumped on every load from disk so the canvas restarts from the loaded content.
   const [loadSeq, setLoadSeq] = useState(0);
+  // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
+  const [focus, setFocus] = useState<CanvasFocus | null>(null);
 
   const fileRef = useRef<DpxFile | null>(null);
   const pathRef = useRef<string | null>(null);
@@ -141,7 +144,7 @@ export function App() {
   }, [save]);
 
   const edit = useCallback(
-    (patch: Partial<Pick<DpxFile, 'title' | 'blocks' | 'canvas'>>) => {
+    (patch: Partial<Pick<DpxFile, 'title' | 'document' | 'blocks' | 'canvas'>>) => {
       setFile((cur) => {
         if (!cur) return cur;
         const next = { ...cur, ...patch };
@@ -167,6 +170,7 @@ export function App() {
     setFile(f);
     fileRef.current = f;
     setLoadSeq((n) => n + 1);
+    setFocus(null);
     setStatus('');
     setHashPath(p);
   }, []);
@@ -290,12 +294,27 @@ export function App() {
 
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
-  const doc = file && <DocPane blocks={file.blocks} dark={theme === 'dark'} onBlocks={(b: Block[]) => edit({ blocks: b })} />;
+  const showBlock = useCallback((blockId: string) => {
+    setView((v) => (v === 'doc' ? 'both' : v));
+    setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
+  }, []);
+  const doc = file && path && (
+    <DocPane
+      key={`${path}#${loadSeq}`}
+      document={file.document}
+      blocks={file.blocks}
+      dark={theme === 'dark'}
+      onDocument={(d) => edit({ document: d })}
+      onBlocks={(b: Block[]) => edit({ blocks: b })}
+      onShow={showBlock}
+    />
+  );
   const canvas = (
     <CanvasPane
       fileKey={file && path ? `${path}#${loadSeq}` : null}
       canvas={file?.canvas}
       blocks={file?.blocks ?? []}
+      focus={focus}
       dark={theme === 'dark'}
       onChange={edit}
     />

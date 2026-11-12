@@ -68,3 +68,13 @@ export function filterSlash(items: readonly SlashItem[], query: string): SlashIt
   if (!q) return [...items];
   return items.filter((it) => it.title.toLowerCase().includes(q) || it.keywords.some((k) => k.toLowerCase().includes(q)));
 }
+
+/** A typed link address made safe to store: web and mail links only; a bare host gets https://. */
+export function normalizeLink(input: string): string | null {
+  const s = input.trim();
+  if (!s || /\s/.test(s)) return null;
+  if (/^(https?:\/\/|mailto:)/i.test(s)) return s;
+  // Any other scheme (javascript:, data:, file:...) is refused.
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) && !/^[^:/]+:\d+(\/|$)/.test(s)) return null;
+  return `https://${s}`;
+}
