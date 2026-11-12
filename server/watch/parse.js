@@ -1,11 +1,17 @@
 // Parse a .drawio file into pages -> cells. Handles plain XML pages and the
 // compressed form (<diagram> text = base64(deflateRaw(encodeURIComponent(xml)))).
-import { inflateRawSync } from 'node:zlib';
+import { inflateRaw } from 'node:zlib';
+import { promisify } from 'node:util';
 import { parseXml, findAll, findFirst } from './xml.js';
 
-export function decompressDiagram(text) {
+// Cap on file size and on inflated page size: a small compressed page must not
+// expand into gigabytes (zip bomb). Larger files are treated as broken.
+export const MAX_BYTES = 20 * 1024 * 1024;
+const inflateRawAsync = promisify(inflateRaw);
+
+export async function decompressDiagram(text) {
   const bytes = Buffer.from(text.trim(), 'base64');
-  const inflated = inflateRawSync(bytes).toString('latin1');
+  const inflated = (await inflateRawAsync(bytes, { maxOutputLength: MAX_BYTES })).toString('latin1');
   return decodeURIComponent(inflated);
 }
 
@@ -14,13 +20,13 @@ export function decompressDiagram(text) {
  * Cell = { id, parent, value, style, vertex, edge, source, target, geometry: {x,y,width,height,points}|null }
  * Throws if the file is not (yet) well-formed.
  */
-export function parseDrawio(src) {
+export async function parseDrawio(src) {
   const doc = parseXml(src);
   const mxfile = findFirst(doc, 'mxfile');
   const pages = [];
   if (mxfile) {
     const diagrams = mxfile.children.filter((c) => c.name === 'diagram');
-    diagrams.forEach((d, i) => pages.push(parsePage(src, d, i)));
+    for (const [i, d] of diagrams.entries()) pages.push(await parsePage(src, d, i));
   } else {
     // A bare <mxGraphModel> file is one page.
     const model = findFirst(doc, 'mxGraphModel');
@@ -30,7 +36,7 @@ export function parseDrawio(src) {
   return { pages };
 }
 
-function parsePage(src, diagram, index) {
+async function parsePage(src, diagram, index) {
   const id = diagram.attrs.id || `page-${index}`;
   const name = diagram.attrs.name || `Page-${index + 1}`;
   let model = findFirst(diagram, 'mxGraphModel');
@@ -38,7 +44,7 @@ function parsePage(src, diagram, index) {
   if (model) {
     xml = src.slice(model.start, model.end);
   } else if (diagram.text.trim()) {
-    xml = decompressDiagram(diagram.text);
+    xml = await decompressDiagram(diagram.text);
     model = findFirst(parseXml(xml), 'mxGraphModel');
     if (!model) throw new Error('compressed diagram without mxGraphModel');
   } else {

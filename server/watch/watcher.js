@@ -3,15 +3,32 @@
 // A file is processed only after its stamp has been stable for `quietMs` and it
 // parses cleanly, so a script writing in pieces yields one change.
 // Read-only: never writes to watched files. Logs no file content.
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
-import { parseDrawio } from './parse.js';
+import { parseDrawio, MAX_BYTES } from './parse.js';
 import { diffFiles } from './diff.js';
 import { listSources, scanDrawio, fileStamp, fetchSessionLabels } from './sources.js';
 
 export const HISTORY_LIMIT = 500;
 const GIVE_UP_MS = 10_000; // stop retrying a file that stays unparseable
+
+/** Read and parse; throws (treated as broken) when the file is over MAX_BYTES. */
+async function readParsed(abs) {
+  const { size } = await stat(abs);
+  if (size > MAX_BYTES) throw new Error('file too large');
+  return parseDrawio(await readFile(abs, 'utf8'));
+}
+
+/**
+ * Outward copy of a change (SSE, history, HTTP): no absolute paths, so source
+ * keeps only kind + label. Module-internal callbacks get the full change with
+ * source.dir (agents/T4 uses it to attribute edits).
+ */
+export function publicChange(c) {
+  const { dir, ...source } = c.source;
+  return { ...c, source };
+}
 
 export function fileId(sourceKey, path) {
   return createHash('sha1').update(`${sourceKey}\0${path}`).digest('hex').slice(0, 12);
@@ -80,7 +97,7 @@ export function createWatcher(opts) {
   async function loadInitial(f) {
     f.stamp = await fileStamp(f.abs);
     try {
-      f.parsed = parseDrawio(await readFile(f.abs, 'utf8'));
+      f.parsed = await readParsed(f.abs);
     } catch {
       f.parsed = null; // retried on next stamp change
       f.pending = { stamp: f.stamp, since: now() };
@@ -121,7 +138,7 @@ export function createWatcher(opts) {
     const { stamp, since } = f.pending;
     let parsed;
     try {
-      parsed = parseDrawio(await readFile(f.abs, 'utf8'));
+      parsed = await readParsed(f.abs);
     } catch {
       // Half-written or broken: wait for the next write, give up after a while.
       if (now() - since >= GIVE_UP_MS) {
@@ -158,7 +175,7 @@ export function createWatcher(opts) {
         summary: d.summary,
         at,
       };
-      f.history.push(change);
+      f.history.push(publicChange(change));
       if (f.history.length > HISTORY_LIMIT) f.history.splice(0, f.history.length - HISTORY_LIMIT);
       for (const fn of listeners) {
         try {

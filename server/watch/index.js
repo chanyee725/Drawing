@@ -3,8 +3,9 @@
 //   GET /api/files/<id>       -> { id, path, source, pages:[{id,name,xml}] }
 //   GET /api/history?file=<id> -> change[] (oldest first, last 500)
 //   SSE `file` (list entry) and `change` via ctx.hub.
-// api (for agents/T4): onChange(fn) -> unsubscribe, listSources().
-import { createWatcher } from './watcher.js';
+// api (module-internal, for agents/T4): onChange(fn) -> unsubscribe, listSources().
+//   These carry source.dir (absolute path); never send them out as-is.
+import { createWatcher, publicChange } from './watcher.js';
 import { sendJson } from '../app.js';
 
 /** @param {{ projectDir: string, dispatch?: string|null, hub: { broadcast(event: string, data: unknown): void } }} ctx */
@@ -14,7 +15,8 @@ export async function setup(ctx, overrides = {}) {
     dispatch: ctx.dispatch ?? null,
     ...overrides,
     onFile: (e) => ctx.hub.broadcast('file', e),
-    onChange: (c) => ctx.hub.broadcast('change', c),
+    // Outward: no absolute paths (source = {kind,label}).
+    onChange: (c) => ctx.hub.broadcast('change', publicChange(c)),
   });
   await watcher.start();
 

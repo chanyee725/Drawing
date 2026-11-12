@@ -5,9 +5,9 @@ import { existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
-import { parseDrawio, decompressDiagram } from '../server/watch/parse.js';
+import { parseDrawio, decompressDiagram, MAX_BYTES } from '../server/watch/parse.js';
 import { diffFiles } from '../server/watch/diff.js';
-import { createWatcher } from '../server/watch/watcher.js';
+import { createWatcher, publicChange } from '../server/watch/watcher.js';
 import { createApp } from '../server/app.js';
 import { modules } from '../server/modules.js';
 
@@ -21,10 +21,10 @@ const file = (pages) =>
   `<?xml version="1.0"?><mxfile host="test">${pages.map(([id, name, body]) => `<diagram id="${id}" name="${name}">${body}</diagram>`).join('')}</mxfile>`;
 const compress = (xml) => deflateRawSync(Buffer.from(encodeURIComponent(xml), 'latin1')).toString('base64');
 
-test('parse: uncompressed and compressed diagrams give the same cells', () => {
+test('parse: uncompressed and compressed diagrams give the same cells', async () => {
   const m = model(box('a', { value: 'Hello &amp; 안녕' }) + `<UserObject id="u" label="Obj"><mxCell vertex="1" parent="1" style="s"><mxGeometry x="5" y="6" width="7" height="8" as="geometry"/></mxCell></UserObject>`);
-  const plain = parseDrawio(file([['p1', 'One', m]]));
-  const packed = parseDrawio(file([['p1', 'One', compress(m)]]));
+  const plain = await parseDrawio(file([['p1', 'One', m]]));
+  const packed = await parseDrawio(file([['p1', 'One', compress(m)]]));
   for (const doc of [plain, packed]) {
     assert.equal(doc.pages.length, 1);
     const p = doc.pages[0];
@@ -34,15 +34,21 @@ test('parse: uncompressed and compressed diagrams give the same cells', () => {
     assert.equal(p.cells.get('u').value, 'Obj');
     assert.match(p.xml, /^<mxGraphModel>/);
   }
-  assert.equal(decompressDiagram(compress(m)), m);
-  assert.throws(() => parseDrawio(file([['p1', 'One', m]]).slice(0, 80)));
+  assert.equal(await decompressDiagram(compress(m)), m);
+  await assert.rejects(parseDrawio(file([['p1', 'One', m]]).slice(0, 80)));
+});
+
+test('parse: zip bomb is refused (inflated size capped at MAX_BYTES)', async () => {
+  const bomb = deflateRawSync(Buffer.alloc(MAX_BYTES + 1024, 0x41)).toString('base64');
+  assert.ok(bomb.length < 100_000); // small input, huge output
+  await assert.rejects(parseDrawio(file([['p', 'P', bomb]])), /RangeError|larger than|maxOutputLength|buffer/i);
 });
 
 test('parse: real handover files (scratch copy)', { skip: !existsSync(HANDOVER) && 'sim-studio handover not present' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'draw-handover-'));
   try {
     await cp(HANDOVER, dir, { recursive: true });
-    const doc = parseDrawio(await readFile(join(dir, 'handover.drawio'), 'utf8'));
+    const doc = await parseDrawio(await readFile(join(dir, 'handover.drawio'), 'utf8'));
     assert.ok(doc.pages.length > 1);
     assert.ok(doc.pages.every((p) => p.cells.size > 2));
   } finally {
@@ -50,9 +56,9 @@ test('parse: real handover files (scratch copy)', { skip: !existsSync(HANDOVER) 
   }
 });
 
-test('diff: added, removed, moved, text, style with bbox', () => {
-  const before = parseDrawio(file([['p', 'P', model(box('a') + box('b', { x: 200 }) + box('c') + box('d') + box('e'))]]));
-  const after = parseDrawio(
+test('diff: added, removed, moved, text, style with bbox', async () => {
+  const before = await parseDrawio(file([['p', 'P', model(box('a') + box('b', { x: 200 }) + box('c') + box('d') + box('e'))]]));
+  const after = await parseDrawio(
     file([['p', 'P', model(box('a') + box('b', { x: 300, y: 10 }) + box('c', { value: 'B' }) + box('d', { style: 'x' }) + box('f', { x: 50, y: 500 }))]]),
   );
   const [d] = diffFiles(before, after);
@@ -64,9 +70,9 @@ test('diff: added, removed, moved, text, style with bbox', () => {
   assert.equal(diffFiles(before, before).length, 0);
 });
 
-test('diff: child cell bbox is absolute (parent offset)', () => {
-  const before = parseDrawio(file([['p', 'P', model(box('g', { x: 100, y: 100, w: 300, h: 300 }))]]));
-  const after = parseDrawio(file([['p', 'P', model(box('g', { x: 100, y: 100, w: 300, h: 300 }) + box('k', { x: 10, y: 20, w: 5, h: 5, parent: 'g' }))]]));
+test('diff: child cell bbox is absolute (parent offset)', async () => {
+  const before = await parseDrawio(file([['p', 'P', model(box('g', { x: 100, y: 100, w: 300, h: 300 }))]]));
+  const after = await parseDrawio(file([['p', 'P', model(box('g', { x: 100, y: 100, w: 300, h: 300 }) + box('k', { x: 10, y: 20, w: 5, h: 5, parent: 'g' }))]]));
   assert.deepEqual(diffFiles(before, after)[0].bbox, { x: 110, y: 120, w: 5, h: 5 });
 });
 
@@ -186,6 +192,53 @@ test('routes: /api/files, /api/files/<id>, /api/history', async () => {
       await app.close();
     }
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('watcher: a file over MAX_BYTES is skipped like a broken file', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'draw-big-'));
+  try {
+    const path = join(dir, 'big.drawio');
+    await writeFile(path, file([['p', 'P', model(box('a'))]]));
+    const { w, changes, step } = await harness(dir);
+    const id = w.listFiles()[0].id;
+    const body = file([['p', 'P', model(box('a', { x: 9 }))]]);
+    await writeFile(path, body.replace('<mxfile', ' '.repeat(MAX_BYTES) + '<mxfile'));
+    await step(10);
+    await step(400);
+    assert.equal(changes.length, 0);
+    assert.equal(w.getParsed(id).pages[0].cells.get('a').geometry.x, 0); // old version kept
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('privacy: outward changes carry no absolute path; internal api keeps source.dir', async () => {
+  const { setup } = await import('../server/watch/index.js');
+  const dir = await mkdtemp(join(tmpdir(), 'draw-priv-'));
+  const sent = [];
+  const mod = await (async () => {
+    await writeFile(join(dir, 'p.drawio'), file([['p', 'P', model(box('a'))]]));
+    return setup({ projectDir: dir, hub: { broadcast: (event, data) => sent.push({ event, data }) } }, { pollMs: 20, quietMs: 40 });
+  })();
+  try {
+    const internal = new Promise((r) => mod.api.onChange(r));
+    await writeFile(join(dir, 'p.drawio'), file([['p', 'P', model(box('a', { x: 5 }))]]));
+    const c = await Promise.race([internal, new Promise((_, rej) => setTimeout(() => rej(new Error('no change')), 3000))]);
+    assert.equal(c.source.dir, dir);
+    assert.equal(mod.api.listSources()[0].dir, dir);
+
+    const out = sent.filter((s) => s.event === 'change').map((s) => s.data);
+    assert.equal(out.length, 1);
+    const hist = mod.watcher.history(c.fileId);
+    for (const v of [...out, ...hist, ...mod.watcher.listFiles(), mod.watcher.getFile(c.fileId)]) {
+      assert.ok(!JSON.stringify(v).includes(dir), 'absolute path leaked');
+    }
+    assert.deepEqual(out[0].source, { kind: 'main', label: 'main' });
+    assert.deepEqual(publicChange(c), out[0]);
+  } finally {
+    mod.close();
     await rm(dir, { recursive: true, force: true });
   }
 });
