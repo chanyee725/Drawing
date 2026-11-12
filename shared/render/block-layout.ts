@@ -1,5 +1,7 @@
 // Per-block layout overrides (`block.layout` in `.dpx.json`): moved node centres on top of the automatic layout.
-// Types only. Reconciling overrides with code edits lives elsewhere; rendering applies them in `composeGraph`.
+// The JSON shape plus the storage rules both sides share (`layoutProblem`, `cleanLayout`): the server checks saves with
+// them and the web checks layouts read back from canvas images. Reconciling with code edits is in `overrides.ts`;
+// rendering applies layouts in `composeGraph`.
 
 /** Sub-format version this renderer understands. A layout with another `v` is ignored when drawing. */
 export const BLOCK_LAYOUT_VERSION = 1;

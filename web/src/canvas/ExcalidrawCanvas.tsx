@@ -6,6 +6,7 @@ import type { AppState, ExcalidrawImperativeAPI, BinaryFileData } from '@excalid
 import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
+import type { BlockLayout } from '../../../shared/render/index.ts';
 import { BlockEditor } from '../BlockEditor';
 import { BlockProps } from '../BlockProps';
 import { CanvasInsertMenu } from './CanvasInsertMenu';
@@ -15,7 +16,10 @@ import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, hash, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
+import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
+import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 /** Show (scroll to and select) this block's image; a new `n` is a new request. */
@@ -58,6 +62,17 @@ const UI_OPTIONS = {
 // Web embeds load third-party pages in iframes; the canvas makes no outbound requests.
 const NO_EMBEDS = () => false;
 
+/** The layout session made for one block's code (or why there is none). */
+type Sess = { blockId: string; key: string; s: LayoutSession | { reason: string } };
+/** Layout edit mode for a block; `start` is the press that entered it on a node, continued as a drag. */
+type Edit = { blockId: string; start: EditStart | null };
+const ready = (s: Sess | null, b: Block | undefined): LayoutSession | null => (s && b && s.blockId === b.id && s.key === sessionKey(b) && !('reason' in s.s) ? s.s : null);
+const withLayout = (cd: Record<string, unknown> | undefined, layout: BlockLayout | undefined) => {
+  const { layout: _old, ...rest } = cd ?? {};
+  return layout ? { ...rest, layout } : rest;
+};
+const BAR_BTN = 'h-7 rounded-md border px-2.5';
+
 export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -68,7 +83,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // Blocks drawn with their saved layout left out because the code changed a lot (design §4.2).
   const [resets, setResets] = useState<ReadonlySet<string>>(new Set());
   // Picture size per file id, to keep a block's scale when its picture changes.
-  const sizes = useRef(new Map<string, { width: number; height: number }>());
+  const sizes = useRef(new Map<string, BlockPicture>());
   // The picture each block shows, so a block whose code did not change is not rendered again.
   const picCache = useRef<PictureCache<BlockPicture>>(new Map());
   const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
@@ -91,6 +106,125 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const focusRef = useRef(focus);
   focusRef.current = focus;
   const focusDone = useRef(0);
+
+  // Layout edit mode (design §5): the one selected block, its session (opened ahead, so a press can enter at once),
+  // the block being edited and where its layout sits on screen.
+  const [selBlock, setSelBlock] = useState<string | null>(null);
+  const [sess, setSess] = useState<Sess | null>(null);
+  const [edit, setEdit] = useState<Edit | null>(null);
+  const [frame, setFrame] = useState<LayoutFrame | null>(null);
+  // Why the selected block cannot be laid out by hand, shown after a try.
+  const [notice, setNotice] = useState<{ blockId: string; text: string } | null>(null);
+  const selRef = useRef(selBlock);
+  selRef.current = selBlock;
+  const sessRef = useRef(sess);
+  sessRef.current = sess;
+  const editRef = useRef<Edit | null>(null);
+  const startN = useRef(0);
+  // Opacity the edited block image had before it was hidden under the overlay.
+  const hiddenOpacity = useRef(100);
+
+  const imageOf = (els: readonly ExcalidrawElement[], blockId: string) => els.find((e) => !e.isDeleted && blockIdOf(e as unknown as SceneEl) === blockId) as ExcalidrawImageElement | undefined;
+
+  /** Where the block's layout lands in the wrapper, from its image and the view; null while its picture is not current. */
+  const frameOf = useCallback((img: ExcalidrawImageElement, st: AppState, b: Block): LayoutFrame | null => {
+    const pic = sizes.current.get(img.fileId ?? '');
+    const el = wrap.current;
+    if (!pic || !el) return null;
+    let origin = pic.anchor && pic.anchor.key === hash(`${PIC_THEME}\n${b.type}\n${b.code}`) ? pic.anchor : null;
+    // A picture drawn with its layout left out (§4.2) has no anchor, but it is what the session composes for that layout.
+    const s = ready(sessRef.current, b);
+    if (!pic.anchor && pic.layoutReset && s) origin = { key: '', ...(s.compose(b.layout).scene.origin ?? { x: 0, y: 0 }) };
+    if (!origin) return null;
+    const r = el.getBoundingClientRect();
+    return layoutFrame(img, { width: pic.width, origin }, { scrollX: st.scrollX, scrollY: st.scrollY, zoom: st.zoom.value, offsetX: st.offsetLeft - r.left, offsetY: st.offsetTop - r.top });
+  }, []);
+
+  const sameFrame = (a: LayoutFrame | null, b: LayoutFrame | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.k === b.k);
+
+  /** Place the overlay again from the edited block's image and picture (both can change without a scene change). */
+  const refreshFrame = useCallback(() => {
+    const ed = editRef.current;
+    const xapi = apiRef.current;
+    const b = ed && blocksRef.current.find((x) => x.id === ed.blockId);
+    if (!xapi || !ed || !b) return;
+    const img = imageOf(xapi.getSceneElements(), ed.blockId);
+    const f = img ? frameOf(img, xapi.getAppState(), b) : null;
+    setFrame((old) => (sameFrame(old, f) ? old : f));
+  }, [frameOf]);
+
+  /** Leave layout edit mode: show the image again, and select it unless the press that ended the mode selects something. */
+  const exitEdit = useCallback((reselect: boolean) => {
+    const ed = editRef.current;
+    if (!ed) return;
+    editRef.current = null;
+    setEdit(null);
+    setFrame(null);
+    const xapi = apiRef.current;
+    if (!xapi) return;
+    const els = xapi.getSceneElementsIncludingDeleted();
+    const img = imageOf(els, ed.blockId);
+    if (!img) return;
+    xapi.updateScene({
+      elements: els.map((e) => (e === img && e.opacity === 0 ? newElementWith(img, { opacity: hiddenOpacity.current }) : e)),
+      ...(reselect ? { appState: { selectedElementIds: { [img.id]: true } } } : {}),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }, []);
+
+  /** Enter layout edit mode for a block: tidy its layout first (§4.3), hide its image under the overlay. */
+  const enterEdit = useCallback(
+    (blockId: string, start: EditStart | null) => {
+      const xapi = apiRef.current;
+      const b = blocksRef.current.find((x) => x.id === blockId);
+      if (!xapi || !b) return;
+      const els = xapi.getSceneElementsIncludingDeleted();
+      const img = imageOf(els, blockId);
+      if (!img) return;
+      const pruned = prunedLayout(b);
+      hiddenOpacity.current = img.opacity || 100;
+      // The tidy-up goes through the image like any layout change, so block and image agree; it is not an undo step.
+      const patch = pruned ? { opacity: 0, customData: withLayout(img.customData, pruned.layout) } : { opacity: 0 };
+      editRef.current = { blockId, start };
+      setEdit(editRef.current);
+      setNotice(null);
+      setFrame(frameOf(img, xapi.getAppState(), b));
+      xapi.updateScene({ elements: els.map((e) => (e === img ? newElementWith(img, patch) : e)), appState: { selectedElementIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
+    },
+    [frameOf],
+  );
+
+  /** Store a block's layout on its image; `IMMEDIATELY` makes it one undo step (design §5.6). */
+  const writeLayout = useCallback((blockId: string, layout: BlockLayout | undefined) => {
+    const xapi = apiRef.current;
+    if (!xapi) return;
+    const els = xapi.getSceneElementsIncludingDeleted();
+    const img = imageOf(els, blockId);
+    if (!img) return;
+    xapi.updateScene({ elements: els.map((e) => (e === img ? newElementWith(img, { customData: withLayout(img.customData, layout) }) : e)), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  }, []);
+
+  const resetLayout = useCallback(
+    (blockId: string) => {
+      if (blocksRef.current.find((b) => b.id === blockId)?.layout) writeLayout(blockId, undefined);
+    },
+    [writeLayout],
+  );
+
+  /** Palette `레이아웃 편집`: enter for the selected block, or say why not. */
+  const tryEdit = useCallback(async () => {
+    if (editRef.current) return exitEdit(true);
+    const xapi = apiRef.current;
+    const id = selRef.current;
+    const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
+    if (!xapi || !id || !b) return;
+    const img = imageOf(xapi.getSceneElements(), id);
+    const why = (img && imageReason(img)) ?? null;
+    const s = why ? null : await openLayoutSession(b);
+    const reason = why ?? (s && 'reason' in s ? s.reason : null);
+    if (reason) return setNotice({ blockId: id, text: reason });
+    if (selRef.current === id) enterEdit(id, null);
+  }, [enterEdit, exitEdit]);
 
   // Show the requested block once its image is on the canvas (a new block's image arrives after its picture is drawn).
   const tryFocus = useCallback(() => {
@@ -189,17 +323,31 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         next.push(...restoreElements(skeletons, null));
       }
       if (changed) api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+      // A comment edit keeps the same picture (no scene change) but gives it a new anchor: the overlay needs it.
+      else refreshFrame();
       tryFocus();
     });
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, drawn, draw, tryFocus]);
+  }, [api, drawn, draw, tryFocus, refreshFrame]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
     setBlockSelected(sel.length > 0 && sel.every((e) => blockIdOf(e as unknown as SceneEl) !== null));
+    setSelBlock(sel.length === 1 ? blockIdOf(sel[0] as unknown as SceneEl) : null);
+    const ed = editRef.current;
+    if (ed) {
+      // While editing, the overlay follows zoom, pan and the block image; a deleted image (undo, another tab) ends it.
+      const img = imageOf(sceneEls, ed.blockId);
+      const b = blocksRef.current.find((x) => x.id === ed.blockId);
+      if (!img || !b) exitEdit(false);
+      else {
+        const f = frameOf(img, appState, b);
+        setFrame((old) => (sameFrame(old, f) ? old : f));
+      }
+    }
     let elements = sceneEls;
     let cur = blocksRef.current;
     // A copied block image (duplicate, paste, alt-drag) becomes a new block with the same code.
@@ -225,6 +373,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     const split = splitScene(elements as unknown as readonly SceneEl[]);
     for (const b of cur) if (split.deleted.has(b.id)) graveyard.current.set(b.id, b);
+    // A deleted image's layout is not "seen" any more: if undo brings the image back, the block takes its layout again.
+    for (const id of split.deleted) seenLayouts.current.delete(id);
     let next = applyScene(cur, split, layoutsFromImages(split.layouts, seenLayouts.current));
     // An image came back (undo) for a block that was deleted on the canvas.
     const back = [...split.geometry.keys()].filter((id) => !cur.some((b) => b.id === id) && graveyard.current.has(id));
@@ -247,6 +397,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     if (next !== blocksRef.current) patch.blocks = [...next];
     if (patch.canvas || patch.blocks) onChangeRef.current(patch);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Double-click on a diagram block opens its code instead of Excalidraw's image crop.
@@ -276,13 +427,122 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       e.preventDefault();
       setEditing(bid);
     };
+    // Layout edit mode (design §5.2): pressing a node of the one selected block enters it and goes on as a drag; any
+    // other press on the canvas while editing leaves it (and does what it would do anyway).
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0 || (e.target instanceof Element && e.target.closest('[data-layout-edit]'))) return;
+      if (!(e.target instanceof HTMLCanvasElement)) return;
+      if (editRef.current) return exitEdit(false);
+      if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return;
+      const st = api.getAppState();
+      if (st.activeTool.type !== 'selection') return;
+      const sel = api.getSceneElements().filter((s) => st.selectedElementIds[s.id]);
+      const img = sel.length === 1 ? (sel[0] as ExcalidrawImageElement) : null;
+      const bid = img && blockIdOf(img as unknown as SceneEl);
+      const b = bid ? blocksRef.current.find((x) => x.id === bid) : undefined;
+      if (!img || !bid || !b) return;
+      const { x, y } = viewportCoordsToSceneCoords(e, st);
+      if (x < img.x || x > img.x + img.width || y < img.y || y > img.y + img.height) return;
+      // No session (still being made, or a block that cannot be laid out: sequence, ERD, an error): this press moves
+      // the block, like before, and says nothing; the palette's try is where the reason shows.
+      const ls = ready(sessRef.current, b);
+      const f = ls && frameOf(img, st, b);
+      if (!ls || !f) return;
+      const scene = ls.compose(b.layout).scene;
+      const r = el.getBoundingClientRect();
+      const hit = hitHandle(layoutHandles(scene.handles, scene.origin), toLayout(f, { x: e.clientX - r.left, y: e.clientY - r.top }));
+      if (!hit) return;
+      // A node was hit, but a locked or turned image cannot be edited: say why instead of entering.
+      const why = imageReason(img);
+      if (why) return setNotice({ blockId: bid, text: why });
+      e.stopPropagation();
+      e.preventDefault();
+      enterEdit(bid, { id: hit.id, clientX: e.clientX, clientY: e.clientY, shift: false, n: ++startN.current });
+    };
+    // A press outside the canvas (sidebar, top bar, document) leaves edit mode too; a modal (the palette) does not.
+    const onOutside = (e: PointerEvent) => {
+      if (!editRef.current || !(e.target instanceof Node) || el.contains(e.target)) return;
+      if (document.querySelector('[aria-modal="true"]')) return;
+      exitEdit(true);
+    };
     el.addEventListener('dblclick', onDbl, true);
     el.addEventListener('keydown', onKey, true);
+    el.addEventListener('pointerdown', onDown, true);
+    document.addEventListener('pointerdown', onOutside, true);
     return () => {
+      document.removeEventListener('pointerdown', onOutside, true);
       el.removeEventListener('dblclick', onDbl, true);
       el.removeEventListener('keydown', onKey, true);
+      el.removeEventListener('pointerdown', onDown, true);
     };
-  }, [api]);
+  }, [api, enterEdit, exitEdit, frameOf]);
+
+  // The session for the selected (or edited) block, opened ahead and again whenever its code changes.
+  const sessId = edit?.blockId ?? selBlock;
+  const sessBlock = sessId ? blocks.find((b) => b.id === sessId) : undefined;
+  const sessFor = sessBlock ? sessionKey(sessBlock) : null;
+  useEffect(() => {
+    const b = sessBlock;
+    if (!b) return setSess(null);
+    let live = true;
+    void openLayoutSession(b).then((s) => live && setSess({ blockId: b.id, key: sessionKey(b), s }));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessId, sessFor]);
+
+  // Edit mode ends when its block goes away or its code can no longer be laid out by hand (an error, another kind).
+  const editBlock = edit ? blocks.find((b) => b.id === edit.blockId) : undefined;
+  const editSess = ready(sess, editBlock);
+  useEffect(() => {
+    if (!edit) return;
+    if (!editBlock) return exitEdit(false);
+    if (sess && sess.blockId === edit.blockId && sess.key === sessionKey(editBlock) && 'reason' in sess.s) {
+      setNotice({ blockId: edit.blockId, text: sess.s.reason });
+      exitEdit(true);
+    }
+  }, [edit, editBlock, sess, exitEdit]);
+  // While the code changes, the new session and picture come a moment later; the overlay keeps the last picture it
+  // placed (not editable) instead of leaving the hidden block blank.
+  const lastShown = useRef<{ blockId: string; sess: LayoutSession; frame: LayoutFrame } | null>(null);
+  if (!edit) lastShown.current = null;
+  else if (editSess && frame) lastShown.current = { blockId: edit.blockId, sess: editSess, frame };
+  const kept = edit && !(editSess && frame) && lastShown.current?.blockId === edit.blockId ? lastShown.current : null;
+  const overlaySess = editSess && frame ? editSess : kept?.sess;
+  const overlayFrame = editSess && frame ? frame : kept?.frame;
+  // A fresh session (or the first one) can place a picture whose layout was left out; place the overlay again.
+  useEffect(refreshFrame, [api, editSess, refreshFrame]);
+  // A notice belongs to one try; it goes when another block is selected, or after a while.
+  useEffect(() => {
+    if (!notice) return;
+    if (selBlock && selBlock !== notice.blockId) return setNotice(null);
+    const t = setTimeout(() => setNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [notice, selBlock]);
+
+  // Wheel over the overlay goes to Excalidraw's canvas: it zooms at the pointer (tracked on document) and pans.
+  const forwardWheel = useCallback((e: WheelEvent) => {
+    const c = wrap.current?.querySelector('canvas.interactive') ?? wrap.current?.querySelector('.excalidraw canvas');
+    c?.dispatchEvent(
+      new WheelEvent('wheel', {
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        deltaZ: e.deltaZ,
+        deltaMode: e.deltaMode,
+        clientX: e.clientX,
+        clientY: e.clientY,
+        screenX: e.screenX,
+        screenY: e.screenY,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        shiftKey: e.shiftKey,
+        altKey: e.altKey,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  }, []);
 
   // What export, the palette and shortcuts can do with this canvas.
   useEffect(() => {
@@ -321,11 +581,23 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         target.focus({ preventScroll: true });
         target.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey: !!ctrl, metaKey: !!meta, shiftKey: !!shift, altKey: !!alt, bubbles: true, cancelable: true }));
       },
+      layout: {
+        state: () => {
+          const id = editRef.current?.blockId ?? selRef.current;
+          const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
+          return { block: !!b, editing: !!editRef.current, moved: !!b?.layout };
+        },
+        edit: () => void tryEdit(),
+        reset: () => {
+          const id = editRef.current?.blockId ?? selRef.current;
+          if (id) resetLayout(id);
+        },
+      },
     };
     return () => {
       handle.current = null;
     };
-  }, [api, handle]);
+  }, [api, handle, tryEdit, resetLayout]);
 
   const block = editing ? blocks.find((b) => b.id === editing) : undefined;
   useEffect(() => {
@@ -361,6 +633,36 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         onBlock={(b) => {
           onChangeRef.current({ blocks: [...blocksRef.current, b] });
           setEditing(b.id);
+        }}
+      />
+      {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
+        <LayoutEditOverlay
+          layout={editBlock.layout}
+          session={overlaySess}
+          frame={overlayFrame}
+          stale={!!kept}
+          dark={dark}
+          wrap={wrap.current}
+          start={edit.start}
+          onCommit={(l) => writeLayout(edit.blockId, l)}
+          onExit={() => exitEdit(true)}
+          onOpenCode={() => setEditing(edit.blockId)}
+          onWheel={forwardWheel}
+        />
+      )}
+      <LayoutBar
+        editing={!!edit}
+        moved={!!(editBlock ?? (selBlock ? blocks.find((b) => b.id === selBlock) : undefined))?.layout}
+        notice={!edit && notice && notice.blockId === selBlock ? notice.text : null}
+        onReset={() => {
+          const id = edit?.blockId ?? selBlock;
+          if (id) resetLayout(id);
+          // The button took focus; Ctrl+Z right after must still reach Excalidraw.
+          focusCanvas(wrap.current);
+        }}
+        onDone={() => {
+          exitEdit(true);
+          focusCanvas(wrap.current);
         }}
       />
       {broken.length > 0 && !block && (
@@ -428,6 +730,31 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
             </p>
           )}
         </aside>
+      )}
+    </div>
+  );
+}
+
+/** Bottom-centre bar for layout edit mode (design §5.5): what the mode does, or that a block has a moved layout, or why it cannot be edited. */
+function LayoutBar({ editing, moved, notice, onReset, onDone }: { editing: boolean; moved: boolean; notice: string | null; onReset: () => void; onDone: () => void }) {
+  if (!editing && !notice && !moved) return null;
+  return (
+    <div
+      role="status"
+      aria-label="레이아웃 안내"
+      className="absolute bottom-16 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow"
+      style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+    >
+      <span>{editing ? '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요' : (notice ?? '직접 옮긴 배치예요')}</span>
+      {(editing || (!notice && moved)) && (
+        <button type="button" className={BAR_BTN} style={{ borderColor: 'var(--border)' }} disabled={!moved} onClick={onReset}>
+          레이아웃 초기화
+        </button>
+      )}
+      {editing && (
+        <button type="button" className={BAR_BTN} style={{ borderColor: 'var(--border)' }} onClick={onDone}>
+          완료
+        </button>
       )}
     </div>
   );

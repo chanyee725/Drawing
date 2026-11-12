@@ -41,12 +41,22 @@ export function hash(s: string): string {
 // Layouts are never mutated, so their text form is computed once per object (handleChange compares them on every frame).
 const sigs = new WeakMap<object, string>();
 
-/** Stable text form of a layout ("" for none), for cache keys and for comparing layouts. */
+// JSON with object keys sorted at every level, so two layouts with the same content compare equal whatever order
+// their keys were written in (a file edited by hand, a server that rebuilt the object).
+const sorted = (v: unknown): string => {
+  if (v === null || typeof v !== 'object') return JSON.stringify(v) ?? 'null';
+  if (Array.isArray(v)) return `[${v.map(sorted).join(',')}]`;
+  const o = v as Record<string, unknown>;
+  const keys = Object.keys(o).filter((k) => o[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${sorted(o[k])}`).join(',')}}`;
+};
+
+/** Stable text form of a layout ("" for none), for cache keys and for comparing layouts. Key order does not count. */
 export function layoutSig(l: BlockLayout | undefined | null): string {
   if (!l) return '';
   let s = sigs.get(l);
   if (s === undefined) {
-    s = JSON.stringify(l);
+    s = sorted(l);
     sigs.set(l, s);
   }
   return s;

@@ -10,4 +10,13 @@ export type CanvasHandle = {
   png(o?: ExportOptions): Promise<Blob | null>;
   /** Send a key to the canvas as if typed there (tool keys, zoom, undo...). */
   key(k: { key: string; code?: string; ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean }): void;
+  /** Layout edit mode for the one selected diagram block (design §5). */
+  layout: {
+    /** Whether one block is selected (or edited), edit mode is on, and that block has a moved layout. */
+    state(): { block: boolean; editing: boolean; moved: boolean };
+    /** Enter edit mode for the selected block (or say why not on the canvas); leave it when already on. */
+    edit(): void;
+    /** Drop the block's moved layout, as one undo step. */
+    reset(): void;
+  };
 };
