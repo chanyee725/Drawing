@@ -39,5 +39,6 @@ body {
 
 /* The web-embed tool (right after "frame" in the extra-tools menu) is off: embeds would load outside pages. */
 .excalidraw [data-testid="toolbar-frame"] + [data-testid="toolbar-embeddable"] {
-  display: none;
+  /* !important: Excalidraw's own menu-item rules load later and set display. */
+  display: none !important;
 }
