@@ -156,12 +156,26 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   n = await nodes();
   assert.ok(Math.abs(before.DB.y - n.DB.y) > 5, 'the picture follows the undo');
   near(n.Web, auto.Web, 'Web stays through undo');
+
+  // Holding an arrow key (auto-repeat) is one undo step, not one per repeat.
+  for (let i = 0; i < 6; i++) await page.keyboard.down('ArrowLeft');
+  await page.keyboard.up('ArrowLeft');
+  b = await saved();
+  assert.equal(b.layout.items.DB.cx, db1.cx + 1 - 6, 'six repeats move six steps');
+  await page.keyboard.press('Control+z');
+  b = await saved();
+  assert.deepEqual([b.layout.items.DB.cx, b.layout.items.DB.cy], [db1.cx + 1, db1.cy], 'one undo takes back the whole hold');
   const kept = b.layout;
 
-  // Delete does nothing in edit mode (it would remove the whole block).
+  // Ctrl+A selects every node in the block, not every element on the canvas; Delete does nothing in edit mode (it
+  // would remove the whole block).
+  await page.keyboard.press('Control+a');
+  assert.equal(await overlay.locator('[data-selected]').count(), 3, 'Ctrl+A selects the three nodes');
+  assert.equal(await page.locator('.block-selected').count(), 0, 'no canvas element gets selected');
   await page.keyboard.press('Delete');
   b = await saved();
   assert.ok(b, 'block still there');
+  assert.deepEqual(b.layout, kept);
 
   // Reset drops the layout (auto layout again); undo brings it back.
   await bar.getByRole('button', { name: '레이아웃 초기화' }).click();
@@ -189,6 +203,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   // Old anchor: after a comment edit the picture is the same; dragging a node must not shift the other nodes.
   await page.mouse.click(settled.Web.x, settled.Web.y);
   await page.waitForTimeout(200);
+  // The double-click's first press lands on a node of the selected block, so it enters edit mode; the code opens on top.
   await page.mouse.dblclick(settled.Web.x, settled.Web.y);
   const panel = page.getByRole('complementary', { name: '다이어그램 코드' });
   await panel.locator('.cm-content').waitFor();
@@ -198,7 +213,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await page.waitForTimeout(500);
   await panel.getByRole('button', { name: '닫기' }).click();
   await page.waitForTimeout(500);
-  await palette('레이아웃 편집');
+  // Edit mode stays through the code panel.
   await overlay.waitFor({ timeout: 5000 });
   n = await nodes();
   for (const id of ['Web', 'API', 'DB']) near(n[id], settled[id], `${id} after a comment edit`);
@@ -211,7 +226,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   const left = n.Web;
 
   // Error then recovery: broken code ends edit mode and says why; fixed code edits again from the same spots.
-  await overlay.dblclick({ position: { x: 2, y: 2 } });
+  await overlay.locator('[aria-label="레이아웃 편집"]').dblclick({ position: { x: 2, y: 2 } });
   await panel.locator('.cm-content').waitFor();
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
@@ -243,8 +258,31 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   near(n.Web, left, 'Web stays through the undo');
   near(n.API, settled.API, 'API stays through the undo');
 
+  // Ctrl+wheel over the overlay zooms the canvas around the pointer: the node under it stays put, the others spread.
+  await page.mouse.move(n.API.x, n.API.y);
+  await page.keyboard.down('Control');
+  await page.mouse.wheel(0, -200);
+  await page.keyboard.up('Control');
+  await page.waitForTimeout(400);
+  const zoomed = await nodes();
+  near(zoomed.API, n.API, 'the node under the pointer stays put', 3);
+  assert.ok(Math.hypot(zoomed.Web.x - zoomed.API.x, zoomed.Web.y - zoomed.API.y) > Math.hypot(n.Web.x - n.API.x, n.Web.y - n.API.y) * 1.05, 'zoomed in');
+
   // Broken code refuses entry and says why.
   await page.keyboard.press('Escape');
   await overlay.waitFor({ state: 'detached', timeout: 5000 });
+  await page.keyboard.press('Enter');
+  await panel.locator('.cm-content').waitFor();
+  await panel.locator('.cm-line').last().click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('\nWeb > ');
+  await page.waitForTimeout(500);
+  await panel.getByRole('button', { name: '닫기' }).click();
+  await page.waitForTimeout(500);
+  await palette('레이아웃 편집');
+  await page.waitForTimeout(300);
+  assert.equal(await overlay.count(), 0, 'broken code does not enter');
+  assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/);
+  await shot('block-drag-refused.png');
   assert.deepEqual(errors, []);
 });
