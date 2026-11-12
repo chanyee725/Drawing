@@ -9,42 +9,43 @@
 
 import { LUCIDE_ICONS, SIMPLE_ICONS } from './icon-data.ts';
 
-export type Glyph =
-  | 'user'
-  | 'users'
-  | 'server'
-  | 'database'
-  | 'monitor'
-  | 'phone'
-  | 'cloud'
-  | 'queue'
-  | 'balancer'
-  | 'function'
-  | 'bucket'
-  | 'bolt'
-  | 'container'
-  | 'lock'
-  | 'globe'
-  | 'flag'
-  | 'mail'
-  | 'file'
-  | 'gear'
-  | 'chart'
-  | 'code'
-  | 'bell'
-  | 'search'
-  | 'placeholder';
+/** Generic glyph names. `Glyph` and the exact-name lookup both derive from this one list. */
+const GLYPH_LIST = [
+  'user',
+  'users',
+  'server',
+  'database',
+  'monitor',
+  'phone',
+  'cloud',
+  'queue',
+  'balancer',
+  'function',
+  'bucket',
+  'bolt',
+  'container',
+  'lock',
+  'globe',
+  'flag',
+  'mail',
+  'file',
+  'gear',
+  'chart',
+  'code',
+  'bell',
+  'search',
+  'placeholder',
+] as const;
+
+export type Glyph = (typeof GLYPH_LIST)[number];
 
 /** Our own artwork: only the neutral placeholder is drawn. Every other glyph name is drawn with Lucide (see LUCIDE_FOR_GLYPH). */
 export const GLYPHS = {
   placeholder: 'M4 4h16v16H4z M9 9h6v6H9z',
 } as const satisfies Record<'placeholder', string>;
 
-/** Generic glyph names; an icon name equal to one of these picks that glyph before keywords are tried. */
-const GLYPH_NAMES: ReadonlySet<string> = new Set<Glyph>([
-  'user', 'users', 'server', 'database', 'monitor', 'phone', 'cloud', 'queue', 'balancer', 'function', 'bucket', 'bolt',
-  'container', 'lock', 'globe', 'flag', 'mail', 'file', 'gear', 'chart', 'code', 'bell', 'search', 'placeholder',
-]);
+/** An icon name equal to one of the glyph names picks that glyph before keywords are tried. */
+const GLYPH_NAMES: ReadonlySet<string> = new Set<string>(GLYPH_LIST);
 
 /** Keyword → glyph, checked in order against the `-`/`_`/space separated words of the icon name. */
 const KEYWORDS: [Glyph, string[]][] = [
