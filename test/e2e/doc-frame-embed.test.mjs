@@ -44,8 +44,11 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   const el = (o) => ({ angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, ...o });
   const frame = el({ id: 'frame_1', type: 'frame', x: 100, y: 100, width: 400, height: 300, name: '구조도', frameId: null });
   const box = el({ id: 'box_1', type: 'rectangle', x: 140, y: 140, width: 120, height: 80, frameId: 'frame_1', backgroundColor: '#a5d8ff' });
+  const bare = el({ id: 'frame_2', type: 'frame', x: 700, y: 100, width: 300, height: 200, name: '', frameId: null });
+  // The canvas refits its height to the picture (about 416), so the centre still lies inside the frame.
+  const block = { id: 'b_in', type: 'architecture', code: 'title T\nWeb [icon: user]', x: 110, y: 110, w: 240, h: 120 };
   let f = await call('POST', '/api/file', { path: 'fr', title: '프레임' });
-  f = await call('PUT', '/api/file?path=fr', { ...f, version: 2, canvas: { ...f.canvas, elements: [frame, box] }, document: { type: 'doc', content: [{ type: 'paragraph' }] } });
+  f = await call('PUT', '/api/file?path=fr', { ...f, version: 2, canvas: { ...f.canvas, elements: [frame, box, bare] }, blocks: [block], document: { type: 'doc', content: [{ type: 'paragraph' }] } });
 
   browser = await chromium.launch({ executablePath: process.env.CHROME, headless: true });
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
@@ -65,19 +68,49 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   assert.match(await pic.getAttribute('src'), /^data:image\/svg\+xml/);
   assert.equal(await page.locator('.doc-frame figcaption').textContent(), '프레임 구조도 · 누르면 캔버스로 가요');
   await page.getByText('저장했어요').waitFor();
-  const saved = await call('GET', '/api/file?path=fr');
+  // The diagram block inside the frame is drawn in the preview (it is not a canvas element).
+  await page.waitForFunction(() => decodeURIComponent(document.querySelector('.doc-frame .doc-diagram-pic img')?.getAttribute('src') ?? '').includes('data-block-id'), null, { timeout: 30000 });
+  const svgText = decodeURIComponent((await pic.getAttribute('src')).split(',')[1]);
+  assert.match(svgText, /data-block-id="b_in"/);
+  let saved = await call('GET', '/api/file?path=fr');
   const node = saved.document.content.find((n) => n.type === 'frameEmbed');
   assert.deepEqual(node.attrs, { frameId: 'frame_1', name: '구조도' });
 
-  // The canvas already shows the frame; selecting it draws handles around it, so its pixels change.
-  const canvasPng = () => page.locator('.excalidraw').first().screenshot();
+  // Dark mode: Excalidraw inverts the whole exported SVG, so the block layer must stay the light picture
+  // (drawn dark it would be inverted twice). Its picture is the same as in the light page.
+  const lightPic = /<image[^>]*data-block-id="b_in"/.exec(svgText)?.[0].match(/href="([^"]+)"/)?.[1];
+  const dark = await (await browser.newContext({ viewport: { width: 1400, height: 900 }, colorScheme: 'dark' })).newPage();
+  await dark.goto(`${BASE}/#file=fr`);
+  await dark.waitForFunction(() => decodeURIComponent(document.querySelector('.doc-frame .doc-diagram-pic img')?.getAttribute('src') ?? '').includes('data-block-id'), null, { timeout: 30000 });
+  const darkSvg = decodeURIComponent((await dark.locator('.doc-frame .doc-diagram-pic img').getAttribute('src')).split(',')[1]);
+  assert.match(darkSvg, /invert\(/, 'the export is in dark mode');
+  const darkPic = /<image[^>]*data-block-id="b_in"/.exec(darkSvg)?.[0].match(/href="([^"]+)"/)?.[1];
+  assert.ok(lightPic && darkPic);
+  assert.equal(darkPic, lightPic, 'frame preview draws blocks light, also in dark mode');
+  await dark.close();
+
+  // Clicking the preview shows the frame on the canvas and selects it. Check the selection itself:
+  // Delete removes the selected elements, so only the frame itself may go; its child and the other frame stay.
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
-  await page.waitForTimeout(1000);
-  const before = await canvasPng();
-  // Clicking the preview shows the frame on the canvas and selects it.
   await page.locator('.doc-frame .doc-diagram-pic').click();
-  await page.waitForTimeout(1500);
-  assert.notDeepEqual(await canvasPng(), before);
+  await page.waitForTimeout(1000);
+  await page.keyboard.press('Delete');
+  let live = [];
+  for (let i = 0; i < 50; i++) {
+    await page.waitForTimeout(200);
+    live = ((await call('GET', '/api/file?path=fr')).canvas.elements ?? []).filter((e) => !e.isDeleted).map((e) => e.id);
+    if (!live.includes('frame_1')) break;
+  }
+  assert.deepEqual(live, ['box_1', 'frame_2']);
+
+  // An unnamed frame is numbered by its place among the frames.
+  await page.reload();
+  await page.waitForSelector('.doc-editor');
+  await page.locator('.doc-editor p').first().click();
+  await page.keyboard.type('/프레임');
+  await page.getByRole('option', { name: /프레임 넣기: 프레임 1/ }).waitFor();
+  await page.keyboard.press('Escape');
+  saved = await call('GET', '/api/file?path=fr');
 
   // Delete the frame on the canvas: the embed shows a broken-reference note, keeping the saved name.
   await call('PUT', '/api/file?path=fr', { ...saved, canvas: { ...saved.canvas, elements: [] } });

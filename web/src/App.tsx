@@ -2,7 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from '
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
-import { frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
+import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
@@ -67,6 +67,12 @@ const elementsOf = (canvas: unknown): CanvasEl[] => {
   const els = (canvas as { elements?: unknown } | null | undefined)?.elements;
   return Array.isArray(els) ? (els as CanvasEl[]) : [];
 };
+const inFrames = (blocks: Block[], els: CanvasEl[]): Block[] => {
+  const frames = els.filter((e) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe'));
+  if (!frames.length) return NO_BLOCKS;
+  return blocks.filter((b) => frames.some((f) => blocksInFrame({ x: f.x ?? 0, y: f.y ?? 0, width: f.width ?? 0, height: f.height ?? 0 }, [b]).length));
+};
+const sameFrameBlocks = (a: Block[], b: Block[]) => sameDrawing(a, b) && a.every((x, i) => x.x === b[i].x && x.y === b[i].y && x.w === b[i].w && x.h === b[i].h);
 const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onShowFrame, onExportBlock, onFail }: DocSlotProps) {
   const path = useSession(session, (s) => s.path ?? '');
   const key = useSession(session, (s) => `${s.path}#${s.loadSeq}`);
@@ -74,6 +80,8 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
   const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS, sameDrawing);
   // Frames and their contents: a new array only when one of those changes (not when a block or other drawing does).
   const frameScene = useSession(session, (s) => sceneOf(elementsOf(s.file?.canvas)), (a, b) => frameSceneSig(a) === frameSceneSig(b));
+  // Blocks inside a frame, with where they sit: the frame preview draws them (they are not canvas elements).
+  const frameBlocks = useSession(session, (s) => inFrames(s.file?.blocks ?? NO_BLOCKS, elementsOf(s.file?.canvas)), sameFrameBlocks);
   const getBlocks = useCallback(() => session.getState().file?.blocks ?? NO_BLOCKS, [session]);
   const getCanvas = useCallback(() => session.getState().file?.canvas, [session]);
   const onDocument = useCallback((d: unknown) => session.edit({ document: d }), [session]);
@@ -104,6 +112,7 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
           onBlocks={onBlocks}
           onShow={onShow}
           frameScene={frameScene}
+          frameBlocks={frameBlocks}
           onShowFrame={onShowFrame}
           onExportBlock={onExportBlock}
         />
