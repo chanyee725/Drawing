@@ -42,7 +42,7 @@ test('CRUD: create, read, list, rename, move, delete files and folders', async (
     assert.equal(r.body.path, 'proj/arch.dpx.json');
     assert.deepEqual(
       { v: r.body.version, t: r.body.title, rev: r.body.revision, doc: r.body.document, canvas: r.body.canvas, blocks: r.body.blocks },
-      { v: 2, t: 'Arch', rev: 1, doc: { type: 'doc', content: [] }, canvas: { elements: [], appState: {} }, blocks: [] },
+      { v: 3, t: 'Arch', rev: 1, doc: { type: 'doc', content: [] }, canvas: { elements: [], appState: {} }, blocks: [] },
     );
     assert.equal((await call('POST', '/api/file', { path: 'proj/arch' })).status, 409);
     assert.equal((await call('POST', '/api/folder', { path: 'proj' })).status, 409);
@@ -92,7 +92,7 @@ test('write: whole-file save bumps revision and keeps content; stale write gets 
     assert.equal(r.status, 200);
     assert.deepEqual(r.body, { path: 'a.dpx.json', revision: 2 });
     r = await call('GET', `/api/file?path=${q('a')}`);
-    assert.deepEqual({ ...r.body, path: undefined }, { ...content, path: undefined, version: 2, revision: 2 });
+    assert.deepEqual({ ...r.body, path: undefined }, { ...content, path: undefined, version: 3, revision: 2 });
 
     // a second client still holding revision 1 is rejected and told the current revision
     r = await call('PUT', `/api/file?path=${q('a')}`, { ...content, title: 'stale', revision: 1 });
@@ -223,7 +223,7 @@ function sseReader(base) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test('external edits emit a workspace SSE event; our own writes do not', async () => {
+test('external edits emit a workspace SSE event; our own saves and creates do not', async () => {
   await withApp(async ({ ws, base, call }) => {
     await call('POST', '/api/file', { path: 'a' });
     const sse = sseReader(base);
@@ -233,10 +233,19 @@ test('external edits emit a workspace SSE event; our own writes do not', async (
       await call('PUT', `/api/file?path=${q('a')}`, { title: 'mine', revision: 1 });
       await call('POST', '/api/file', { path: 'b' });
       await call('POST', '/api/folder', { path: 'dir' });
-      await call('POST', '/api/move', { from: 'b', to: 'dir/b' });
-      await call('DELETE', `/api/file?path=${q('dir/b')}`);
       await sleep(400);
       assert.deepEqual(sse.events, []);
+
+      // moves and deletes through the API tell other tabs
+      await call('POST', '/api/move', { from: 'b', to: 'dir/b' });
+      assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json')).kind, 'tree');
+      await call('DELETE', `/api/file?path=${q('dir/b')}`);
+      assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json' && e.kind === 'delete')).kind, 'delete');
+      await call('POST', '/api/folder', { path: 'tmpdir' });
+      await call('DELETE', `/api/folder?path=${q('tmpdir')}`);
+      await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree');
+      await sleep(400); // the watcher then sees nothing new
+      sse.events.length = 0;
 
       // outside edit of an existing file
       const cur = JSON.parse(await readFile(join(ws, 'a.dpx.json'), 'utf8'));
@@ -490,21 +499,78 @@ test('no folder can be named like a file: create, move and parent segments are a
   });
 });
 
+test('block layout: valid layouts round-trip, unknown fields are dropped, bad ones get 400', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const blk = { id: 'b1', type: 'architecture', code: 'A > B', x: 0, y: 0, w: 10, h: 10 };
+    const layout = {
+      v: 1,
+      basis: { type: 'architecture', direction: 'right', count: 2 },
+      items: { A: { cx: 1.5, cy: -2, parent: '' }, B: { cx: 3, cy: 4, parent: 'VPC' } },
+    };
+    const put = (b, revision) => call('PUT', `/api/file?path=${q('a')}`, { revision, blocks: [b] });
+    let r = await put({ ...blk, layout: { ...layout, junk: 1, items: { ...layout.items, A: { ...layout.items.A, extra: 1 } } } }, 1);
+    assert.equal(r.status, 200);
+    assert.deepEqual((await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0].layout, layout);
+    // no layout stays absent
+    r = await put(blk, 2);
+    assert.equal('layout' in (await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0], false);
+    const bad = [
+      null, 'x', [], {}, { v: 0 }, { v: 1.5 }, { v: 1, items: [] },
+      { v: 1, items: { A: { cx: 'x', cy: 0, parent: '' } } },
+      { v: 1, items: { A: { cx: 0, cy: null, parent: '' } } },
+      { v: 1, items: { A: { cx: 0, cy: 0 } } },
+      { v: 1, items: { '': { cx: 0, cy: 0, parent: '' } } },
+      { v: 1, items: { ['k'.repeat(201)]: { cx: 0, cy: 0, parent: '' } } },
+      { v: 1, basis: { type: 'a', direction: 'right', count: -1 } },
+      { v: 1, basis: { type: 'a', count: 1 } },
+    ];
+    let rev = 3;
+    for (const l of bad) {
+      assert.equal((await put({ ...blk, layout: l }, rev)).status, 400, JSON.stringify(l));
+    }
+    const many = {};
+    for (let i = 0; i < 2001; i++) many[`n${i}`] = { cx: 0, cy: 0, parent: '' };
+    assert.equal((await put({ ...blk, layout: { v: 1, items: many } }, rev)).status, 400);
+  });
+});
+
+test('block layout: a layout with a newer sub-format version is kept verbatim', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const layout = { v: 2, items: { A: { x: 1 } }, shape: ['new'] };
+    const blk = { id: 'b1', type: 'flowchart', code: 'a', x: 0, y: 0, w: 1, h: 1, layout };
+    assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { revision: 1, blocks: [blk] })).status, 200);
+    assert.deepEqual((await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0].layout, layout);
+    assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { revision: 2, blocks: [{ ...blk, layout: { v: 2.5 } }] })).status, 400);
+  });
+});
+
+test('a stored file with a broken layout still reads; only that layout is dropped', async () => {
+  const { parseStored } = await import('../server/workspace/model.js');
+  const blk = { id: 'b1', type: 'flowchart', code: 'a', x: 0, y: 0, w: 1, h: 1 };
+  const text = JSON.stringify({ version: 3, title: 't', document: { type: 'doc', content: [] }, canvas: {}, revision: 2,
+    blocks: [{ ...blk, layout: { v: 1, items: { A: { cx: 'oops' } } } }, { ...blk, id: 'b2', layout: { v: 1, items: { B: { cx: 1, cy: 2, parent: '' } } } }] });
+  const f = parseStored(text);
+  assert.equal('layout' in f.blocks[0], false);
+  assert.deepEqual(f.blocks[1].layout, { v: 1, items: { B: { cx: 1, cy: 2, parent: '' } } });
+});
+
 test('a file reads back with the version it was written with; a write stores the current one', async () => {
   const { parseStored, normalizeContent, FORMAT_VERSION } = await import('../server/workspace/model.js');
   const old = JSON.stringify({ version: 1, title: 'old', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 3 });
   assert.equal(parseStored(old).version, 1);
   assert.equal(parseStored(JSON.stringify({ title: 'x', revision: 1 })).version, 1);
   assert.equal(normalizeContent({ version: 1 }).version, FORMAT_VERSION);
-  assert.equal(FORMAT_VERSION, 2);
+  assert.equal(FORMAT_VERSION, 3);
 });
 
-test('a file written with a newer format version is not overwritten as version 2', async () => {
+test('a file written with a newer format version is not overwritten as version 3', async () => {
   await withApp(async ({ ws, call }) => {
-    const text = JSON.stringify({ version: 3, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1, extra: 'keep' });
+    const text = JSON.stringify({ version: 4, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1, extra: 'keep' });
     await writeFile(join(ws, 'f.dpx.json'), text);
     const r = await call('GET', `/api/file?path=${q('f')}`);
-    assert.equal(r.body.version, 3);
+    assert.equal(r.body.version, 4);
     const w = await call('PUT', `/api/file?path=${q('f')}`, { title: 'x', revision: r.body.revision });
     assert.equal(w.status, 422);
     assert.match(w.body.error ?? JSON.stringify(w.body), /더 새 버전에서 만든 파일이라 저장하지 않았어요/);
@@ -518,7 +584,7 @@ test('reading a newer-format file after an outside edit leaves it untouched, and
     // The server knows this file (created here) before the newer app replaces it on disk.
     const made = await call('POST', '/api/file', { path: 'f' });
     assert.equal(made.status, 201);
-    const base = { version: 3, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: made.body.revision };
+    const base = { version: 4, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: made.body.revision };
     await writeFile(file, JSON.stringify(base));
     // Outside edit that keeps the revision: a v2 file would get its revision raised on disk here.
     const edited = JSON.stringify({ ...base, title: 'edited outside', extra: 'keep' });
@@ -532,4 +598,46 @@ test('reading a newer-format file after an outside edit leaves it untouched, and
     assert.equal(stale.status, 422);
     assert.equal(await readFile(file, 'utf8'), edited);
   });
+});
+
+test('a typed .dpx suffix is dropped: demo.dpx is the file demo.dpx.json', async () => {
+  await withApp(async ({ ws, call }) => {
+    const r = await call('POST', '/api/file', { path: 'a/demo.dpx', title: 'Demo' });
+    assert.equal(r.status, 201);
+    assert.equal(r.body.path, 'a/demo.dpx.json');
+    assert.deepEqual(await readdir(join(ws, 'a')), ['demo.dpx.json']);
+    assert.equal((await call('GET', `/api/file?path=${q('a/demo.dpx')}`)).status, 200);
+    assert.equal((await call('POST', '/api/file', { path: 'a/demo' })).status, 409);
+  });
+});
+
+test('names like a:memo are fine; only drive paths are refused', async () => {
+  await withApp(async ({ call }) => {
+    assert.equal((await call('POST', '/api/file', { path: 'a:memo' })).status, 201);
+    assert.equal((await call('GET', `/api/file?path=${q('a:memo')}`)).status, 200);
+    if (process.platform !== 'win32') assert.equal((await call('POST', '/api/file', { path: 'C:/x' })).status, 400);
+  });
+});
+
+test('the revision floors of deleted files are bounded, newest kept', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const store = createStore(ws, {});
+  try {
+    for (const name of ['old', 'recent']) {
+      await store.createFile(name, {});
+      const f = await store.readFile(name);
+      await store.writeFile(name, { ...f, revision: f.revision });
+    }
+    await store.removeFile('old');
+    for (let i = 0; i < 1100; i++) {
+      await store.createFile(`x${i}`, {});
+      await store.removeFile(`x${i}`);
+    }
+    await store.removeFile('recent');
+    assert.equal((await store.createFile('old', {})).revision, 1, 'the oldest floor was dropped');
+    assert.equal((await store.createFile('recent', {})).revision, 3, 'a recent deletion keeps its floor');
+  } finally {
+    store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
 });

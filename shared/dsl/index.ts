@@ -53,7 +53,8 @@ export function detectDiagramType(code: string): DiagramType {
 }
 
 function run(code: string, type: DiagramType): ParseResult {
-  const src = code.replace(/^﻿/, '');
+  // A BOM becomes a space, not nothing, so every offset and column still matches the source text.
+  const src = code.replace(/^\uFEFF/, ' ');
   const { tokens, diagnostics: lexDiagnostics } = tokenize(src);
   const c = new Cursor(src, tokens, GRAPH_KEYS);
   const ast: Diagram =
@@ -76,9 +77,11 @@ function emptyAst(type: DiagramType): Diagram {
  * `type` defaults to `detectDiagramType(code)`.
  */
 export function parse(code: string, type?: DiagramType): ParseResult {
-  const stripped = stripMarker(String(code ?? ''));
-  const resolved = type ?? stripped.type ?? detectDiagramType(stripped.code);
+  let resolved = type ?? 'cloud-architecture';
   try {
+    // Inside the try: an object whose toString throws must not make parse() throw.
+    const stripped = stripMarker(String(code ?? ''));
+    resolved = type ?? stripped.type ?? detectDiagramType(stripped.code);
     return run(stripped.code, resolved);
   } catch (e) {
     const message = `Internal parser error: ${e instanceof Error ? e.message : String(e)}`;

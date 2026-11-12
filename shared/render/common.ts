@@ -43,7 +43,7 @@ function globalAt(d: DiagramBase, key: string, line: number): string | undefined
 
 /**
  * Element attrs win over global styles. Defaults follow the spec except `typeface`: we default to `clean`
- * until the hand-drawn font is bundled (rough is accepted and rendered with a fallback stack).
+ * (the hand-drawn face is bundled and embedded in the SVG; whether it should be the default is a product call).
  */
 export function styleFor(d: DiagramBase, attrs: Attrs, line: number): ElementStyle {
   const get = (key: string): string | undefined => attrs[key] ?? globalAt(d, key, line);
@@ -205,6 +205,7 @@ export function finishScene(type: Scene['type'], d: DiagramBase, items: SceneIte
     items.push(textItem(d.title.split(/\r?\n/), b.x0, b.y0 - 16 - lh * d.title.split(/\r?\n/).length, { size, font: 'clean', anchor: 'start', weight: 600, tone: 'strong' }));
     b = boundsOf(items);
   }
+  const origin = { x: round(PAD - b.x0), y: round(PAD - b.y0) };
   translate(items, PAD - b.x0, PAD - b.y0);
-  return { type, width: Math.ceil(b.x1 - b.x0 + PAD * 2), height: Math.ceil(b.y1 - b.y0 + PAD * 2), items };
+  return { type, width: Math.ceil(b.x1 - b.x0 + PAD * 2), height: Math.ceil(b.y1 - b.y0 + PAD * 2), items, origin };
 }

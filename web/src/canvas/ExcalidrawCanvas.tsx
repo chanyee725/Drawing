@@ -9,9 +9,10 @@ import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram } from '../dsl/adapter';
+import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, picturesFor, rectOf, sameDrawing, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 /** Show (scroll to and select) this block's image; a new `n` is a new request. */
@@ -60,9 +61,12 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
   const [blockSelected, setBlockSelected] = useState(false);
   // Blocks whose code has errors (they show their last good picture), for the notice on the canvas.
-  const [broken, setBroken] = useState<{ id: string; errors: number }[]>([]);
+  const [broken, setBroken] = useState<BrokenBlock[]>([]);
   // Picture size per file id, to keep a block's scale when its picture changes.
   const sizes = useRef(new Map<string, { width: number; height: number }>());
+  // The picture each block shows, so a block whose code did not change is not rendered again.
+  const picCache = useRef<PictureCache<BlockPicture>>(new Map());
+  const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
   const wrap = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   const canvasRef = useRef(canvas);
@@ -99,7 +103,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // Built once per mount (CanvasPane remounts on file switch/reload).
   const initialData = useMemo(
     () => async () => {
-      const pics = await Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME)));
+      const pics = await draw(blocks);
       for (const p of pics) sizes.current.set(p.fileId, p);
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
@@ -116,17 +120,19 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   );
 
   // What the images depend on: which blocks exist and their type and code, not where they sit. Dragging a
-  // block changes `blocks` on every frame; this key stays the same, so nothing below runs.
-  const drawKey = useMemo(() => JSON.stringify(blocks.map((b) => [b.id, b.type, b.code])), [blocks]);
+  // block changes `blocks` on every frame; `drawn` keeps its identity then, so nothing below runs.
+  const drawnRef = useRef(blocks);
+  if (!sameDrawing(drawnRef.current, blocks)) drawnRef.current = blocks;
+  const drawn = drawnRef.current;
 
   // Keep block images in step with the block list: new code → new picture, new block → new image, removed block → gone.
   useEffect(() => {
     if (!api) return;
     let live = true;
     const blocks = blocksRef.current;
-    void Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME))).then((pics) => {
+    void draw(blocks).then((pics) => {
       if (!live) return;
-      setBroken(pics.flatMap((p, i) => (p.errors > 0 ? [{ id: blocks[i]!.id, errors: p.errors }] : [])));
+      setBroken(pics.flatMap((p, i) => (p.errors > 0 || p.failed ? [{ id: blocks[i]!.id, type: blocks[i]!.type, errors: p.errors, lastGood: p.lastGood, failed: p.failed }] : [])));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
       const add = pics.filter((p) => !files[p.fileId]).map(fileData);
@@ -170,7 +176,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, drawKey, tryFocus]);
+  }, [api, drawn, draw, tryFocus]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
@@ -323,7 +329,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
           {broken.map((b) => (
             <button key={b.id} type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setEditing(b.id)}>
-              오류 {b.errors}개 · 마지막으로 그린 모습이에요. 눌러서 코드를 고쳐요
+              {brokenNotice(b, blockLabel(b, blocks, DIAGRAM_TYPES.find((t) => t.id === b.type)?.label ?? b.type))}
             </button>
           ))}
         </div>
