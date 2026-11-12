@@ -168,3 +168,26 @@ test('reconcileForSave leaves the layout alone while the code has errors', () =>
   const good = reconcileForSave(parse('A\nX\nY\nZ', 'cloud-architecture') as never, l);
   assert.equal(good.reset, 'dropped');
 });
+
+test('a group that gained children loses its key; odd key names are plain data', () => {
+  const before = 'VPC {\n}\nDB\nWeb\nVPC > DB';
+  const l: BlockLayout = { v: 1, basis: basisOf(ast(before)), items: { VPC: { cx: 1, cy: 2, parent: '' }, DB: { cx: 3, cy: 4, parent: '' }, Web: { cx: 5, cy: 6, parent: '' } } };
+  const r = reconcileLayout(ast('VPC {\n  API\n}\nDB\nWeb\nVPC > DB'), l);
+  assert.deepEqual(r.dropped, ['VPC']);
+  assert.deepEqual(Object.keys(r.layout!.items!), ['DB', 'Web']);
+  // `__proto__` never survives; `constructor` is an ordinary node name.
+  const items = JSON.parse('{"__proto__":{"cx":1,"cy":2,"parent":""},"constructor":{"cx":3,"cy":4,"parent":""},"DB":{"cx":5,"cy":6,"parent":""}}');
+  const r2 = reconcileLayout(ast('constructor\nDB\nconstructor > DB\nDB > constructor'), { v: 1, items });
+  assert.deepEqual(r2.dropped, ['__proto__']);
+  assert.deepEqual(Object.keys(r2.layout!.items!).sort(), ['DB', 'constructor']);
+  assert.equal(Object.getPrototypeOf(r2.layout!.items), Object.prototype);
+});
+
+test('basisOf stores the AST type, so a saved layout is not wiped on the next render', () => {
+  const d = ast(BASE);
+  assert.equal(basisOf(d).type, 'cloud-architecture');
+  const l = layoutFor(BASE, FULL);
+  assert.equal(reconcileLayout(d, l).changed, false);
+  // The editor block type ("architecture") is not the AST type.
+  assert.equal(reconcileLayout(d, { ...l, basis: { ...l.basis!, type: 'architecture' } }).reset, 'type');
+});

@@ -19,19 +19,25 @@ export interface Structure {
   count: number;
   /** id -> parent group id ("" for root). Groups and nodes share one namespace, like edges do. */
   parents: Map<string, string>;
+  /** Ids of groups that have at least one child: their box always comes from the children, so they never keep a key. */
+  filled: Set<string>;
 }
 
 export function structureOf(diagram: GraphDiagram): Structure {
   const parents = new Map<string, string>();
+  const filled = new Set<string>();
   const walk = (children: GraphChild[], parent: string): void => {
     for (const c of children) {
       // The parser keeps the first definition only, but stay safe for hand-built ASTs.
       if (!parents.has(c.id)) parents.set(c.id, parent);
-      if (c.kind === 'group') walk(c.children, c.id);
+      if (c.kind === 'group') {
+        if (c.children.length) filled.add(c.id);
+        walk(c.children, c.id);
+      }
     }
   };
   walk(diagram.children, '');
-  return { type: diagram.type, direction: diagram.direction, count: parents.size, parents };
+  return { type: diagram.type, direction: diagram.direction, count: parents.size, parents, filled };
 }
 
 /** The `basis` to store next to the items when saving. */
@@ -70,7 +76,8 @@ export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | und
 
   const dropped = keys.filter((k) => {
     const parent = s.parents.get(k);
-    return parent === undefined || parent !== old[k]!.parent;
+    // `__proto__` cannot be stored as a key (the server refuses it), so it never survives.
+    return k === '__proto__' || parent === undefined || parent !== old[k]!.parent || s.filled.has(k);
   });
   if (keys.length >= 2 && dropped.length >= keys.length * RESET_DROP_RATIO) return wiped(keys, 'dropped');
   if (basis && basis.count > 0 && Math.abs(s.count - basis.count) > basis.count * RESET_COUNT_RATIO) return wiped(keys, 'count');
@@ -78,8 +85,8 @@ export function reconcileLayout(diagram: GraphDiagram, layout: BlockLayout | und
 
   if (dropped.length === 0) return { layout, dropped, changed: false };
   const gone = new Set(dropped);
-  const items: Record<string, LayoutItem> = {};
-  for (const k of keys) if (!gone.has(k)) items[k] = old[k]!;
+  // fromEntries defines own properties, so odd keys like `constructor` stay plain data.
+  const items: Record<string, LayoutItem> = Object.fromEntries(keys.filter((k) => !gone.has(k)).map((k) => [k, old[k]!]));
   // Keep the old basis: it describes the structure the surviving items were made for.
   return { layout: { ...layout, items }, dropped, changed: true };
 }
