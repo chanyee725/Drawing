@@ -11,6 +11,7 @@ export const FILE_EXT = '.dpx.json';
 export const FORMAT_VERSION = 3;
 // Newest block `layout` sub-format this server validates; a higher `v` is kept verbatim.
 const LAYOUT_VERSION = 1;
+const MAX_NAME = 200; // longest node/group name, basis.type and basis.direction
 
 export const emptyDocument = () => ({ type: 'doc', content: [] });
 export const emptyCanvas = () => ({ elements: [], appState: {} });
@@ -46,6 +47,9 @@ function normalizeLayout(l, at) {
     for (const k of keys) {
       const it = l.items[k];
       if (k.length < 1 || k.length > 200) throw new ValidationError(`${at}.items keys must be 1-200 characters`);
+      // `out.items['__proto__'] = ...` would set the prototype instead of storing the entry.
+      if (k === '__proto__') throw new ValidationError(`${at}.items must not have a "__proto__" key`);
+      if (it !== null && typeof it === 'object' && typeof it.parent === 'string' && it.parent.length > MAX_NAME) throw new ValidationError(`${at}.items parent must be at most ${MAX_NAME} characters`);
       if (!isObj(it) || !isNum(it.cx) || !isNum(it.cy) || typeof it.parent !== 'string') {
         throw new ValidationError(`${at}.items["${k.slice(0, 40)}"] needs numeric cx, cy and a string parent`);
       }
@@ -57,6 +61,7 @@ function normalizeLayout(l, at) {
     if (!isObj(b) || typeof b.type !== 'string' || typeof b.direction !== 'string' || !isInt(b.count) || b.count < 0) {
       throw new ValidationError(`${at}.basis needs string type, string direction and integer count >= 0`);
     }
+    if (b.type.length > MAX_NAME || b.direction.length > MAX_NAME) throw new ValidationError(`${at}.basis type and direction must be at most ${MAX_NAME} characters`);
     out.basis = { type: b.type, direction: b.direction, count: b.count };
   }
   return out;
