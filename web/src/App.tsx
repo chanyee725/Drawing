@@ -3,6 +3,11 @@ import { pickDataSource, type ConnectionState, type DataSource, type FileDetail,
 import { applyFileEvent, paths, pickFile, sortFiles, sourcesFor } from './data/files';
 import { DiagramView, type DiagramApi } from './view/DiagramView';
 import { HistoryHighlight, HistoryPanel, useHistory } from './history';
+import { AgentPanel } from './agents/AgentPanel';
+import { LiveCursors } from './agents/LiveCursors';
+import { PageAgentChips } from './agents/PageAgentChips';
+import { agentsByOtherPage, type Agent } from './agents/model';
+import { useLiveAgents, useNow } from './agents/useLiveAgents';
 
 function readUrl() {
   const q = new URLSearchParams(window.location.search);
@@ -31,6 +36,8 @@ export function App() {
   const [conn, setConn] = useState<ConnectionState>('connecting');
   const [notice, setNotice] = useState<string | null>(null);
   const [api, setApi] = useState<DiagramApi | null>(null);
+  const live = useLiveAgents(ds?.name ?? null);
+  const now = useNow(5000);
 
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -123,6 +130,18 @@ export function App() {
     return () => clearTimeout(t);
   }, [notice]);
 
+  const viewKey = `${current?.path}\n${page?.id}`;
+  const chips = agentsByOtherPage(live.agents, current?.path ?? null, page?.id ?? null, now);
+  const jumpTo = (a: Agent) => {
+    const c = a.lastChange;
+    if (!c?.page) return;
+    const f = files.find((x) => x.id === c.fileId) ?? files.find((x) => x.path === c.relPath);
+    if (!f) return setNotice('그 파일을 찾지 못했어요.');
+    setFileId(f.id);
+    setPageId(c.page.id);
+    live.requestFocus(a.id);
+  };
+
   const allPaths = paths(files);
   const sources = current ? sourcesFor(files, current.path) : [];
   const selectCls = 'h-8 rounded-md border border-neutral-300 bg-white px-2 text-sm';
@@ -191,12 +210,14 @@ export function App() {
               aria-current={p.id === page?.id ? 'page' : undefined}
             >
               {p.name}
+              <PageAgentChips agents={chips.get(p.id)} />
             </button>
           ))}
         </nav>
       )}
 
-      <main className="relative flex-1">
+      <div className="flex min-h-0 flex-1">
+      <main className="relative min-w-0 flex-1">
         {listError ? (
           <div className="flex h-full items-center justify-center text-sm text-red-600">{listError}</div>
         ) : !files.length ? (
@@ -206,11 +227,15 @@ export function App() {
         ) : (
           <DiagramView
             xml={hist.view ? hist.view.xml : pageXml}
-            resetKey={`${current?.path}\n${page?.id}`}
+            resetKey={viewKey}
             flashKey={hist.view ? hist.view.key : `${current?.id}\n${page?.id}`}
             onApi={setApi}
           >
             <HistoryHighlight api={api} cells={hist.view?.cells ?? null} viewKey={hist.view?.key ?? null} />
+            {/* Cursors show live work; hide them while a past version is on screen. */}
+            {!hist.view && (
+              <LiveCursors api={api} agents={live.agents} path={current?.path ?? null} pageId={page?.id ?? null} viewKey={viewKey} now={now} focus={live.focus} />
+            )}
           </DiagramView>
         )}
         {files.length > 0 && <HistoryPanel h={hist} />}
@@ -220,6 +245,8 @@ export function App() {
           </div>
         )}
       </main>
+      <AgentPanel agents={live.agents} dispatch={live.dispatch} loaded={live.loaded} onPick={jumpTo} />
+      </div>
     </div>
   );
 }

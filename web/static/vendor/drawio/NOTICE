@@ -7,3 +7,6 @@ SHA-256: 35b8ef54369e938ad2399d3c8ce3945591d4b200a01f6942d0e39743bea1f1a1
 Copyright (c) JGraph Ltd. Licensed under the Apache License, Version 2.0
 (see LICENSE in this folder). The upstream repository has no NOTICE file.
 The file is redistributed unmodified.
+
+The bundle also includes third-party code (DOMPurify, pako, spin.js, Babel helpers).
+See THIRD_PARTY.md in this folder.

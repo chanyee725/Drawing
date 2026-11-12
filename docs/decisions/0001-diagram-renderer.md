@@ -12,6 +12,7 @@ our own server at `/vendor/drawio/viewer-static.min.js`.
 - Project: https://github.com/jgraph/drawio (tag `v32.6.10`)
 - SHA-256: `35b8ef54369e938ad2399d3c8ce3945591d4b200a01f6942d0e39743bea1f1a1`
 - Licence: Apache-2.0 (`LICENSE` and `NOTICE` next to the file). Size 4.9 MB.
+  The bundle includes third-party code (DOMPurify, pako, spin.js, Babel helpers); see `web/static/vendor/drawio/THIRD_PARTY.md`.
 
 We use its `Graph` class directly (not the `GraphViewer` widget) so we own
 pan/zoom, can swap the model in place on live changes, and can map cell ids
