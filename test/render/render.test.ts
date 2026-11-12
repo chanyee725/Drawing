@@ -126,3 +126,31 @@ test('Object.prototype key names as colour or icon fall back to defaults', async
     assert.equal(glyphFor(k), 'placeholder', k);
   }
 });
+
+test('edge ends touch the outline of diamonds and ellipses, not the bounding box', async () => {
+  const code = ['Start [shape: oval]', 'Check [shape: diamond]', 'Pool [shape: ellipse]', 'Done', 'Start > Check', 'Check > Pool', 'Check > Done: no', 'Pool > Done'].join('\n');
+  for (const connector of ['elbow', 'straight']) {
+    const { scene } = await renderDiagram(`direction down\nconnector-style ${connector}\n${code}`, { type: 'flowchart' });
+    const box = (id: string) => scene.items.find((i): i is SceneBox => i.kind === 'box' && i.id === id)!;
+    const edges = scene.items.filter((i): i is SceneEdge => i.kind === 'edge');
+    assert.ok(edges.length >= 3);
+    const onOutline = (p: { x: number; y: number }, b: SceneBox): boolean => {
+      const u = (p.x - b.x - b.w / 2) / (b.w / 2);
+      const v = (p.y - b.y - b.h / 2) / (b.h / 2);
+      const k = b.shape === 'diamond' ? Math.abs(u) + Math.abs(v) : b.shape === 'ellipse' ? Math.hypot(u, v) : Math.max(Math.abs(u), Math.abs(v));
+      return Math.abs(k - 1) < 0.03;
+    };
+    let curved = 0;
+    for (const id of ['Check', 'Pool']) {
+      const b = box(id);
+      for (const e of edges) {
+        const first = e.points[0]!;
+        const last = e.points[e.points.length - 1]!;
+        // An end that is within the node's bounding box is an end on this node.
+        const inBox = (p: { x: number; y: number }) => p.x >= b.x - 2 && p.x <= b.x + b.w + 2 && p.y >= b.y - 2 && p.y <= b.y + b.h + 2;
+        for (const p of [first, last]) if (inBox(p)) { curved++; assert.ok(onOutline(p, b), `${connector}: edge end (${p.x},${p.y}) is on ${id}'s outline`); }
+      }
+    }
+    assert.ok(curved >= 4, `${connector}: found ${curved} ends on curved shapes`);
+  }
+});

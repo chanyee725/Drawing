@@ -1,7 +1,6 @@
 // The export actions behind the top bar menu, the palette, the shortcuts and the diagram buttons.
 // Each resolves with a short Korean message for the status line and rejects with an Error whose message is shown as is.
 import type { Block } from '../api';
-import { renderBlock } from '../canvas/render';
 import { download, copyPng, svgBlob, svgSize, svgToPng } from './image';
 import { documentToMarkdown, exportName } from './markdown';
 import type { CanvasHandle } from './types';
@@ -33,6 +32,8 @@ export async function exportCanvas(handle: CanvasHandle | null, kind: ImageKind,
 
 /** One diagram block, drawn as it looks now (a block with errors exports its last good picture). */
 export async function exportBlock(block: Block, kind: ImageKind, title: string): Promise<string> {
+  // Loaded on use: the renderer (ELK) is big and only needed once something is drawn.
+  const { renderBlock } = await import('../canvas/render');
   const pic = await renderBlock(block, 'light');
   const { width, height } = svgSize(pic.svg);
   if (kind === 'svg') {

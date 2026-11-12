@@ -3,7 +3,8 @@
 import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOutcome } from '../dsl/adapter.ts';
 import { fileIdFor, hash, type BlockLike } from './sync.ts';
 
-export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number };
+export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number;
+  /** Number of errors in the code that is drawn now; when above 0 the picture is the last good one (or a placeholder). */ errors: number };
 
 const MIN = 40;
 
@@ -51,15 +52,16 @@ function outcomeFor(b: BlockLike, theme: 'light' | 'dark') {
   return p;
 }
 
-function picture(blockId: string, r: { svg: string; width: number; height: number }): BlockPicture {
+function picture(blockId: string, r: { svg: string; width: number; height: number; errors?: number }): BlockPicture {
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height) };
+    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0 };
     pictures.set(fileId, p);
     if (pictures.size > 200) pictures.delete(pictures.keys().next().value!);
   }
-  return p;
+  // The same picture can be shown for good code and, later, for broken code: errors belong to the call.
+  return (r.errors ?? 0) === p.errors ? p : { ...p, errors: r.errors ?? 0 };
 }
 
 /**
@@ -68,22 +70,32 @@ function picture(blockId: string, r: { svg: string; width: number; height: numbe
  */
 export function renderBlock(b: BlockLike, theme: 'light' | 'dark'): Promise<BlockPicture> {
   const key = `${b.id}\n${theme}`;
+  const sig = `${b.type}\n${b.code}`;
+  // Same code as the latest call (a drag or resize calls again with only the position changed): reuse it.
+  const latest = latestCall.get(key);
+  if (latest?.sig === sig) return latest.result;
   const run = (queue.get(key) ?? Promise.resolve())
     .then(() => draw(b, theme, key))
     .catch(() => placeholder('그리지 못했어요. 코드를 확인해 주세요', theme))
     .then((r) => picture(b.id, r));
   queue.set(key, run);
+  latestCall.set(key, { sig, result: run });
+  if (latestCall.size > 500) latestCall.delete(latestCall.keys().next().value!);
   return run;
 }
+
+// The latest call per block + theme, so a call with unchanged code does no work.
+const latestCall = new Map<string, { sig: string; result: Promise<BlockPicture> }>();
 
 async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
   if (!analyzeDiagram(b.type, '').parsed) {
     shown.delete(key);
     return placeholder('이 종류는 아직 그릴 수 없어요', theme);
   }
-  const state = nextPreview(shown.get(key) ?? null, await outcomeFor(b, theme), b.type, theme);
+  const outcome = await outcomeFor(b, theme);
+  const state = nextPreview(shown.get(key) ?? null, outcome, b.type, theme);
   shown.set(key, state);
-  if (!state) return placeholder('그리지 못했어요. 코드를 확인해 주세요', theme);
+  if (!state) return { ...placeholder('그리지 못했어요. 코드를 확인해 주세요', theme), errors: outcome ? outcome.diagnostics.filter((d) => d.severity === 'error').length : 0 };
   if (!state.scene.items.length) return placeholder(b.code.trim() ? '그릴 내용이 없어요. 코드를 확인해 주세요' : '코드를 입력하면 여기에 그려져요', theme);
-  return { svg: state.svg, width: state.scene.width, height: state.scene.height };
+  return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length };
 }

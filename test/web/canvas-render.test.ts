@@ -44,3 +44,24 @@ test('unsupported types show the not-yet placeholder', async () => {
   const p = await renderBlock(block('bpmn1', 'x', 'bpmn'), 'light');
   assert.match(svgOf(p.dataURL), /아직 그릴 수 없어요/);
 });
+
+test('a call with unchanged code returns the same pending result, even when the block only moved', async () => {
+  const a = renderBlock(block('same1', GOOD), 'light');
+  const b = renderBlock({ ...block('same1', GOOD), x: 500, y: 90, w: 300, h: 200 }, 'light');
+  assert.equal(a, b);
+  const c = renderBlock(block('same1', GOOD + 'c [icon: aws-rds]\n'), 'light');
+  assert.notEqual(c, a);
+  assert.notEqual((await c).fileId, (await a).fileId);
+});
+
+test('a picture says how many errors the drawn code has', async () => {
+  assert.equal((await renderBlock(block('err1', GOOD), 'light')).errors, 0);
+  const broken = await renderBlock(block('err1', BAD), 'light');
+  assert.ok(broken.errors > 0);
+  assert.equal((await renderBlock(block('err1', GOOD), 'light')).errors, 0);
+});
+
+test('broken code with no earlier picture still reports its errors', async () => {
+  const p = await renderBlock(block('err2', BAD), 'light');
+  assert.ok(p.errors > 0);
+});

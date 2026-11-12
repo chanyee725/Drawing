@@ -79,7 +79,9 @@ test('undo removes a block the document created with its embed; redo brings it b
   const placed = { ...nb, x: 5, w: 100, h: 50 };
   const afterUndo = blocksAfterHistory(['o', 'n'], ['o'], created, [old, placed]);
   assert.deepEqual(afterUndo, [old]);
-  assert.deepEqual(blocksAfterHistory(['o'], ['o', 'n'], created, afterUndo!), [old, placed]);
+  assert.deepEqual(blocksAfterHistory(['o'], ['o', 'n'], created, afterUndo!, true), [old, placed]);
+  // Redo of an embed deleted by hand: the block stayed on the canvas then, and stays now.
+  assert.equal(blocksAfterHistory(['o', 'n'], ['o'], created, [old, placed], true), null);
   // Blocks the document did not create stay when their embed goes; nothing to do returns null.
   assert.equal(blocksAfterHistory(['o', 'n'], ['n'], created, [old, placed]), null);
   // Another embed of the same block keeps it.
