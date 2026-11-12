@@ -28,7 +28,7 @@
 - **AI**: README에 "AI integrations — canvas primitives for building with LLMs"가 있고, starter kit 중 Agent(캔버스를 읽고 고치는 AI 에이전트)가 있다. https://github.com/tldraw/tldraw
 - **가격**: 금액은 공개 안 한다. "Value-based pricing", 100일 무료 체험, 취미용 무료 hobby license 신청, 초기 스타트업 할인이 있다. https://tldraw.dev/pricing
 - **강점**: 커스텀 shape, 도구, UI를 코드로 확장하기 가장 좋다. 실시간 동기화 레퍼런스가 있다.
-- **약점**: 상용 사용 시 라이선스 키가 필요해서 "로컬 개인 도구"는 괜찮지만 배포·공유하면 걸린다. 정확한 조건은 tldraw.dev에서 확인해야 한다 (미확인: 라이선스 조건 해석은 이 문서 범위 밖).
+- **약점**: 기본 라이선스는 배포가 아니라 프로덕션 사용 자체를 막는다("Not to use the Software in Production Environments"). 사내 전용 업무 도구도 production으로 볼 여지가 커서 키(상용 계약)가 필요할 수 있다. 원문 판정은 [08](08-spike-oss.md) §7. https://github.com/tldraw/tldraw/blob/main/LICENSE.md
 - **가져올 아이디어**: 커스텀 shape를 1급으로 취급하는 확장 구조(예: 클라우드 아이콘 노드), 멀티플레이어 sync 레이어 분리.
 
 ## 3. draw.io / diagrams.net
@@ -152,12 +152,12 @@
 
 피해야 할 것:
 - 범용 화이트보드로 Miro/Excalidraw와 정면 경쟁 (추정: 규모 싸움에서 불리).
-- tldraw를 그대로 얹을 때 라이선스 조건 확인 없이 배포 (tldraw.dev 확인 필요).
+- tldraw를 라이선스 확인 없이 업무에 쓰는 것. 배포하지 않아도 production 사용이면 걸린다([08](08-spike-oss.md) §7).
 - PlantUML식 무거운 런타임 의존성(Java, 일부 다이어그램은 Graphviz).
 
 ## 13. 미해결/후속 확인
 
-- tldraw 프로덕션 라이선스의 정확한 조건 (라이선스 해석은 이 문서 범위 밖). 가격은 비공개("Value-based pricing")로 확인했어요.
+- 해결: tldraw 라이선스 조건은 원문으로 [08](08-spike-oss.md) §7에서 판정했어요. 남은 건 "사내 업무 사용이 Development Environment인가"를 tldraw에 서면 확인하는 일뿐이에요. 가격은 비공개("Value-based pricing").
 - Lucidchart 현재 공식 가격, 무료 한도, self-host 여부 (공식 페이지가 자동 요청에 403).
 - D2 TALA: D2 저장소 쪽 README와 예전 TALA 저장소 README가 서로 달라요. 바이너리 배포판에 워터마크가 남는지는 직접 실행해 봐야 해요.
 - 해결: Whimsical 가격(위 8절), Structurizr local(예전 Lite) 동작 방식(위 7절), Mermaid Live Editor self-host(위 4절).
