@@ -20,7 +20,7 @@ const isDpx = (name) => name.endsWith(FILE_EXT) && name.length > FILE_EXT.length
 
 export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 60 } = {}) {
   const fsr = createResolver(workspaceDir);
-  const known = new Map(); // rel file path -> sha of the content we last wrote or saw
+  const known = new Map(); // rel file path -> { hash, revision } of the content we last wrote or saw
   const knownDirs = new Set();
   let queue = Promise.resolve();
   let watcher = null;
@@ -145,7 +145,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       await ensureParent(abs);
       const text = serialize(file);
       await atomicWrite(abs, text, { exclusive: true });
-      known.set(rel, sha(text));
+      known.set(rel, { hash: sha(text), revision: file.revision });
       return { path: rel, ...file };
     });
   }
@@ -153,8 +153,27 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
   async function readFileAt(rel) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
-    const { file } = await loadStored(abs);
-    return { path: rel, ...file };
+    return serial(async () => {
+      const { file } = await syncExternal(rel, await loadStored(abs), abs);
+      return { path: rel, ...file };
+    });
+  }
+
+  // If the file was edited outside without raising its revision, raise it here so a client that
+  // loaded the old content cannot overwrite the outside edit with a "current" revision.
+  async function syncExternal(rel, loaded, abs) {
+    const k = known.get(rel);
+    const h = sha(loaded.text);
+    if (!k || k.hash === h) return loaded;
+    let file = loaded.file;
+    let text = loaded.text;
+    if (file.revision <= k.revision) {
+      file = { ...file, revision: k.revision + 1 };
+      text = serialize(file);
+      await atomicWrite(abs, text);
+    }
+    known.set(rel, { hash: sha(text), revision: file.revision });
+    return { text, file };
   }
 
   async function writeFileAt(rel, body) {
@@ -170,14 +189,14 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       throw err;
     }
     return serial(async () => {
-      const { file: current } = await loadStored(abs);
+      const { file: current } = await syncExternal(rel, await loadStored(abs), abs);
       if (current.revision !== base) {
         throw new StoreError(409, 'stale write', { revision: current.revision });
       }
       const next = { ...content, revision: current.revision + 1 };
       const text = serialize(next);
       await atomicWrite(abs, text);
-      known.set(rel, sha(text));
+      known.set(rel, { hash: sha(text), revision: next.revision });
       return { path: rel, revision: next.revision };
     });
   }
@@ -202,53 +221,81 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     }
   }
 
-  /** Rename and move are the same operation: `to` is the full new path. */
-  async function move(from, to) {
+  /**
+   * Rename and move are the same operation: `to` is the full new path.
+   * `type` is 'file' | 'folder'. Without it a file wins: `from` is tried as a file
+   * (extension optional) first, then as a folder.
+   */
+  async function move(from, to, type) {
     parseOrThrow(from);
     parseOrThrow(to);
-    let fromAbs = await wrapPath(from);
-    const st = await statOrNull(fromAbs);
-    if (!st) {
-      // allow passing a file path without the extension
-      from = checkedFileRel(from);
-      fromAbs = await wrapPath(from);
-    }
+    if (type !== undefined && type !== 'file' && type !== 'folder') throw new StoreError(400, 'type must be "file" or "folder"');
     return serial(async () => {
-      const fst = await statOrNull(fromAbs);
-      if (!fst) throw new StoreError(404, 'not found');
-      const isDir = fst.isDirectory();
-      if (!isDir && !isDpx(from)) throw new StoreError(400, 'not a workspace file');
-      const toRel = isDir ? to : checkedFileRel(to);
-      if (isDir && (toRel === from || toRel.startsWith(from + '/'))) throw new StoreError(400, 'cannot move a folder into itself');
-      const toAbs = await wrapPath(toRel);
-      if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
-      await mkdir(dirname(toAbs), { recursive: true });
-      await rename(fromAbs, toAbs);
-      forget(from, isDir);
-      if (isDir) {
-        knownDirs.add(toRel);
-        await scan(toAbs, toRel);
-      } else {
-        known.set(toRel, sha(await readFile(toAbs, 'utf8')));
+      if (type !== 'folder') {
+        const fileFrom = checkedFileRel(from);
+        const fromAbs = await wrapPath(fileFrom);
+        const st = await statOrNull(fromAbs);
+        if (st?.isFile()) return moveFile(fileFrom, fromAbs, checkedFileRel(to));
+        if (type === 'file') throw new StoreError(404, 'not found');
       }
-      return { path: toRel };
+      const fromAbs = await wrapPath(from);
+      const st = await statOrNull(fromAbs);
+      if (!st?.isDirectory()) throw new StoreError(404, 'not found');
+      return moveFolder(from, fromAbs, to);
     });
   }
 
-  async function remove(rel) {
-    parseOrThrow(rel);
-    let abs = await wrapPath(rel);
-    if (!(await statOrNull(abs))) {
-      rel = checkedFileRel(rel);
-      abs = await wrapPath(rel);
-    }
+  async function moveFile(from, fromAbs, toRel) {
+    const toAbs = await wrapPath(toRel);
+    if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
+    await mkdir(dirname(toAbs), { recursive: true });
+    await rename(fromAbs, toAbs);
+    forget(from, false);
+    known.set(toRel, await knownEntry(toAbs));
+    return { path: toRel };
+  }
+
+  async function moveFolder(from, fromAbs, toRel) {
+    if (toRel === from || toRel.startsWith(from + '/')) throw new StoreError(400, 'cannot move a folder into itself');
+    const toAbs = await wrapPath(toRel);
+    if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
+    await mkdir(dirname(toAbs), { recursive: true });
+    await rename(fromAbs, toAbs);
+    forget(from, true);
+    knownDirs.add(toRel);
+    await scan(toAbs, toRel);
+    return { path: toRel };
+  }
+
+  async function knownEntry(abs) {
+    const text = await readFile(abs, 'utf8');
+    let revision = 0;
+    try {
+      revision = parseStored(text).revision;
+    } catch {}
+    return { hash: sha(text), revision };
+  }
+
+  async function removeFile(rel) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
     return serial(async () => {
       const st = await statOrNull(abs);
-      if (!st) throw new StoreError(404, 'not found');
-      if (st.isDirectory()) await rm(abs, { recursive: true });
-      else if (isDpx(rel)) await unlink(abs);
-      else throw new StoreError(400, 'not a workspace file');
-      forget(rel, st.isDirectory());
+      if (!st?.isFile()) throw new StoreError(404, 'file not found');
+      await unlink(abs);
+      forget(rel, false);
+      return { path: rel };
+    });
+  }
+
+  async function removeFolder(rel) {
+    parseOrThrow(rel);
+    const abs = await wrapPath(rel);
+    return serial(async () => {
+      const st = await statOrNull(abs);
+      if (!st?.isDirectory()) throw new StoreError(404, 'folder not found');
+      await rm(abs, { recursive: true });
+      forget(rel, true);
       return { path: rel };
     });
   }
@@ -276,14 +323,15 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
         await scan(join(absDir, e.name), rel);
       } else if (e.isFile() && isDpx(e.name)) {
         try {
-          known.set(rel, sha(await readFile(join(absDir, e.name), 'utf8')));
+          known.set(rel, await knownEntry(join(absDir, e.name)));
         } catch {}
       }
     }
   }
 
   // Compare disk with what we know; only differences (= outside changes) are reported.
-  async function reconcile(rel) {
+  const reconcile = (rel) => serial(() => reconcileNow(rel));
+  async function reconcileNow(rel) {
     let segs;
     try {
       segs = parseRelPath(rel);
@@ -311,21 +359,26 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
       return;
     }
     if (!st.isFile() || !isDpx(rel)) return;
-    let text;
+    let loaded;
     try {
-      text = await readFile(abs, 'utf8');
+      const text = await readFile(abs, 'utf8');
+      try {
+        loaded = { text, file: parseStored(text) };
+      } catch {
+        loaded = { text, file: null };
+      }
     } catch {
       return;
     }
-    const h = sha(text);
-    if (known.get(rel) === h) return; // our own write
-    const isNew = !known.has(rel);
-    known.set(rel, h);
-    let revision = null;
-    try {
-      revision = parseStored(text).revision;
-    } catch {}
-    onExternalChange?.({ kind: isNew ? 'create' : 'change', path: rel, revision });
+    const prev = known.get(rel);
+    if (prev?.hash === sha(loaded.text)) return; // our own write
+    if (!prev || !loaded.file) {
+      known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? 0 });
+      onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: loaded.file?.revision ?? null });
+      return;
+    }
+    const { file } = await syncExternal(rel, loaded, abs); // raises the revision if the editor did not
+    onExternalChange?.({ kind: 'change', path: rel, revision: file.revision });
   }
 
   async function startWatching() {
@@ -349,5 +402,5 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     return queue;
   }
 
-  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, remove, startWatching, close };
+  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, startWatching, close };
 }

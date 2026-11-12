@@ -20,6 +20,21 @@ async function readJson(req) {
   }
 }
 
+// Filesystem errors that mean "your request does not fit the current tree" are client errors.
+// Never forward err.message: it contains absolute paths.
+const FS_CLIENT_ERRORS = {
+  ENOTDIR: [400, 'a parent in the path is not a folder'],
+  EISDIR: [400, 'path is a folder'],
+  ENAMETOOLONG: [400, 'name too long'],
+  EEXIST: [409, 'already exists'],
+  ENOTEMPTY: [409, 'folder is not empty'],
+};
+function toStoreError(err) {
+  if (err instanceof StoreError) return err;
+  const hit = FS_CLIENT_ERRORS[err?.code];
+  return hit ? new StoreError(hit[0], hit[1]) : err;
+}
+
 export async function setup(ctx) {
   if (!ctx.workspaceDir) return {};
   const store = createStore(ctx.workspaceDir, {
@@ -38,7 +53,8 @@ export async function setup(ctx) {
       try {
         const body = method === 'GET' || method === 'DELETE' ? null : await readJson(req);
         send(res, okStatus, await fn(url.searchParams.get('path'), body));
-      } catch (err) {
+      } catch (e) {
+        const err = toStoreError(e);
         if (!(err instanceof StoreError)) throw err;
         const out = { error: err.message };
         if (err.revision !== undefined) out.revision = err.revision;
@@ -59,10 +75,11 @@ export async function setup(ctx) {
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
       route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
-      route('DELETE', '/api/file', (p) => store.remove(need(p, 'path'))),
+      route('DELETE', '/api/file', (p) => store.removeFile(need(p, 'path'))),
       route('POST', '/api/folder', (_p, b) => store.createFolder(need(b?.path, 'path')), 201),
-      route('DELETE', '/api/folder', (p) => store.remove(need(p, 'path'))),
-      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'))),
+      route('DELETE', '/api/folder', (p) => store.removeFolder(need(p, 'path'))),
+      // body: {from, to, type?: 'file'|'folder'}; without type a file wins over a same-named folder
+      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type)),
     ],
   };
 }
