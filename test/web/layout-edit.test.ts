@@ -16,7 +16,7 @@ import {
   toScreen,
   type LayoutHandle,
 } from '../../web/src/canvas/layoutEdit.ts';
-import { editReason, openLayoutSession, type LayoutSession } from '../../web/src/canvas/layoutSession.ts';
+import { editReason, editReasonCode, reasonText, openLayoutSession, type LayoutSession } from '../../web/src/canvas/layoutSession.ts';
 import { renderPreview } from '../../web/src/dsl/adapter.ts';
 
 const H = (id: string, x: number, y: number, w = 40, h = 20, parent = '', kind: 'node' | 'group' = 'node'): LayoutHandle => ({ id, kind, parent, x, y, w, h });
@@ -128,4 +128,17 @@ test('a session composes exactly the picture the block renders, with and without
   const again = (await openLayoutSession({ type: 'architecture', code: ARCH })) as LayoutSession;
   assert.equal(again.compose(moved).svg, mine.svg);
   assert.deepEqual(await openLayoutSession({ type: 'sequence', code: 'A > B: x' }), { reason: '이 종류는 아직 노드를 옮길 수 없어요' });
+});
+
+test('reason codes get wording per action, with no string patching', async () => {
+  assert.equal(editReasonCode({ type: 'sequence', code: 'A > B: hi' }), 'kind');
+  assert.equal(editReasonCode({ type: 'flowchart', code: '' }), 'empty');
+  assert.equal(editReasonCode({ type: 'architecture', code: ARCH }), null);
+  assert.equal(reasonText('kind', 'freeform'), '이 블록은 자유 도형으로 바꿀 수 없어요');
+  assert.match(editReason({ type: 'bpmn', code: '' }, 'freeform')!, /자유 도형/);
+  assert.match(editReason({ type: 'bpmn', code: '' })!, /옮길/);
+  const s = await openLayoutSession({ type: 'flowchart', code: '' }, 'freeform');
+  assert.deepEqual(s, { reason: '바꿀 노드가 없어요' });
+  for (const action of ['move', 'freeform'] as const)
+    for (const c of ['kind', 'errors', 'version', 'empty'] as const) assert.ok(reasonText(c, action).length > 0);
 });

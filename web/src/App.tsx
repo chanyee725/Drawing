@@ -524,8 +524,8 @@ export function App() {
     const freeformCmd = (): Command => ({
       id: 'block-freeform',
       title: '자유 도형으로 바꾸기',
-      disabled: !lay?.block,
-      hint: lay?.block ? undefined : '블록을 하나 고를 때',
+      disabled: !lay?.graph,
+      hint: lay?.graph ? undefined : lay?.block ? '그래프 블록만 바꿀 수 있어요' : '블록을 하나 고를 때',
       keywords: ['freeform', 'convert', 'shapes', 'ungroup', '자유', '도형', '변환', '바꾸기'],
       run: () => canvasHandle.current?.layout.freeform(),
     });

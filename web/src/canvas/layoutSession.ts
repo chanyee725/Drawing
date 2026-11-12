@@ -16,21 +16,48 @@ export type LayoutSession = {
 
 const keyOf = (type: string, code: string) => `${type}\n${code}`;
 
-/** Why a block's code cannot be laid out by hand, or null when it can. */
-export function editReason(b: { type: string; code: string; layout?: BlockLayout }): string | null {
+export type EditReasonCode = 'kind' | 'errors' | 'version' | 'empty';
+/** What the user is trying to do; the wording of a reason follows it. */
+export type EditAction = 'move' | 'freeform';
+
+const REASON_TEXT: Record<EditAction, Record<EditReasonCode, string>> = {
+  move: {
+    kind: '이 종류는 아직 노드를 옮길 수 없어요',
+    errors: '코드 오류를 고치면 옮길 수 있어요',
+    version: '새 버전에서 만든 배치라 여기서는 고칠 수 없어요',
+    empty: '옮길 노드가 없어요',
+  },
+  freeform: {
+    kind: '이 블록은 자유 도형으로 바꿀 수 없어요',
+    errors: '코드 오류를 고치면 자유 도형으로 바꿀 수 있어요',
+    version: '새 버전에서 만든 배치라 여기서는 바꿀 수 없어요',
+    empty: '바꿀 노드가 없어요',
+  },
+};
+
+export const reasonText = (code: EditReasonCode, action: EditAction = 'move') => REASON_TEXT[action][code];
+
+/** Why a block's code cannot be laid out by hand (as a code), or null when it can. */
+export function editReasonCode(b: { type: string; code: string; layout?: BlockLayout }): EditReasonCode | null {
   const { ast, diagnostics, parsed } = analyzeDiagram(b.type, b.code);
-  if (!parsed || !ast || (ast.type !== 'cloud-architecture' && ast.type !== 'flowchart')) return '이 종류는 아직 노드를 옮길 수 없어요';
-  if (diagnostics.some((d) => d.severity === 'error')) return '코드 오류를 고치면 옮길 수 있어요';
-  if (b.layout && b.layout.v !== BLOCK_LAYOUT_VERSION) return '새 버전에서 만든 배치라 여기서는 고칠 수 없어요';
-  if (!ast.children.length) return '옮길 노드가 없어요';
+  if (!parsed || !ast || (ast.type !== 'cloud-architecture' && ast.type !== 'flowchart')) return 'kind';
+  if (diagnostics.some((d) => d.severity === 'error')) return 'errors';
+  if (b.layout && b.layout.v !== BLOCK_LAYOUT_VERSION) return 'version';
+  if (!ast.children.length) return 'empty';
   return null;
+}
+
+/** The reason as text for an action, or null. */
+export function editReason(b: { type: string; code: string; layout?: BlockLayout }, action: EditAction = 'move'): string | null {
+  const code = editReasonCode(b);
+  return code ? reasonText(code, action) : null;
 }
 
 const bases = new Map<string, Promise<{ ast: GraphDiagram; base: GraphBase }>>();
 
 /** A session for the block's current code, or the reason there is none (see `editReason`). */
-export async function openLayoutSession(b: { type: string; code: string; layout?: BlockLayout }): Promise<LayoutSession | { reason: string }> {
-  const reason = editReason(b);
+export async function openLayoutSession(b: { type: string; code: string; layout?: BlockLayout }, action: EditAction = 'move'): Promise<LayoutSession | { reason: string }> {
+  const reason = editReason(b, action);
   if (reason) return { reason };
   const key = keyOf(b.type, b.code);
   let p = bases.get(key);
