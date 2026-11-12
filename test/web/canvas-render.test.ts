@@ -65,3 +65,22 @@ test('broken code with no earlier picture still reports its errors', async () =>
   const p = await renderBlock(block('err2', BAD), 'light');
   assert.ok(p.errors > 0);
 });
+
+test('a picture says whether it is an earlier drawing, and a first broken draw is not', async () => {
+  const first = await renderBlock(block('last1', BAD), 'light');
+  assert.equal(first.lastGood, false);
+  assert.equal(first.failed, false);
+  await renderBlock(block('last1', GOOD), 'light');
+  const again = await renderBlock(block('last1', BAD), 'light');
+  assert.equal(again.lastGood, true);
+  assert.equal((await renderBlock(block('last1', GOOD + 'z [icon: aws-s3]\n'), 'light')).lastGood, false);
+});
+
+test('a render that throws shows a placeholder and says it failed', async () => {
+  // renderBlock reads `code` once for its signature; later reads (inside the draw) throw.
+  let n = 0;
+  const flaky = { id: 'throw1', type: 'architecture', x: 0, y: 0, w: 0, h: 0, get code(): string { if (n++ === 0) return 'a > b'; throw new Error('boom'); } };
+  const p = await renderBlock(flaky, 'light');
+  assert.equal(p.failed, true);
+  assert.match(svgOf(p.dataURL), /그리지 못했어요/);
+});
