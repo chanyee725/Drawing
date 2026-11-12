@@ -274,3 +274,127 @@ test('an outside change reloads a clean file once, but only refreshes a dirty on
   assert.deepEqual(reads, ['a.dpx']);
   void server;
 });
+
+test('flushForReload reports true after a good save and false after a refused one (no retry, no endless wait)', async (t) => {
+  const { s, server } = setup(t);
+  assert.equal(await s.flushForReload(), true); // nothing to save
+  s.edit({ title: 'x' });
+  const ok = s.flushForReload();
+  await settle();
+  server.ok(2);
+  assert.equal(await ok, true);
+  assert.equal(s.getState().status, '저장했어요');
+
+  s.edit({ title: 'y' });
+  const refused = s.flushForReload();
+  await settle();
+  server.fail(new ApiError(422, 'bad body'));
+  assert.equal(await refused, false);
+  assert.equal(s.getState().status, RELOAD_STOPPED);
+  assert.equal(s.hasUnsaved(), true);
+  t.mock.timers.tick(RETRY_MAX * 2);
+  await settle();
+  assert.equal(server.calls.length, 2, 'a refused body is not retried');
+});
+
+test('close() during a save drops the file; the late result changes nothing, hasUnsaved holds until it lands', async (t) => {
+  const { s, server, saved } = setup(t);
+  s.edit({ title: 'x' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  assert.equal(s.hasUnsaved(), true);
+  s.close();
+  assert.equal(s.getState().path, null);
+  assert.equal(s.isDirty(), false);
+  // The PUT is still running, so leaving now would still lose it.
+  assert.equal(s.hasUnsaved(), true);
+  server.ok(2);
+  await settle();
+  assert.equal(s.getState().path, null);
+  assert.equal(s.getState().file, null);
+  assert.equal(s.getState().status, '');
+  assert.equal(saved(), 0);
+  assert.equal(s.hasUnsaved(), false);
+  // Nothing is left to save or retry.
+  t.mock.timers.tick(RETRY_MAX * 2);
+  await settle();
+  assert.equal(server.calls.length, 1);
+});
+
+test('hasUnsaved is true while a save is in flight, and false only after it lands', async (t) => {
+  const { s, server } = setup(t);
+  assert.equal(s.hasUnsaved(), false);
+  s.edit({ title: 'x' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  assert.equal(s.hasUnsaved(), true);
+  server.ok(2);
+  await settle();
+  assert.equal(s.hasUnsaved(), false);
+});
+
+test('overwrite() while a save is running waits for it and starts no second PUT when there is no conflict', async (t) => {
+  const a = setup(t);
+  a.s.edit({ title: 'x' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  let doneA = false;
+  void a.s.overwrite().then(() => (doneA = true));
+  await settle();
+  assert.equal(doneA, false, 'waits for the running save');
+  a.server.ok(2);
+  await settle();
+  assert.equal(doneA, true);
+  assert.equal(a.server.calls.length, 1);
+  assert.equal(a.s.isDirty(), false);
+});
+
+test('overwrite() called while a running save hits a 409 re-sends against the server revision', async (t) => {
+  const { s, server } = setup(t);
+  s.edit({ title: 'mine' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  const done = s.overwrite();
+  await settle();
+  assert.equal(server.calls.length, 1, 'still waiting for the running save');
+  server.fail(new ApiError(409, 'conflict', 9));
+  await settle();
+  assert.equal(server.calls.length, 2);
+  assert.equal(server.calls[1].file.revision, 9);
+  assert.equal(server.calls[1].file.title, 'mine');
+  server.ok(10);
+  await done;
+  assert.equal(s.getState().conflict, null);
+  assert.equal(s.hasUnsaved(), false);
+});
+
+test('editing in the 409 state keeps the conflict notice, saves nothing, and overwrite sends the latest edit', async (t) => {
+  const { s, server } = setup(t);
+  s.edit({ title: 'one' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  server.fail(new ApiError(409, 'conflict', 4));
+  await settle();
+  for (const title of ['two', 'three']) {
+    s.edit({ title });
+    assert.equal(s.getState().status, '다른 곳에서 바뀌었어요');
+    assert.equal(s.getState().statusAlert, true);
+    assert.deepEqual(s.getState().conflict, { revision: 4 });
+  }
+  t.mock.timers.tick(SAVE_DELAY * 10);
+  await settle();
+  assert.equal(server.calls.length, 1);
+  assert.equal(s.hasUnsaved(), true);
+  // pagehide does not fire a doomed PUT either.
+  s.saveOnHide();
+  await settle();
+  assert.equal(server.calls.length, 1);
+  const done = s.overwrite();
+  await settle();
+  assert.equal(server.calls[1].file.title, 'three');
+  assert.equal(server.calls[1].file.revision, 4);
+  server.ok(5);
+  await done;
+  assert.equal(s.getState().status, '저장했어요');
+  assert.equal(s.hasUnsaved(), false);
+});
