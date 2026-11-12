@@ -62,7 +62,7 @@ function normalizeLayout(l, at) {
   return out;
 }
 
-function normalizeBlock(b, i) {
+function normalizeBlock(b, i, lenient) {
   if (!isObj(b)) throw new ValidationError(`blocks[${i}] must be an object`);
   if (typeof b.id !== 'string' || !b.id) throw new ValidationError(`blocks[${i}].id must be a non-empty string`);
   if (typeof b.type !== 'string' || !b.type) throw new ValidationError(`blocks[${i}].type must be a non-empty string`);
@@ -71,12 +71,19 @@ function normalizeBlock(b, i) {
     if (typeof b[k] !== 'number' || !Number.isFinite(b[k])) throw new ValidationError(`blocks[${i}].${k} must be a number`);
   }
   const out = { id: b.id, type: b.type, code: b.code, x: b.x, y: b.y, w: b.w, h: b.h };
-  if (b.layout !== undefined) out.layout = normalizeLayout(b.layout, `blocks[${i}].layout`);
+  if (b.layout !== undefined) {
+    try {
+      out.layout = normalizeLayout(b.layout, `blocks[${i}].layout`);
+    } catch (e) {
+      // On read, a broken layout (hand-edited file) only loses the moved positions, not the whole file.
+      if (!lenient || !(e instanceof ValidationError)) throw e;
+    }
+  }
   return out;
 }
 
 /** Validate client content (everything except `revision`, which the store owns). Missing sections get defaults. */
-export function normalizeContent(input) {
+export function normalizeContent(input, { lenient = false } = {}) {
   if (!isObj(input)) throw new ValidationError('body must be a JSON object');
   const title = input.title ?? '';
   if (typeof title !== 'string') throw new ValidationError('title must be a string');
@@ -92,7 +99,7 @@ export function normalizeContent(input) {
   if (!Array.isArray(blocks)) throw new ValidationError('blocks must be an array');
   const seen = new Set();
   const outBlocks = blocks.map((b, i) => {
-    const nb = normalizeBlock(b, i);
+    const nb = normalizeBlock(b, i, lenient);
     if (seen.has(nb.id)) throw new ValidationError(`duplicate block id "${nb.id}"`);
     seen.add(nb.id);
     return nb;
@@ -108,7 +115,7 @@ export function parseStored(text) {
   } catch {
     throw new ValidationError('file is not valid JSON');
   }
-  const content = normalizeContent(raw);
+  const content = normalizeContent(raw, { lenient: true });
   const v = raw.version;
   const version = Number.isInteger(v) && v >= 1 ? v : 1;
   const revision = raw.revision;

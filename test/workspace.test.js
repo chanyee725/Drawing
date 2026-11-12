@@ -546,6 +546,16 @@ test('block layout: a layout with a newer sub-format version is kept verbatim', 
   });
 });
 
+test('a stored file with a broken layout still reads; only that layout is dropped', async () => {
+  const { parseStored } = await import('../server/workspace/model.js');
+  const blk = { id: 'b1', type: 'flowchart', code: 'a', x: 0, y: 0, w: 1, h: 1 };
+  const text = JSON.stringify({ version: 3, title: 't', document: { type: 'doc', content: [] }, canvas: {}, revision: 2,
+    blocks: [{ ...blk, layout: { v: 1, items: { A: { cx: 'oops' } } } }, { ...blk, id: 'b2', layout: { v: 1, items: { B: { cx: 1, cy: 2, parent: '' } } } }] });
+  const f = parseStored(text);
+  assert.equal('layout' in f.blocks[0], false);
+  assert.deepEqual(f.blocks[1].layout, { v: 1, items: { B: { cx: 1, cy: 2, parent: '' } } });
+});
+
 test('a file reads back with the version it was written with; a write stores the current one', async () => {
   const { parseStored, normalizeContent, FORMAT_VERSION } = await import('../server/workspace/model.js');
   const old = JSON.stringify({ version: 1, title: 'old', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 3 });
