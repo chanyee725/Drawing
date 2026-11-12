@@ -32,8 +32,8 @@ export async function renderFrame(scene: readonly CanvasEl[], frameId: string, d
   const pad = Math.max(0, (parseFloat(svg.getAttribute('width') ?? '0') - fw) / 2) || 0;
   const inside = blocksInFrame({ x: fx, y: fy, width: fw, height: fh }, blocks);
   if (inside.length) {
-    const theme = dark ? 'dark' : 'light';
-    const pics = await Promise.all(inside.map((b) => renderBlock(b, theme)));
+    // Always the light picture: a dark export puts an invert filter on the whole SVG, which would invert a dark one twice.
+    const pics = await Promise.all(inside.map((b) => renderBlock(b, 'light')));
     const clipId = `frame-clip-${frameId.replace(/[^\w-]/g, '_')}`;
     const clip = document.createElementNS(SVG_NS, 'clipPath');
     clip.setAttribute('id', clipId);

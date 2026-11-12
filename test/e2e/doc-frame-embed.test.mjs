@@ -76,6 +76,19 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   const node = saved.document.content.find((n) => n.type === 'frameEmbed');
   assert.deepEqual(node.attrs, { frameId: 'frame_1', name: '구조도' });
 
+  // Dark mode: Excalidraw inverts the whole exported SVG, so the block layer must stay the light picture
+  // (drawn dark it would be inverted twice). Its picture is the same as in the light page.
+  const lightPic = /<image[^>]*data-block-id="b_in"/.exec(svgText)?.[0].match(/href="([^"]+)"/)?.[1];
+  const dark = await (await browser.newContext({ viewport: { width: 1400, height: 900 }, colorScheme: 'dark' })).newPage();
+  await dark.goto(`${BASE}/#file=fr`);
+  await dark.waitForFunction(() => decodeURIComponent(document.querySelector('.doc-frame .doc-diagram-pic img')?.getAttribute('src') ?? '').includes('data-block-id'), null, { timeout: 30000 });
+  const darkSvg = decodeURIComponent((await dark.locator('.doc-frame .doc-diagram-pic img').getAttribute('src')).split(',')[1]);
+  assert.match(darkSvg, /invert\(/, 'the export is in dark mode');
+  const darkPic = /<image[^>]*data-block-id="b_in"/.exec(darkSvg)?.[0].match(/href="([^"]+)"/)?.[1];
+  assert.ok(lightPic && darkPic);
+  assert.equal(darkPic, lightPic, 'frame preview draws blocks light, also in dark mode');
+  await dark.close();
+
   // Clicking the preview shows the frame on the canvas and selects it. Check the selection itself:
   // Delete removes the selected elements, so only the frame itself may go; its child and the other frame stay.
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
