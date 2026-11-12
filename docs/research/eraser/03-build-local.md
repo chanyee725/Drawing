@@ -64,7 +64,7 @@
   - 이 프로젝트는 외부 통신을 피하는 로컬 도구라서, 외부 요청이 0건이었던 Excalidraw가 더 안전해요 (추정).
 - **Excalidraw**: MIT이고 `@excalidraw/excalidraw` React 컴포넌트로 임베드할 수 있어요. 출처: <https://github.com/excalidraw/excalidraw>. 다만 Eraser의 `typeface: rough`는 손글씨 글꼴일 뿐이고(위 1절), Excalidraw는 rough.js로 선 자체를 흔들어 그려요. 출처: `npm view @excalidraw/excalidraw dependencies`에 `roughjs`. 그래서 겉모습은 결이 다를 수 있어요 (추정: 화면 비교 안 함). 또, freeform 편집기이지 DSL 레이아웃 엔진이 아니에요.
 - **rough.js**: MIT. canvas와 SVG 양쪽에서 쓸 수 있고 hachure, zigzag 같은 채움을 지원해요. 출처: <https://github.com/rough-stuff/rough>. 채움은 "hachure(default), solid, zigzag, cross-hatch, dots, dashed, or zigzag-line"뿐이라 `styleMode: watercolor` 효과는 없어요. 출처: <https://github.com/rough-stuff/rough/blob/master/README.md>. 직접 구현해야 해요. Eraser는 텍스처 이미지 방식을 써요(1절).
-- **ELK.js**: ELK 알고리즘을 JS로 옮긴 것이고 레이아웃만 계산해요. 렌더링은 따로 해야 해요. `new ELK().layout(graph)`가 Promise를 반환하고, Web Worker로 돌릴 수 있어요. 출처: <https://github.com/kieler/elkjs>. 라이선스는 EPL-2.0이고 Secondary License로 GPL-3.0-or-later를 명시해요. 출처: <https://github.com/kieler/elkjs/blob/master/LICENSE.md>. EPL은 약한 카피레프트라서, 수정 없이 의존성으로 쓰는 로컬 앱에는 보통 문제가 없어요 (추정, 배포 시 법률 확인 필요). 중첩 group(compound node)을 지원해요. `hierarchyHandling: INCLUDE_CHILDREN`이면 한 번에 배치해요. 출처: <https://eclipse.dev/elk/reference/options/org-eclipse-elk-hierarchyHandling.html>
+- **ELK.js**: ELK 알고리즘을 JS로 옮긴 것이고 레이아웃만 계산해요. 렌더링은 따로 해야 해요. `new ELK().layout(graph)`가 Promise를 반환하고, Web Worker로 돌릴 수 있어요. 출처: <https://github.com/kieler/elkjs>. 라이선스는 EPL-2.0이고 Secondary License로 GPL-3.0-or-later를 명시해요. 출처: <https://github.com/kieler/elkjs/blob/master/LICENSE.md>. EPL은 배포("Distribute")할 때만 소스 제공 의무가 생겨요. 이 도구는 사내 전용·비배포라서 사실상 의무가 없어요. 원문 인용과 판정은 [08](08-spike-oss.md) §7. 중첩 group(compound node)을 지원해요. `hierarchyHandling: INCLUDE_CHILDREN`이면 한 번에 배치해요. 출처: <https://eclipse.dev/elk/reference/options/org-eclipse-elk-hierarchyHandling.html>
 - **dagre**: MIT. `@dagrejs/dagre`만 갱신되고 있어요. 출처: <https://github.com/dagrejs/dagre>. 중첩 group(compound graph)도 지원해요. graphlib에서 `compound: true` + `setParent`를 쓰고, 위키가 클러스터 구현이 Sander의 "Layout of Compound Directed Graphs"를 따른다고 해요. 출처: <https://github.com/dagrejs/dagre/wiki>, <https://github.com/dagrejs/graphlib/wiki/API-Reference>. 포트·계층 옵션이 더 많은 ELK가 group 중심 architecture diagram에 낫다고 (추정: 비교 실험 안 함)해요.
 - **Mermaid**: MIT, "20+ Diagram Types". 출처: <https://github.com/mermaid-js/mermaid>. 레이아웃은 v12.0.0부터 ELK가 번들 기본값이고 "replacing Dagre"예요. `layout: dagre`로 되돌릴 수 있어요. 출처: <https://mermaid.js.org/config/layouts.html>. Mermaid 문법을 import하는 용도나 sequence diagram 렌더링 참고로 쓸 만해요 (추정: 설계 판단).
 - **Yjs**: MIT, 네트워크 독립 CRDT예요. y-websocket 서버로 동기화하고, y-indexeddb 등으로 저장해요. 출처: <https://github.com/yjs/yjs>. Lexical은 Yjs 협업을 지원해요. 출처: <https://github.com/facebook/lexical>.
@@ -133,18 +133,23 @@ Node 서버 (Fastify 또는 Express)
 - AI 생성 연동(별도 키가 필요해요. 키는 저장하지 않고 환경 변수로만).
 - LSP(Langium).
 
-## 5. 상표·트레이드 드레스 리스크
+## 5. 상표·트레이드 드레스와 저작권 (내부 전용 전제, 2026-11-12 개정)
 
-- Eraser 약관: "Our trademarks and trade dress may not be used in connection with any product or service without the prior written consent of the Company." 별도 브랜드 가이드라인은 공개되어 있지 않아요. 출처: <https://www.eraser.io/terms>
-- 따라서 이름·로고·로고 색·마스코트·마케팅 문구를 쓰지 마세요. 제품명에 "Eraser"나 유사 철자를 넣지 마세요 (추정: 상표 혼동 위험, 법률 판단이라 공개 자료로 확정 못 해요).
-- 화면의 전체적인 룩앤필(색 팔레트, 폰트 조합, 아이콘 모양, 스크린샷 같은 배치)을 그대로 따라 하면 trade dress 주장의 소지가 있어요 (추정: 법률 판단, 법률 자문 아님).
-- 권장: **기능 구조와 UX 흐름(좌측 코드, 우측 캔버스 같은 분할 등)은 유지**하되, **비주얼은 자체 스타일**로 만들어요. 이 저장소의 UI는 이미 해요체 한국어 카피와 자체 스타일이 있으니 그걸 이어가면 돼요.
-- DSL 문법 자체(키워드 `icon`, `color`, `direction` 등)의 저작권·호환성 문제는 (미확인: 약관·문서에 문법 언급이 없고 법률 판단이 필요해요). 출처: <https://www.eraser.io/terms>. 참고로 새 JSON 형식(eraser-diagrams)은 Eraser가 MIT로 공개했어요. 출처: <https://www.eraser.io/open-source>. 호환 목표라면 "Eraser 호환"이라고 홍보하지 않는 게 안전해요 (추정: 상표 쪽 판단).
-- 아이콘: Eraser의 `aws-ec2` 같은 아이콘 이름은 문법에 나오지만, 실제 아이콘 이미지는 Eraser 자산이거나 AWS 등 각 사 상표일 수 있어요. 번들 전에 각 아이콘 세트의 라이선스를 확인하세요 (미확인: Eraser 아이콘 문서는 이름 목록만 있고 라이선스가 없어요). 출처: <https://docs.eraser.io/docs/icons>. eraser-diagrams도 4,000개 아이콘 세트를 "as an optional add-on"으로 따로 둬요. 출처: <https://www.eraser.io/open-source>
-- 사용자 콘텐츠: Eraser 약관상 사용자가 콘텐츠 소유권을 유지해요. 출처: <https://www.eraser.io/terms>. export한 다이어그램을 로컬 도구로 가져오는 것은 소유권 면에서 문제가 없어 보이나, 그 해석은 (추정: 법률 판단)이에요.
+전제(사용자 확정): 이 도구는 판매·배포하지 않고 회사 안에서만 써요. 외부에 노출하지 않아요. 아래는 법률 검토가 아니에요.
+
+- Eraser 약관: "Our trademarks and trade dress may not be used in connection with any product or service without the prior written consent of the Company." 같은 절에서 서비스의 "features and functionality"가 회사 소유라고 해요. 경쟁 제품 금지나 리버스 엔지니어링 금지 조항은 약관 본문에서 찾지 못했어요. 출처: <https://www.eraser.io/terms>
+- **상표·트레이드 드레스 위험은 내부 전용이면 크게 낮아져요 (추정: 법률 판단).** 상표·트레이드 드레스는 시장에서 소비자가 출처를 헷갈리는 걸 막는 권리라서, 팔지도 공개하지도 않는 사내 도구는 혼동할 소비자가 없어요. 그래서 화면 배치, 색 팔레트, 폰트 조합, 톤을 Eraser와 똑같이 맞추는 것 자체는 막지 않아요.
+  - 그래도 이름·로고·워드마크·파비콘은 쓰지 않아요. 사내 도구에 남의 이름을 붙일 이유가 없고, 나중에 공개 범위가 바뀌면 바로 문제가 돼요. 위 약관 조항은 회사가 Eraser 계정을 쓰는 경우 계약 조건으로도 걸려요 (추정).
+- **저작권은 내부 전용이어도 그대로예요.** 복제 자체가 권리자 허락이 필요한 행위라서, 배포 여부와 관계없이 Eraser의 실제 자산 파일(아이콘·일러스트·폰트 파일·비공개 코드)을 앱이나 사이트에서 가져와 복사해 넣으면 안 돼요 (추정: 법률 판단).
+  - 예외: Eraser가 MIT로 공개한 eraser-diagrams 코드는 MIT 조건(저작권 고지 유지)대로 쓸 수 있어요. 출처: <https://github.com/eraserlabs/eraser-diagrams/blob/main/LICENSE>. 단, 4,000개 아이콘 세트는 "as an optional add-on"이라 별도이고, 그 라이선스는 (미확인: 공개 페이지에 조건이 없어요). 출처: <https://www.eraser.io/open-source>
+  - 폰트: 공개 렌더러가 쓰는 Shantell Sans·Inter·JetBrains Mono는 모두 SIL OFL 1.1이에요. Eraser에서 파일을 복사하지 말고 각 원 배포처에서 받으면 같은 모양을 쓸 수 있어요. 출처: <https://github.com/arrowtype/shantell-sans/blob/main/OFL.txt>, <https://github.com/rsms/inter/blob/master/LICENSE.txt>, <https://github.com/JetBrains/JetBrainsMono/blob/master/OFL.txt>
+  - 아이콘: `aws-ec2` 같은 아이콘 이름은 문법에 나오지만 이미지는 Eraser 자산이거나 AWS 등 각 사 자산이에요. 각 클라우드 회사가 공식 배포하는 아이콘 세트를 그 조건대로 쓰거나 직접 그려요. Eraser 아이콘 문서는 이름 목록만 있고 라이선스가 없어요 (미확인). 출처: <https://docs.eraser.io/docs/icons>
+- DSL 문법(키워드 `icon`, `color`, `direction` 등)을 똑같이 읽는 파서를 직접 짜는 건 자산 복제가 아니라서 허용 쪽으로 봐요 (추정: 법률 판단. 약관·문서에 문법 언급이 없어요). 새 JSON 형식은 MIT로 공개됐어요. 출처: <https://www.eraser.io/open-source>
+- 사용자 콘텐츠: Eraser 약관상 사용자가 콘텐츠 소유권을 유지해요. 출처: <https://www.eraser.io/terms>. 그래서 회사가 Eraser에서 만든 다이어그램을 export해 로컬 도구로 가져오는 건 문제가 없어 보여요 (추정: 법률 판단).
+- 이전 판과 달라진 점: 이전 판은 "룩앤필을 그대로 따라 하면 trade dress 주장의 소지"가 있다며 비주얼을 자체 스타일로 하라고 권했어요. 내부 전용 전제로 이 권고를 풀었어요. 이름·로고와 자산 파일 복제 금지는 유지해요.
 
 ## 6. 열린 질문 (사용자 결정 필요)
 
-1. 혼자 쓰는 로컬 도구로 끝낼지, 배포까지 갈지. tldraw와 EPL 판단이 갈려요.
+1. ~~혼자 쓰는 로컬 도구로 끝낼지, 배포까지 갈지~~ → 결정됨(2026-11-12): 판매·배포 없이 사내 전용. 라이선스 판정은 [08](08-spike-oss.md) §7. 나중에 공개 범위가 바뀌면 이 문서 5절과 08 §7을 다시 봐야 해요.
 2. Eraser DSL과 문법 호환을 목표로 할지, 영감만 받고 자체 DSL을 만들지.
 3. freeform 캔버스가 MVP에 필요한지.
