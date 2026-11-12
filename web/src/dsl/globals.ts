@@ -8,12 +8,12 @@ export type PropDef = { key: string; label: string; options: PropOption[]; types
 const GRAPH = ['architecture', 'flowchart'];
 const ALL = ['architecture', 'flowchart', 'sequence', 'erd'];
 
-/** First option of each property is the DSL default (see docs/research/eraser/02 attribute table). */
+/** First option of each property is the renderer default (shared/render/common.ts `styleFor`; typeface is clean there, not the spec's rough). */
 export const PROPS: PropDef[] = [
   { key: 'direction', label: '방향', types: GRAPH, options: [{ value: 'down', label: '아래' }, { value: 'up', label: '위' }, { value: 'left', label: '왼쪽' }, { value: 'right', label: '오른쪽' }] },
   { key: 'colorMode', label: '색 모드', types: ALL, options: [{ value: 'pastel', label: '파스텔' }, { value: 'bold', label: '진하게' }, { value: 'outline', label: '윤곽선' }] },
   { key: 'styleMode', label: '스타일', types: ALL, options: [{ value: 'shadow', label: '그림자' }, { value: 'plain', label: '단순' }, { value: 'watercolor', label: '수채화' }] },
-  { key: 'typeface', label: '글꼴', types: ALL, options: [{ value: 'rough', label: '손글씨' }, { value: 'clean', label: '깔끔' }, { value: 'mono', label: '고정폭' }] },
+  { key: 'typeface', label: '글꼴', types: ALL, options: [{ value: 'clean', label: '깔끔' }, { value: 'rough', label: '손글씨' }, { value: 'mono', label: '고정폭' }] },
   { key: 'textSize', label: '글자 크기', types: ALL, options: [{ value: 'small', label: '작게' }, { value: 'medium', label: '보통' }, { value: 'large', label: '크게' }] },
   { key: 'connectorStyle', label: '연결선', types: GRAPH, options: [{ value: 'elbow', label: '꺾은선' }, { value: 'straight', label: '직선' }, { value: 'arc', label: '곡선' }] },
 ];
