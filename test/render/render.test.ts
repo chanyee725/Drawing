@@ -195,3 +195,11 @@ test('the diagram title follows the global typeface', async () => {
   assert.equal(await titleFont('typeface rough\ntitle My title\nA > B'), 'rough');
   assert.equal(await titleFont('typeface mono\ntitle My title\nA > B'), 'mono');
 });
+
+test('the legend follows the global typeface like the title', async () => {
+  const code = 'typeface mono\nA > B\nlegend { [color: red, label: Error] }';
+  const { svg } = await renderDiagram(code, { type: 'flowchart' });
+  const legendText = /<text[^>]*font-family="([^"]*)"[^>]*>(?:(?!<\/text>).)*Error/.exec(svg);
+  assert.ok(legendText, 'legend label is drawn');
+  assert.match(legendText![1]!, /mono|Mono/i);
+});

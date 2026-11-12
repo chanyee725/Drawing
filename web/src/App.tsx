@@ -272,6 +272,8 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
+  // Path this tab is deleting right now (see the SSE handler below).
+  const removing = useRef<string | null>(null);
   // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
     session.close();
@@ -291,7 +293,8 @@ export function App() {
       }
       if (session.external(e, (p) => api.readFile(p), load) === 'close') {
         setHashPath(null);
-        setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
+        // Our own delete can be announced before its response arrives: that close needs no error.
+        if (!removing.current) setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
       }
       void refreshTree();
     });
@@ -301,6 +304,7 @@ export function App() {
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
     if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
+    removing.current = n.path;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
@@ -308,6 +312,8 @@ export function App() {
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');
+    } finally {
+      removing.current = null;
     }
   };
 

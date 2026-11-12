@@ -155,8 +155,10 @@ function legendItems(d: DiagramBase): { items: SceneItem[]; w: number; h: number
   const lh = lineHeightOf(size);
   const rowH = Math.max(lh, 18) + 6;
   const swatchW = 28;
+  // The legend reads like the title: it follows the global typeface.
+  const font = pick<Typeface>(d.styles.typeface, ['rough', 'clean', 'mono']) ?? 'clean';
   let w = 0;
-  for (const e of entries) w = Math.max(w, textWidth(e.label ?? '', size, 'clean'));
+  for (const e of entries) w = Math.max(w, textWidth(e.label ?? '', size, font));
   const boxW = Math.ceil(16 + swatchW + 10 + w + 16);
   const boxH = 12 + entries.length * rowH + 6;
   const items: SceneItem[] = [
@@ -174,7 +176,7 @@ function legendItems(d: DiagramBase): { items: SceneItem[]; w: number; h: number
       const shape = (e.shape ?? 'rectangle') as 'rectangle';
       items.push({ kind: 'box', role: 'node', shape, x: 16 + 4, y: cy - 8, w: swatchW - 8, h: 16, paint: { color, mode: 'pastel' }, shadow: false });
     }
-    if (e.label) items.push(textItem([e.label], 16 + swatchW + 10, cy - lh / 2, { size, font: 'clean', anchor: 'start' }));
+    if (e.label) items.push(textItem([e.label], 16 + swatchW + 10, cy - lh / 2, { size, font, anchor: 'start' }));
   });
   return { items, w: boxW, h: boxH };
 }
