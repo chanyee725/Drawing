@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react';
 import type { Block } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
+import type { CanvasHandle } from './export/types';
 
 // Excalidraw is large; load it only when a canvas is shown.
 const ExcalidrawCanvas = lazy(() => import('./canvas/ExcalidrawCanvas'));
@@ -13,6 +14,7 @@ type Props = {
   focus: CanvasFocus | null;
   dark: boolean;
   onChange: (patch: { canvas?: CanvasData; blocks?: Block[] }) => void;
+  handle?: { current: CanvasHandle | null };
 };
 
 const asCanvas = (c: unknown): CanvasData => {
@@ -20,7 +22,7 @@ const asCanvas = (c: unknown): CanvasData => {
   return { elements: Array.isArray(o.elements) ? o.elements : [], appState: o.appState && typeof o.appState === 'object' ? o.appState : {} };
 };
 
-export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange }: Props) {
+export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, handle }: Props) {
   if (fileKey === null)
     return (
       <main className="flex h-full min-h-64 flex-1 items-center justify-center p-6" aria-label="캔버스">
@@ -38,7 +40,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange }: P
           </p>
         }
       >
-        <ExcalidrawCanvas key={fileKey} canvas={asCanvas(canvas)} blocks={blocks} focus={focus} dark={dark} onChange={onChange} />
+        <ExcalidrawCanvas key={fileKey} canvas={asCanvas(canvas)} blocks={blocks} focus={focus} dark={dark} onChange={onChange} handle={handle} />
       </Suspense>
     </main>
   );

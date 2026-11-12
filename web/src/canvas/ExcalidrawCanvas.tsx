@@ -1,7 +1,7 @@
 // The infinite canvas: Excalidraw (MIT) with diagram blocks shown as image elements.
 // Loaded lazily from CanvasPane so the editor shell does not wait for it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CaptureUpdateAction, Excalidraw, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, Excalidraw, exportToBlob, exportToSvg, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
 import type { AppState, ExcalidrawImperativeAPI, BinaryFileData } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
@@ -10,6 +10,7 @@ import { BlockEditor } from '../BlockEditor';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram } from '../dsl/adapter';
 import { renderBlock, type BlockPicture } from './render';
+import type { CanvasHandle } from '../export/types';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, rectOf, splitScene, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -22,6 +23,8 @@ type Props = {
   focus: CanvasFocus | null;
   dark: boolean;
   onChange: (patch: { canvas?: CanvasData; blocks?: Block[] }) => void;
+  /** Filled while this canvas is mounted, so export, the palette and shortcuts can reach it. */
+  handle?: { current: CanvasHandle | null };
 };
 
 const theme = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
@@ -51,7 +54,7 @@ const UI_OPTIONS = {
 // Web embeds load third-party pages in iframes; the canvas makes no outbound requests.
 const NO_EMBEDS = () => false;
 
-export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange }: Props) {
+export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
@@ -246,6 +249,48 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       el.removeEventListener('keydown', onKey, true);
     };
   }, [api]);
+
+  // What export, the palette and shortcuts can do with this canvas.
+  useEffect(() => {
+    if (!api || !handle) return;
+    // The selection (with the text bound to selected shapes), or everything when nothing is selected.
+    const scope = () => {
+      const st = api.getAppState();
+      const all = api.getSceneElements();
+      const picked = all.filter((e) => st.selectedElementIds[e.id]);
+      const ids = new Set(picked.map((e) => e.id));
+      const sel = picked.length ? all.filter((e) => ids.has(e.id) || (e.type === 'text' && e.containerId && ids.has(e.containerId))) : [];
+      return { selected: sel.length > 0, elements: sel.length ? sel : all };
+    };
+    const opts = () => ({ exportBackground: true, viewBackgroundColor: '#ffffff', exportWithDarkMode: false });
+    handle.current = {
+      scope: () => {
+        const s = scope();
+        return { selected: s.selected, count: s.elements.length };
+      },
+      svg: async () => {
+        const { elements } = scope();
+        if (!elements.length) return null;
+        const el = await exportToSvg({ elements, appState: opts(), files: api.getFiles(), exportPadding: 16 });
+        el.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        return { svg: new XMLSerializer().serializeToString(el), width: parseFloat(el.getAttribute('width') ?? '0'), height: parseFloat(el.getAttribute('height') ?? '0') };
+      },
+      png: async () => {
+        const { elements } = scope();
+        if (!elements.length) return null;
+        return await exportToBlob({ elements, appState: opts(), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16 });
+      },
+      key: ({ key, code, ctrl, meta, shift, alt }) => {
+        const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');
+        if (!target) return;
+        target.focus({ preventScroll: true });
+        target.dispatchEvent(new KeyboardEvent('keydown', { key, code, ctrlKey: !!ctrl, metaKey: !!meta, shiftKey: !!shift, altKey: !!alt, bubbles: true, cancelable: true }));
+      },
+    };
+    return () => {
+      handle.current = null;
+    };
+  }, [api, handle]);
 
   const block = editing ? blocks.find((b) => b.id === editing) : undefined;
   useEffect(() => {

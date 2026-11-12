@@ -3,7 +3,7 @@
 import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOutcome } from '../dsl/adapter.ts';
 import { fileIdFor, hash, type BlockLike } from './sync.ts';
 
-export type BlockPicture = { fileId: string; dataURL: string; width: number; height: number };
+export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number };
 
 const MIN = 40;
 
@@ -55,7 +55,7 @@ function picture(blockId: string, r: { svg: string; width: number; height: numbe
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: toDataURL(r.svg), width: Math.max(MIN, r.width), height: Math.max(MIN, r.height) };
+    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height) };
     pictures.set(fileId, p);
     if (pictures.size > 200) pictures.delete(pictures.keys().next().value!);
   }

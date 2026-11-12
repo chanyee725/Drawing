@@ -3,17 +3,18 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import type { Block } from '../api';
+import type { ImageKind } from '../export/actions';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
 import { DiagramEmbed } from './extensions';
 
-export type DocCtx = { blocks: Block[]; dark: boolean; onShow: (blockId: string) => void };
-export const DocContext = createContext<DocCtx>({ blocks: [], dark: false, onShow: () => {} });
+export type DocCtx = { blocks: Block[]; dark: boolean; onShow: (blockId: string) => void; onExport: (block: Block, kind: ImageKind) => void };
+export const DocContext = createContext<DocCtx>({ blocks: [], dark: false, onShow: () => {}, onExport: () => {} });
 
 export const typeLabel = (type: string) => DIAGRAM_TYPES.find((t) => t.id === type)?.label ?? type;
 
 function DiagramView({ node, selected }: ReactNodeViewProps) {
-  const { blocks, dark, onShow } = useContext(DocContext);
+  const { blocks, dark, onShow, onExport } = useContext(DocContext);
   const id = typeof node.attrs.blockId === 'string' ? node.attrs.blockId : '';
   const block = blocks.find((b) => b.id === id);
   const [pic, setPic] = useState<BlockPicture | null>(null);
@@ -40,6 +41,21 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
         <p className="doc-diagram-gone">캔버스에서 지운 다이어그램이에요. 이 줄을 지워도 돼요.</p>
       )}
       <figcaption>{block ? `${label} · 누르면 캔버스로 가요` : label}</figcaption>
+      {block && (
+        <div className="doc-diagram-actions" role="group" aria-label="다이어그램 내보내기">
+          {(
+            [
+              ['svg', 'SVG'],
+              ['png', 'PNG'],
+              ['copy', '이미지 복사'],
+            ] as const
+          ).map(([kind, text]) => (
+            <button key={kind} type="button" data-export-block={kind} onClick={() => onExport(block, kind)}>
+              {text}
+            </button>
+          ))}
+        </div>
+      )}
     </NodeViewWrapper>
   );
 }

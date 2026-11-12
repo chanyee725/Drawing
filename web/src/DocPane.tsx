@@ -9,6 +9,7 @@ import { docExtensions, documentError } from './doc/extensions';
 import { DiagramEmbedView, DocContext, typeLabel } from './doc/DiagramView';
 import { SlashCommands } from './doc/SlashMenu';
 import { renderBlock } from './canvas/render';
+import type { ImageKind } from './export/actions';
 import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, SLASH_ITEMS, type SlashItem } from './doc/model';
 
 type Props = {
@@ -21,6 +22,8 @@ type Props = {
   onBlocks: (b: Block[]) => void;
   /** Show a diagram block on the canvas. */
   onShow: (blockId: string) => void;
+  /** Export one embedded diagram. */
+  onExportBlock: (block: Block, kind: ImageKind) => void;
 };
 
 const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
@@ -29,7 +32,7 @@ const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
  * Remounted per file (App keys it), so it reads `document` only when it starts. A document the
  * editor cannot read is never saved over: the pane shows an error and stays read-only.
  */
-export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, onShow }: Props) {
+export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, onShow, onExportBlock }: Props) {
   const blocksRef = useRef(blocks);
   const onDocumentRef = useRef(onDocument);
   const onBlocksRef = useRef(onBlocks);
@@ -136,7 +139,7 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
   });
 
   const inTable = useEditorState({ editor, selector: (s) => !!s.editor?.isActive('table') });
-  const ctx = useMemo(() => ({ blocks, dark, onShow }), [blocks, dark, onShow]);
+  const ctx = useMemo(() => ({ blocks, dark, onShow, onExport: onExportBlock }), [blocks, dark, onShow, onExportBlock]);
 
   const tableActions: [string, () => boolean][] = [
     ['행 추가', () => editor.chain().focus().addRowAfter().run()],

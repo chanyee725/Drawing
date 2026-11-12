@@ -10,6 +10,11 @@ import { CanvasPane } from './CanvasPane';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
 import { migrateDocument } from './doc/model';
+import { ExportMenu } from './ExportMenu';
+import { CommandPalette, type Command } from './CommandPalette';
+import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
+import type { CanvasHandle } from './export/types';
+import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 
 const SAVE_DELAY = 700;
 const RETRY_MIN = 1000;
@@ -66,6 +71,12 @@ export function App() {
   const [loadSeq, setLoadSeq] = useState(0);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
   const [focus, setFocus] = useState<CanvasFocus | null>(null);
+
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportSelected, setExportSelected] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Set by the canvas while it is mounted (export, palette commands).
+  const canvasHandle = useRef<CanvasHandle | null>(null);
 
   const fileRef = useRef<DpxFile | null>(null);
   const pathRef = useRef<string | null>(null);
@@ -312,6 +323,98 @@ export function App() {
     setView((v) => (v === 'doc' ? 'both' : v));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
   }, []);
+  const report = useCallback(
+    (job: Promise<string> | string) =>
+      Promise.resolve(job).then(
+        (m) => setStatus(m),
+        (e) => setStatus(e instanceof Error ? e.message : '내보내지 못했어요', true),
+      ),
+    [setStatus],
+  );
+  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, fileRef.current?.title ?? ''));
+  const markdownExport = () => {
+    const f = fileRef.current;
+    if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
+  };
+  const openExport = useCallback((o: boolean) => {
+    if (o) setExportSelected(canvasHandle.current?.scope().selected ?? false);
+    setExportOpen(o);
+  }, []);
+  const blockExport = useCallback(
+    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, fileRef.current?.title ?? '')),
+    [report],
+  );
+
+  // Global shortcuts (capture phase, so they win over the canvas and the editor): Ctrl/Cmd+K palette,
+  // Ctrl/Cmd+E export, Shift+Alt+C copy as image. Tool keys, zoom, undo/redo, duplicate, delete and
+  // select all are the canvas's own keys, active while the canvas has focus.
+  const fileOpen = !!file;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      // Mac uses only Cmd, everything else only Ctrl, so Mac's Ctrl+E/K stay with text fields.
+      const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
+      const k = e.code;
+      // Inside a text field, the document editor or the code editor these keys belong to the editor
+      // (Ctrl+E is "code" in the document), so the export shortcuts step aside; the menu and palette still work.
+      const editing = e.target instanceof Element && !!e.target.closest('.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""]');
+      if (mod && !e.shiftKey && !e.altKey && k === 'KeyK') {
+        e.preventDefault();
+        e.stopPropagation();
+        setExportOpen(false);
+        setPaletteOpen((o) => !o);
+      } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen && !editing && window.matchMedia(EXPORT_MENU_QUERY).matches) {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen(false);
+        openExport(true);
+      } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen && !editing) {
+        e.preventDefault();
+        e.stopPropagation();
+        void report(exportCanvas(canvasHandle.current, 'copy', fileRef.current?.title ?? ''));
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [fileOpen, openExport, report]);
+
+  const commands = (): Command[] => {
+    const h = canvasHandle.current;
+    const key = (k: Parameters<CanvasHandle['key']>[0]) => () => canvasHandle.current?.key(IS_MAC && k.ctrl ? { ...k, ctrl: false, meta: true } : k);
+    const needCanvas = !h || !file;
+    const M = IS_MAC ? '⌘' : 'Ctrl+';
+    const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[] = []): Command => ({ id, title, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
+    return [
+      { id: 'export-svg', title: '캔버스를 SVG로 내보내기', disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
+      { id: 'export-png', title: '캔버스를 PNG로 내보내기', disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
+      { id: 'export-copy', title: '이미지로 복사', keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
+      { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !file, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
+      { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
+      { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
+      { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
+      { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
+      canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구']),
+      canvasCmd('tool-rect', '도구: 사각형', 'R', { key: 'r' }, ['tool', 'rectangle', '도구']),
+      canvasCmd('tool-diamond', '도구: 마름모', 'D', { key: 'd' }, ['tool', 'diamond', '도구']),
+      canvasCmd('tool-ellipse', '도구: 원', 'O', { key: 'o' }, ['tool', 'ellipse', 'circle', '도구']),
+      canvasCmd('tool-arrow', '도구: 화살표', 'A', { key: 'a' }, ['tool', 'arrow', '도구']),
+      canvasCmd('tool-line', '도구: 선', 'L', { key: 'l' }, ['tool', 'line', '도구']),
+      canvasCmd('tool-draw', '도구: 그리기', 'P', { key: 'p' }, ['tool', 'draw', 'pencil', '도구']),
+      canvasCmd('tool-text', '도구: 글자', 'T', { key: 't' }, ['tool', 'text', '도구']),
+      canvasCmd('tool-eraser', '도구: 지우개', 'E', { key: 'e' }, ['tool', 'eraser', '도구']),
+      canvasCmd('tool-hand', '도구: 손(화면 이동)', 'H', { key: 'h' }, ['tool', 'hand', 'pan', '도구']),
+      canvasCmd('zoom-in', '확대', `${M}+`, { key: '=', code: 'Equal', ctrl: true }, ['zoom', '줌']),
+      canvasCmd('zoom-out', '축소', `${M}-`, { key: '-', code: 'Minus', ctrl: true }, ['zoom', '줌']),
+      canvasCmd('zoom-reset', '화면 크기 100%', `${M}0`, { key: '0', code: 'Digit0', ctrl: true }, ['zoom', '줌']),
+      canvasCmd('zoom-fit', '모두 보이게 맞추기', 'Shift+1', { key: '!', code: 'Digit1', shift: true }, ['zoom', 'fit', '줌']),
+      canvasCmd('undo', '실행 취소', `${M}Z`, { key: 'z', ctrl: true }, ['undo', '되돌리기']),
+      canvasCmd('redo', '다시 실행', `${M}Shift+Z`, { key: 'z', ctrl: true, shift: true }, ['redo']),
+      canvasCmd('duplicate', '복제', `${M}D`, { key: 'd', ctrl: true }, ['duplicate', 'copy']),
+      canvasCmd('delete', '삭제', 'Delete', { key: 'Delete' }, ['delete', 'remove']),
+      canvasCmd('select-all', '전체 선택', `${M}A`, { key: 'a', ctrl: true }, ['select', 'all']),
+    ];
+  };
+
   const doc = file && path && (
     <DocPane
       key={`${path}#${loadSeq}`}
@@ -322,6 +425,7 @@ export function App() {
       onDocument={(d) => edit({ document: d })}
       onBlocks={(b: Block[]) => edit({ blocks: b })}
       onShow={showBlock}
+      onExportBlock={blockExport}
     />
   );
   const canvas = (
@@ -332,6 +436,7 @@ export function App() {
       focus={focus}
       dark={theme === 'dark'}
       onChange={edit}
+      handle={canvasHandle}
     />
   );
 
@@ -369,7 +474,19 @@ export function App() {
           onView={setView}
           onTitle={(title) => edit({ title })}
           onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
+          exportMenu={
+            <ExportMenu
+              open={exportOpen}
+              onOpen={openExport}
+              disabled={!file}
+              canvasReady={showCanvas}
+              selected={exportSelected}
+              onImage={imageExport}
+              onMarkdown={markdownExport}
+            />
+          }
         />
+        {paletteOpen && <CommandPalette commands={commands()} onClose={() => setPaletteOpen(false)} />}
         {conflict && (
           <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
             <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
