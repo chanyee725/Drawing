@@ -51,12 +51,14 @@ test('version history: list, preview, restore', { skip: !ON && 'set DRAW_E2E=1, 
   const title = page.getByLabel('파일 제목');
   await title.waitFor();
   await title.fill('New title');
-  await page.getByText('저장했어요').waitFor();
+  // Wait for the save itself (the server has the new title), not for a status text that may already be showing.
+  await page.waitForFunction(async () => (await (await fetch('/api/file?path=hist')).json()).title === 'New title');
 
   await page.getByRole('button', { name: '버전 기록' }).click();
   const dialog = page.getByRole('dialog', { name: '버전 기록' });
   await dialog.waitFor();
   const items = dialog.getByRole('list', { name: '저장된 버전' }).getByRole('button');
+  await items.first().waitFor(); // the list loads after the dialog opens
   assert.equal(await items.count(), 1); // second save is inside the 5-minute window
   await dialog.getByText('읽기 전용 미리보기예요').waitFor();
   assert.match(await dialog.getByTestId('history-doc').innerText(), /Old title/);
