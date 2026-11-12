@@ -48,3 +48,14 @@
 ## 라이선스
 
 - 레이아웃에 `elkjs`(EPL-2.0)를 써요. 소스는 `node_modules/elkjs`에 그대로 있고 수정하지 않았어요.
+- 캔버스에 `@excalidraw/excalidraw`(MIT, `package.json` 표기)를 써요.
+- Excalidraw 패키지에 든 글꼴을 `public/excalidraw/fonts/`로 함께 묶어요. 패키지에 글꼴 LICENSE 파일은 없어서, 아래는 각 글꼴 파일 안의 라이선스·저작권 표기를 옮긴 거예요.
+  - Assistant: SIL OFL 1.1
+  - Cascadia Code: 라이선스 설명은 Microsoft 제품 약관을 가리키고, 라이선스 URL은 SIL OFL이에요
+  - Comic Shanns: MIT
+  - Excalifont: 파일에 라이선스 표기가 없어요 (저작권: Excalidraw)
+  - Liberation Sans: 파일에 라이선스 이름이 없어요 ("Liberation 글꼴 사용 약관을 따른다"는 문구만 있어요)
+  - Lilita One: SIL OFL (라이선스 URL 기준)
+  - Nunito: SIL OFL (라이선스 URL 기준)
+  - Virgil: SIL OFL 1.1
+  - Xiaolai: 파일에 라이선스 표기가 없어요 (저작권: LXGW)
