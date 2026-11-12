@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { bindArrows, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
 import type { Scene } from '../../shared/render/scene.ts';
 import { layoutDiagram } from '../../shared/render/index.ts';
-import { parseFlowchart } from '../../shared/dsl/index.ts';
+import { parseArchitecture, parseFlowchart } from '../../shared/dsl/index.ts';
 
 const counter = () => {
   let n = 0;
@@ -66,4 +66,14 @@ test('a real flowchart converts every node and edge, each edge bound at both end
   assert.equal(skeletons.filter((s) => s.type === 'arrow').length, 2);
   assert.ok(bindings.every((b) => b.startId && b.endId), JSON.stringify(bindings));
   assert.ok(skeletons.some((s) => (s.label as { text?: string } | undefined)?.text === 'yes'));
+});
+
+test('architecture nodes (icon and label, no box) become rectangles from their hit boxes', async () => {
+  const d = parseArchitecture('Web [icon: user]\nAPI [icon: server]\nWeb > API: call');
+  const scene = await layoutDiagram(d.ast);
+  const { skeletons, bindings } = sceneToFreeform(scene, { x: 0, y: 0, width: scene.width }, counter());
+  const rects = skeletons.filter((s) => s.type === 'rectangle');
+  assert.deepEqual(rects.map((r) => (r.label as { text: string }).text).sort(), ['API', 'Web']);
+  assert.equal(skeletons.filter((s) => s.type === 'text').length, 0, 'labels are inside the shapes, not loose');
+  assert.ok(bindings.every((b) => b.startId && b.endId), JSON.stringify(bindings));
 });

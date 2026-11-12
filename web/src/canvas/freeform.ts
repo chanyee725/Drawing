@@ -40,7 +40,13 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
   const k = scene.width > 0 ? at.width / scene.width : 1;
   const X = (x: number) => at.x + x * k;
   const Y = (y: number) => at.y + y * k;
-  const boxes = scene.items.filter((i): i is SceneBox => i.kind === 'box');
+  const drawn = scene.items.filter((i): i is SceneBox => i.kind === 'box');
+  // Architecture nodes are an icon and a label with no box: their hit box stands in for the shape.
+  const boxed = new Set(drawn.filter((b) => b.role === 'node').map((b) => b.id));
+  const bare = (scene.handles ?? [])
+    .filter((h) => h.kind === 'node' && !boxed.has(h.id))
+    .map((h): SceneBox => ({ kind: 'box', id: h.id, role: 'node', shape: 'rectangle', x: h.x, y: h.y, w: h.w, h: h.h, paint: { mode: 'outline' }, shadow: false }));
+  const boxes = [...drawn, ...bare];
   const nodes = boxes.filter((b) => b.role === 'node');
   const edges = scene.items.filter((i): i is SceneEdge => i.kind === 'edge');
   const texts = scene.items.filter((i): i is SceneText => i.kind === 'text');
