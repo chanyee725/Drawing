@@ -48,3 +48,14 @@
 ## 라이선스
 
 - 레이아웃에 `elkjs`(EPL-2.0)를 써요. 소스는 `node_modules/elkjs`에 그대로 있고 수정하지 않았어요.
+- 캔버스에 `@excalidraw/excalidraw`(MIT, `package.json` 표기)를 써요.
+- Excalidraw 패키지에 든 글꼴을 `public/excalidraw/fonts/`로 함께 묶어요. 패키지에 글꼴 라이선스 파일이 없어서, 아래는 각 글꼴의 upstream 저장소 기준이에요.
+  - Assistant: OFL-1.1
+  - Cascadia Code: OFL-1.1
+  - Comic Shanns: MIT
+  - Excalifont: OFL-1.1
+  - Liberation Sans: OFL-1.1
+  - Lilita One: OFL-1.1
+  - Nunito: OFL-1.1
+  - Virgil: OFL-1.1
+  - Xiaolai (LXGW 기반): OFL-1.1
