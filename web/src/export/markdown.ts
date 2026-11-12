@@ -142,8 +142,9 @@ export function exportName(title: string, ext: string): string {
   return `${stem}.${ext}`;
 }
 
-/** The file name stem for one block: the document title plus the block's type and 1-based position, so exports don't overwrite each other. */
+/** The file name stem for one block: the document title plus the block's type and its 1-based position among blocks of that type, so exports don't overwrite each other. */
 export function blockExportTitle(title: string, block: Block, blocks: readonly Block[]): string {
-  const i = blocks.findIndex((b) => b.id === block.id);
+  const same = blocks.filter((b) => b.type === block.type);
+  const i = same.findIndex((b) => b.id === block.id);
   return `${title.trim() || '제목 없는 파일'} - ${block.type} ${i < 0 ? 1 : i + 1}`;
 }
