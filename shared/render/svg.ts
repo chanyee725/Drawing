@@ -2,7 +2,7 @@
 // No ids, no external references, no scripts: safe to inline several on one page.
 
 import { round } from './common.ts';
-import { GLYPHS, glyphFor } from './icons.ts';
+import { iconFor } from './icons.ts';
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { FONT_FAMILY, linesWidth } from './text.ts';
 import { THEMES, resolvePaint, strokeOf } from './theme.ts';
@@ -126,15 +126,34 @@ function textMarkup(tx: SceneText, theme: Theme): string {
   return out.join('');
 }
 
+/** WCAG contrast ratio between two #rrggbb colours. */
+function contrast(a: string, b: string): number {
+  const lum = (hex: string): number => {
+    const c = [1, 3, 5].map((i) => {
+      const v = parseInt(hex.slice(i, i + 2), 16) / 255;
+      return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+  };
+  const [x, y] = [lum(a), lum(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
 function iconMarkup(ic: SceneIcon, theme: Theme): string {
-  const glyph = glyphFor(ic.name);
-  let stroke = ic.paint.color ? strokeOf(ic.paint.color, theme) : THEMES[theme].text;
-  if (ic.inside && ic.paint.mode === 'bold') stroke = resolvePaint(ic.paint, theme).text;
-  const dash = glyph === 'placeholder' ? ' stroke-dasharray="3 2.5"' : '';
+  const icon = iconFor(ic.name);
+  const t = THEMES[theme];
+  let color = ic.paint.color ? strokeOf(ic.paint.color, theme) : t.text;
+  if (ic.inside && ic.paint.mode === 'bold') color = resolvePaint(ic.paint, theme).text;
+  // Logos keep their brand colour unless a colour was asked for, they sit on a bold fill, or the
+  // brand colour would vanish into the background (black logos on the dark theme).
+  else if (icon.hex && !ic.paint.color && contrast(icon.hex, t.background) >= 1.8) color = icon.hex;
   const s = ic.size / 24;
+  const open = `<g data-icon="${esc(ic.name)}" data-icon-set="${icon.set}" transform="translate(${n(ic.x)} ${n(ic.y)}) scale(${n(s)})">`;
+  if (icon.fill) return `${open}<path d="${icon.d}" fill="${color}"/></g>`;
+  const dash = icon.set === 'own' && icon.key === 'placeholder' ? ' stroke-dasharray="3 2.5"' : '';
   return (
-    `<g data-icon="${esc(ic.name)}" transform="translate(${n(ic.x)} ${n(ic.y)}) scale(${n(s)})">` +
-    `<path d="${GLYPHS[glyph]}" fill="none" stroke="${stroke}" stroke-width="${n(1.6 / Math.max(s, 0.5))}" stroke-linecap="round" stroke-linejoin="round"${dash}/></g>`
+    open +
+    `<path d="${icon.d}" fill="none" stroke="${color}" stroke-width="${n(1.6 / Math.max(s, 0.5))}" stroke-linecap="round" stroke-linejoin="round"${dash}/></g>`
   );
 }
 
