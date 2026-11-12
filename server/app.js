@@ -52,7 +52,8 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
       return await serveStatic(req, res, url.pathname, publicDir);
     } catch (err) {
-      console.error('request failed:', err.message);
+      // err.message can hold absolute paths; log only the error kind.
+      console.error('request failed:', err.code ?? err.name);
       if (!res.headersSent) sendJson(res, 500, { error: 'internal error' });
       else res.end();
     }
