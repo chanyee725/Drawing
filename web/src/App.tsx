@@ -6,6 +6,7 @@ import { Splitter } from './Splitter';
 import { DocPane } from './DocPane';
 import { CanvasPane } from './CanvasPane';
 import { useTheme } from './theme';
+import { fileStem } from './fileName';
 
 const SAVE_DELAY = 700;
 const RETRY_MIN = 1000;
@@ -242,10 +243,10 @@ export function App() {
 
   const newFile = async () => {
     const name = window.prompt('새 파일 이름을 입력해 주세요');
-    if (!name?.trim()) return;
+    const p = name ? fileStem(name) : '';
+    if (!p) return;
     await flush();
     try {
-      const p = name.trim();
       await api.createFile(p, p.split('/').pop() ?? p);
       await refreshTree();
       await open(p);
@@ -287,7 +288,7 @@ export function App() {
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
   const doc = file && <DocPane blocks={file.blocks} dark={theme === 'dark'} onBlocks={(b: Block[]) => edit({ blocks: b })} />;
-  const canvas = <CanvasPane blocks={file?.blocks ?? []} hasFile={!!file} />;
+  const canvas = <CanvasPane blocks={file?.blocks ?? []} hasFile={!!file} theme={theme} />;
 
   const sidebar = (
     <Sidebar
