@@ -94,6 +94,7 @@ test('text that looks like a ~~~ fence, strikethrough or an indented code block 
   assert.equal(md('a ~~b~~'), 'a \\~\\~b\\~\\~\n');
   assert.equal(md('\tcode'), '&#9;code\n');
   assert.equal(md('    code'), '   &#32;code\n');
+  assert.equal(md('      \tx'), '   &#32;  \tx\n');
   assert.equal(md('  \tcode'), '  &#9;code\n');
   assert.equal(md('   three'), '   three\n');
 });

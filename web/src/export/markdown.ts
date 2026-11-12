@@ -13,7 +13,7 @@ const escInline = (s: string) => s.replace(/([\\`*_[\]<>~])/g, '\\$1');
  */
 const escStart = (s: string) => {
   // 4+ spaces or a tab would make an indented code block: the first space or tab becomes an entity.
-  const deep = /^( *\t| {4})/.exec(s);
+  const deep = /^( {0,3}\t| {4})/.exec(s);
   if (deep) {
     const at = deep[0].length - 1;
     return s.slice(0, at) + (s[at] === '\t' ? '&#9;' : '&#32;') + s.slice(at + 1);
