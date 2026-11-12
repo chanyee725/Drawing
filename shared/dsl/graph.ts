@@ -78,6 +78,7 @@ export function parseGraph(c: Cursor, type: GraphDiagram['type']): GraphDiagram 
       continue;
     }
     if (t.kind === 'rbrace') {
+      c.checkBraceInWord(t);
       c.next();
       if (stack.length > 1) stack.pop();
       else c.error(t, "Unexpected '}' without a matching '{'");

@@ -41,6 +41,7 @@ export function parseSequence(c: Cursor): SequenceDiagram {
       continue;
     }
     if (t.kind === 'rbrace') {
+      c.checkBraceInWord(t);
       c.next();
       if (stack.length > 1) stack.pop();
       else c.error(t, "Unexpected '}' without a matching '{'");
