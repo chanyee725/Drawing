@@ -764,6 +764,8 @@ export function createStore(
   let closed = false;
   let restartTimer = null;
   let restartDelay = watchRestartMs;
+  let healthyTimer = null;
+  // Logged once per server run: a watcher that keeps failing must not fill the log.
   let warned = false;
 
   function watchRoot() {
@@ -786,7 +788,12 @@ export function createStore(
       }
       try { mine.close(); } catch { /* already closed */ }
       if (watcher === mine) watcher = null;
+      // A watcher that dies right after starting (ENOSPC on a recursive watch, ...) backs off instead of
+      // restarting every second; the delay resets only after a watcher has stayed up for a while.
+      clearTimeout(healthyTimer);
+      healthyTimer = null;
       scheduleRestart();
+      restartDelay = Math.min(restartDelay * 2, 30000);
     });
   }
 
@@ -797,10 +804,13 @@ export function createStore(
       if (closed) return;
       try {
         watchRoot();
-        restartDelay = watchRestartMs;
-        warned = false;
+        healthyTimer = setTimeout(() => { restartDelay = watchRestartMs; }, 60000);
+        healthyTimer.unref?.();
         // Catch what changed while nothing was watching (known files only; new ones show up with the next tree refresh).
-        for (const rel of [...known.keys()]) await reconcile(rel).catch(() => {});
+        for (const rel of [...known.keys()]) {
+          if (closed) break;
+          await reconcile(rel).catch(() => {});
+        }
       } catch {
         restartDelay = Math.min(restartDelay * 2, 30000);
         scheduleRestart();
@@ -822,6 +832,7 @@ export function createStore(
   function close() {
     closed = true;
     clearTimeout(restartTimer);
+    clearTimeout(healthyTimer);
     watcher?.close();
     for (const t of timers.values()) clearTimeout(t);
     timers.clear();

@@ -725,3 +725,29 @@ test('after an async fs.watch error the watcher is closed and started again, and
   await new Promise((r) => setTimeout(r, 50));
   assert.equal(watchers.length, n, 'no restart after close');
 });
+
+test('a watcher that keeps failing right after it starts backs off and warns once', async (t) => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const starts = [];
+  const watchFn = (_root, _opts, cb) => {
+    const w = Object.assign(new EventEmitter(), { cb, closed: false, close() { this.closed = true; } });
+    starts.push(Date.now());
+    // Every watcher dies at once, like a recursive watch over the inotify limit.
+    setImmediate(() => w.emit('error', Object.assign(new Error('x'), { code: 'ENOSPC' })));
+    return w;
+  };
+  const store = createStore(ws, { watchFn, watchRestartMs: 20 });
+  const warn = t.mock.method(console, 'warn', () => {});
+  try {
+    await store.startWatching();
+    await new Promise((r) => setTimeout(r, 400));
+    // With a fixed 20 ms delay this would be ~20 starts; doubling (20, 40, 80, 160, ...) gives about 5.
+    assert.ok(starts.length <= 6, `restarted ${starts.length} times in 400 ms`);
+    assert.ok(starts.length >= 3, 'it keeps trying');
+    assert.equal(warn.mock.callCount(), 1, 'one warning per run');
+  } finally {
+    warn.mock.restore();
+    await store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});
