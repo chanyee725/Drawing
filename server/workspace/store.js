@@ -250,20 +250,33 @@ export function createStore(
   const plainFile = async (abs) => (await statOrNull(abs))?.isFile() === true;
 
   // Move `rel`'s history (and `text`, if known) into a new trash entry. Without text, the newest snapshot stands in on restore.
-  async function trashQuietly(rel, text) {
+  // Returns the new entry's id (or null). Pass `purge: false` when deleting many files at once and call
+  // `purgeTrash(keepIds)` once afterwards, so the entries just made are never the ones dropped.
+  async function trashQuietly(rel, text, { purge = true } = {}) {
     try {
       const histDir = await historyDirOf(rel);
       const hasHistory = (await snapshotIds(histDir)).length > 0;
-      if (text == null && !hasHistory) return;
+      if (text == null && !hasHistory) return null;
       const t = now();
-      const dir = join(await trashRoot(), `${String(t).padStart(13, '0')}-${randomBytes(4).toString('hex')}`);
+      const id = `${String(t).padStart(13, '0')}-${randomBytes(4).toString('hex')}`;
+      const dir = join(await trashRoot(), id);
       await mkdir(dir, { recursive: true });
       await writeFile(join(dir, 'meta.json'), JSON.stringify({ path: rel, deletedAt: t }) + '\n', { mode: 0o644 });
       if (text != null) await writeFile(join(dir, 'file.json'), text, { mode: 0o644 });
       if (hasHistory) await rename(histDir, join(dir, 'history'));
       await rm(histDir, { recursive: true, force: true });
-      await purgeTrash();
-    } catch {}
+      if (purge) await purgeTrash([id]);
+      return id;
+    } catch {
+      return null;
+    }
+  }
+
+  // Trash every file of one delete, then purge once, sparing what this delete just made.
+  async function trashMany(items) {
+    const ids = [];
+    for (const [rel, text] of items) ids.push(await trashQuietly(rel, text, { purge: false }));
+    await purgeTrash(ids.filter(Boolean)).catch(() => {});
   }
 
   async function readEntry(root, id) {
@@ -301,18 +314,21 @@ export function createStore(
     return out;
   }
 
-  // Drop entries older than 30 days, and the oldest beyond TRASH_MAX.
-  async function purgeTrash() {
+  // Drop entries older than 30 days, and the oldest beyond TRASH_MAX. Ids in `spare` (made by the delete in
+  // progress) are never dropped, even past the cap; the next ordinary purge trims the excess.
+  async function purgeTrash(spare = [], { cap = true } = {}) {
     const entries = await trashEntries();
     const cutoff = now() - TRASH_DAYS * 24 * 60 * 60 * 1000;
     const keep = entries.filter((e) => e.deletedAt >= cutoff);
-    const drop = [...entries.filter((e) => e.deletedAt < cutoff), ...keep.slice(0, Math.max(0, keep.length - TRASH_MAX))];
+    const spared = new Set(spare);
+    const droppable = keep.filter((e) => !spared.has(e.id));
+    const drop = [...entries.filter((e) => e.deletedAt < cutoff && !spared.has(e.id)), ...droppable.slice(0, Math.max(0, cap ? keep.length - TRASH_MAX : 0))];
     for (const e of drop) await rm(e.dir, { recursive: true, force: true }).catch(() => {});
   }
 
   async function trash() {
     return serial(async () => {
-      await purgeTrash().catch(() => {});
+      await purgeTrash([], { cap: false }).catch(() => {}); // listing only ages entries out; the cap is enforced when something is deleted
       const items = (await trashEntries()).map((e) => ({ id: e.id, path: e.path, deletedAt: e.deletedAt })).reverse();
       return { items };
     });
@@ -634,7 +650,7 @@ export function createStore(
       const files = await collectFiles(abs, rel);
       await rm(abs, { recursive: true });
       forget(rel, true);
-      for (const f of files) await trashQuietly(f.rel, f.text);
+      await trashMany(files.map((f) => [f.rel, f.text]));
       await dropHistory(rel); // what is left belongs to files that were already gone
       // `from`: other tabs with a file under this folder open must close it (same shape as a folder move).
       onExternalChange?.({ kind: 'tree', path: rel, from: rel });
@@ -701,7 +717,7 @@ export function createStore(
       } else if (knownDirs.has(rel)) {
         const gone = [...known.keys()].filter((k) => k.startsWith(rel + '/'));
         forget(rel, true);
-        for (const k of gone) await trashQuietly(k, null);
+        await trashMany(gone.map((k) => [k, null]));
         onExternalChange?.({ kind: 'tree', path: rel, from: rel });
       }
       return;

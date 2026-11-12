@@ -153,6 +153,33 @@ test('trash: deleting a folder keeps each file; restore recreates the folder', a
   });
 });
 
+test('trash: deleting a folder of 205 files keeps all of them restorable; the next ordinary delete trims to the cap', async () => {
+  await withStore({}, async ({ store }) => {
+    await store.createFolder('big');
+    for (let i = 0; i < 205; i++) await store.createFile(`big/f${i}`);
+    await store.removeFolder('big');
+    assert.equal((await store.trash()).items.length, 205); // listing does not trim
+    for (const item of (await store.trash()).items) await store.restoreTrash(item.id);
+    assert.equal((await store.trash()).items.length, 0);
+    for (let i = 0; i < 205; i++) await store.readFile(`big/f${i}`); // exists again
+    // the ordinary cap still holds for single deletes
+    await store.removeFolder('big');
+    await store.createFile('x');
+    await store.removeFile('x');
+    assert.equal((await store.trash()).items.length, 200);
+  });
+});
+
+test('trash: a stale tab holding the pre-delete revision gets 409 after restore', async () => {
+  await withStore({}, async ({ store }) => {
+    await store.createFile('a');
+    const stale = (await store.readFile('a')).revision;
+    await store.removeFile('a');
+    await store.restoreTrash((await store.trash()).items[0].id);
+    await assert.rejects(store.writeFile('a', { revision: stale, title: 'late' }), { status: 409 });
+  });
+});
+
 test('trash: a file deleted outside the app (watcher) hands its history to the trash, not to a new file', async () => {
   const ws = await mkdtemp(join(tmpdir(), 'draw-hist-'));
   let fire;
