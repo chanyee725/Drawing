@@ -2,10 +2,10 @@
 // (useSession), so an edit that only moves a block re-renders the canvas and nothing else.
 // Saving: edits are debounced, saves run one at a time, retryable failures back off, 409 stops for a choice.
 // Outside changes (server SSE events) close or reload the open file through `external`.
-import { ApiError, type DpxFile } from './api.ts';
+import { ApiError, FILE_FORMAT_VERSION, type DpxFile } from './api.ts';
 import { externalAction, type WorkspaceEvent } from './externalChange.ts';
 import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry.ts';
-import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model.ts';
+import { migrateDocument } from './doc/model.ts';
 
 export const SAVE_DELAY = 700;
 export const RETRY_MIN = 1000;
@@ -101,7 +101,7 @@ export function createFileSession(deps: Deps) {
         } else if (!isRetryableSaveError(e)) {
           // The server refused this request (4xx); retrying the same body would fail forever.
           // Keep a pending edit timer: a newer edit may already have fixed the body.
-          const newer = e instanceof ApiError && e.status === 422 && (state.file?.version ?? 1) > DOC_FORMAT_VERSION;
+          const newer = e instanceof ApiError && e.status === 422 && (state.file?.version ?? 1) > FILE_FORMAT_VERSION;
           problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
         } else {
           retryDelay = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay * 2));
