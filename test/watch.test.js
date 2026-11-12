@@ -232,7 +232,10 @@ test('privacy: outward changes carry no absolute path; internal api keeps source
   })();
   try {
     const internal = new Promise((r) => mod.api.onChange(r));
-    await writeFile(join(dir, 'p.drawio'), file([['p', 'P', model(box('a', { x: 5 }))]]));
+    // The watcher keys on mtime+size. A same-size rewrite inside the same mtime
+    // tick as the setup write has an identical stamp and is never seen, so make
+    // the size differ (x: 5 -> x: 12345) instead of relying on timing.
+    await writeFile(join(dir, 'p.drawio'), file([['p', 'P', model(box('a', { x: 12345 }))]]));
     const c = await Promise.race([internal, new Promise((_, rej) => setTimeout(() => rej(new Error('no change')), 3000))]);
     assert.equal(c.source.dir, dir);
     assert.equal(mod.api.listSources()[0].dir, dir);
