@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 export type View = 'doc' | 'both' | 'canvas';
 
 const VIEWS: { id: View; label: string }[] = [
@@ -17,9 +19,11 @@ type Props = {
   onTitle: (t: string) => void;
   /** Set on narrow screens, where the sidebar is collapsed behind this toggle. */
   onToggleNav?: () => void;
+  /** The export button and its menu. */
+  exportMenu?: ReactNode;
 };
 
-export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu }: Props) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4" style={{ borderColor: 'var(--border)' }}>
       {onToggleNav && (
@@ -64,15 +68,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
           </button>
         ))}
       </div>
-      <button
-        type="button"
-        disabled
-        title="내보내기는 아직 준비 중이에요"
-        className="hidden h-8 shrink-0 whitespace-nowrap rounded-md border px-3 text-sm opacity-50 md:block"
-        style={{ borderColor: 'var(--border)' }}
-      >
-        내보내기
-      </button>
+      {exportMenu}
     </header>
   );
 }

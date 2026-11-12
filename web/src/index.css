@@ -116,6 +116,9 @@ body {
 .doc-diagram-pic img { max-width: 100%; height: auto; }
 .doc-diagram-wait, .doc-diagram-gone { color: var(--text-muted); font-size: 13px; padding: 1.5em; }
 .doc-diagram-gone { border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
+.doc-diagram-actions { display: flex; justify-content: center; gap: 0.4em; }
+.doc-diagram-actions button { font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); }
+.doc-diagram-actions button:hover, .doc-diagram-actions button:focus-visible { color: var(--accent); border-color: var(--accent); }
 .doc-diagram figcaption { font-size: 12px; color: var(--text-muted); text-align: center; }
 
 .doc-slash {
