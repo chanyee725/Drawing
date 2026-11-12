@@ -43,5 +43,5 @@ test('a frame embed fits the schema and round-trips', () => {
   const doc = { type: 'doc', content: [frameNode('f1', '개요'), { type: 'paragraph' }] };
   const node = PMNode.fromJSON(schema, doc);
   node.check();
-  assert.deepEqual(node.toJSON().content[0].attrs, { frameId: 'f1', name: '개요' });
+  assert.deepEqual({ ...node.toJSON().content[0].attrs }, { frameId: 'f1', name: '개요' });
 });
