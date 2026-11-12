@@ -2,17 +2,22 @@
 // `attributeCompletions` is pure (line text in, options out) so it can be tested without a DOM.
 import type { CompletionContext, CompletionResult, Completion } from '@codemirror/autocomplete';
 import { ENUMS, GRAPH_KEYS, SEQUENCE_KEYS, ERD_KEYS, LEGEND_KEYS } from '../../../shared/dsl/common.ts';
-import { GLYPHS } from '../../../shared/render/icons.ts';
+import { LUCIDE_ICONS, SIMPLE_ICONS } from '../../../shared/render/icon-data.ts';
 import { NAMED_COLOR_NAMES } from '../../../shared/render/theme.ts';
 
-/** Icon names offered in `[icon: ...]`: our own glyph names plus common vendor-style names that map to a glyph. */
+/**
+ * Icon names offered in `[icon: ...]`: the bundled Lucide icons and Simple Icons logos, plus common
+ * cloud-vendor names that map to a generic Lucide icon (no vendor artwork is bundled).
+ */
 export const ICON_NAMES: readonly string[] = [
-  ...Object.keys(GLYPHS).filter((g) => g !== 'placeholder'),
-  'aws-ec2', 'aws-lambda', 'aws-s3', 'aws-rds', 'aws-dynamodb', 'aws-sqs', 'aws-sns', 'aws-elb', 'aws-cloudfront',
-  'aws-route53', 'aws-vpc', 'aws-iam', 'aws-eks', 'aws-ecs', 'aws-api-gateway',
-  'gcp-compute-engine', 'gcp-cloud-sql', 'gcp-cloud-storage', 'gcp-pubsub', 'gcp-bigquery', 'gcp-gke',
-  'azure-vm', 'azure-sql', 'azure-storage', 'azure-functions', 'azure-aks',
-  'kubernetes', 'docker', 'postgres', 'mysql', 'mongodb', 'redis', 'kafka', 'rabbitmq', 'nginx', 'github', 'elasticsearch',
+  ...new Set([
+    ...LUCIDE_ICONS.keys(),
+    ...SIMPLE_ICONS.keys(),
+    'aws-ec2', 'aws-lambda', 'aws-s3', 'aws-rds', 'aws-dynamodb', 'aws-sqs', 'aws-sns', 'aws-elb', 'aws-cloudfront',
+    'aws-route53', 'aws-vpc', 'aws-iam', 'aws-eks', 'aws-ecs', 'aws-api-gateway',
+    'gcp-compute-engine', 'gcp-cloud-sql', 'gcp-cloud-storage', 'gcp-pubsub', 'gcp-bigquery', 'gcp-gke',
+    'azure-vm', 'azure-sql', 'azure-storage', 'azure-functions', 'azure-aks',
+  ]),
 ];
 
 const POSITIONS = ['top-left', 'top-center', 'top-right', 'bottom-left', 'bottom-center', 'bottom-right', 'left', 'right'];

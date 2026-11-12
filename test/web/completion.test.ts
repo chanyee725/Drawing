@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { iconFor } from '../../shared/render/icons.ts';
 import { attributeCompletions, ICON_NAMES } from '../../web/src/dsl/completion.ts';
 
 const labels = (r: ReturnType<typeof attributeCompletions>) => r?.options.map((o) => o.label) ?? [];
@@ -30,6 +31,13 @@ test('icon values come from the icon list', () => {
   assert.equal(r?.from, 'Web [icon: '.length);
   assert.deepEqual(labels(r), [...ICON_NAMES]);
   assert.ok(ICON_NAMES.includes('aws-ec2') && ICON_NAMES.includes('user'));
+});
+
+test('every suggested icon name resolves to a bundled icon, never the placeholder', () => {
+  for (const n of ICON_NAMES) assert.notEqual(iconFor(n).set, 'own', n);
+  assert.ok(ICON_NAMES.includes('postgresql') && ICON_NAMES.includes('house'));
+  assert.ok(!ICON_NAMES.includes('placeholder') && !ICON_NAMES.includes('balancer'));
+  assert.equal(new Set(ICON_NAMES).size, ICON_NAMES.length);
 });
 
 test('enum, color and connection values are offered', () => {
