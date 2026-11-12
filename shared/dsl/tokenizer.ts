@@ -29,7 +29,7 @@ const PUNCT: Record<string, TokenKind> = {
   ',': 'comma',
   ':': 'colon',
 };
-const ARROW_RE = /^(?:<-->|<--|-->|<>|>|<)/;
+const ARROW_RE = /^(?:<-->|<--|-->|<>|->|<-|>|<)/;
 const BARE_DASH_RE = /^--?(?=\s|$)/;
 const WORD_STOP = new Set([' ', '\t', '\r', '\n', '{', '}', '[', ']', ',', ':', '"', '<', '>']);
 
@@ -46,6 +46,7 @@ export function tokenize(src: string): { tokens: Token[]; diagnostics: Diagnosti
   let i = 0;
   let line = 1;
   let lineStart = 0;
+  const parens = { start: -1, pairs: new Map<number, number>() };
 
   const make = (kind: TokenKind, start: number, end: number, value?: string): Token => ({
     kind,
@@ -70,7 +71,9 @@ export function tokenize(src: string): { tokens: Token[]; diagnostics: Diagnosti
       i++;
       continue;
     }
-    if (ch === '/' && src[i + 1] === '/') {
+    // `//` is a comment, except right after `scheme:` so unquoted URLs like https://x.test survive.
+    const urlSlashes = src[i - 1] === ':' && i >= 2 && /[A-Za-z0-9+.-]/.test(src[i - 2]!);
+    if (ch === '/' && src[i + 1] === '/' && !urlSlashes) {
       while (i < n && src[i] !== '\n') i++;
       continue;
     }
@@ -118,7 +121,14 @@ export function tokenize(src: string): { tokens: Token[]; diagnostics: Diagnosti
     if (ch === '<' || ch === '>' || ch === '-') {
       const m = ARROW_RE.exec(src.slice(i, i + 4)) ?? BARE_DASH_RE.exec(src.slice(i, i + 3));
       if (m) {
-        tokens.push(make('arrow', i, i + m[0].length));
+        const tok = make('arrow', i, i + m[0].length);
+        tokens.push(tok);
+        if (m[0] === '->' || m[0] === '<-') {
+          diagnostics.push({
+            message: `'${m[0]}' is not a connection symbol. Use '${m[0] === '->' ? '>' : '<'}' (or '${m[0] === '->' ? '-->' : '<--'}' for a dashed line)`,
+            severity: 'warning', line: tok.line, column: tok.column, offset: tok.offset, length: tok.length,
+          });
+        }
         i += m[0].length;
         continue;
       }
@@ -128,8 +138,9 @@ export function tokenize(src: string): { tokens: Token[]; diagnostics: Diagnosti
     while (j < n) {
       const c = src[j]!;
       if (WORD_STOP.has(c)) break;
+      if (j > i && c === '-' && (src[j + 1] === '>' || (src[j + 1] === '-' && src[j + 2] === '>'))) break;
       if (c === '(') {
-        const close = matchingParen(src, j);
+        const close = matchingParen(src, j, lineStart, parens);
         if (close > 0) {
           j = close + 1;
           continue;
@@ -145,12 +156,19 @@ export function tokenize(src: string): { tokens: Token[]; diagnostics: Diagnosti
   return { tokens, diagnostics };
 }
 
-/** Index of the `)` matching the `(` at `open` on the same line, or -1. */
-function matchingParen(src: string, open: number): number {
-  let depth = 0;
-  for (let k = open; k < src.length && src[k] !== '\n'; k++) {
-    if (src[k] === '(') depth++;
-    else if (src[k] === ')' && --depth === 0) return k;
+/**
+ * Index of the `)` matching the `(` at `open` on the same line, or -1. Pairs for a whole line are
+ * computed once with a stack, so many unclosed `(` stay linear.
+ */
+function matchingParen(src: string, open: number, start: number, cache: { start: number; pairs: Map<number, number> }): number {
+  if (cache.start !== start) {
+    cache.start = start;
+    cache.pairs = new Map();
+    const stack: number[] = [];
+    for (let k = start; k < src.length && src[k] !== '\n'; k++) {
+      if (src[k] === '(') stack.push(k);
+      else if (src[k] === ')' && stack.length > 0) cache.pairs.set(stack.pop()!, k);
+    }
   }
-  return -1;
+  return cache.pairs.get(open) ?? -1;
 }

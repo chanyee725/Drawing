@@ -1,5 +1,5 @@
 import {
-  Cursor, describe, emptyBase, endStatement, ERD_KEYS, parseAttrs, parseChain, parseCommonKeyword,
+  Cursor, describe, normalizeSymbol, emptyBase, endStatement, ERD_KEYS, parseAttrs, parseChain, parseCommonKeyword,
   parseConnectionTail, parseEndpoints, parseKeywordValue, recoverLine, spanOf, type Endpoint,
 } from './common.ts';
 import type { ErdCardinality, ErdDiagram, ErdEndpoint, ErdEntity, ErdField } from './types.ts';
@@ -31,12 +31,13 @@ export function parseErd(c: Cursor): ErdDiagram {
     return entity;
   };
 
-  const parseFieldLine = (entity: ErdEntity | null) => {
+  /** Parses one field line. Returns true when it ended by opening a nested `{` (an error). */
+  const parseFieldLine = (entity: ErdEntity | null): boolean => {
     const nameTok = c.peek();
     if (nameTok.kind !== 'word' && nameTok.kind !== 'string') {
       c.error(nameTok, `Expected a field name, found ${describe(nameTok)}`);
       recoverLine(c);
-      return;
+      return false;
     }
     c.next();
     const field: ErdField = { name: nameTok.value, meta: [], attrs: {}, span: spanOf(nameTok) };
@@ -46,8 +47,7 @@ export function parseErd(c: Cursor): ErdDiagram {
       if (t.kind === 'lbrace') {
         c.error(t, 'Entities cannot be nested');
         c.next();
-        parseBody(null, spanOf(t));
-        return;
+        return true;
       }
       if (t.kind === 'lbracket') {
         field.attrs = parseAttrs(c);
@@ -65,9 +65,12 @@ export function parseErd(c: Cursor): ErdDiagram {
     }
     entity?.fields.push(field);
     endStatement(c);
+    return false;
   };
 
   const parseBody = (entity: ErdEntity | null, open: ReturnType<typeof spanOf>) => {
+    // Iterative on purpose: deeply nested braces must not overflow the call stack.
+    let depth = 1;
     for (;;) {
       const t = c.peek();
       if (t.kind === 'eof') {
@@ -77,8 +80,8 @@ export function parseErd(c: Cursor): ErdDiagram {
       if (t.kind === 'newline') c.next();
       else if (t.kind === 'rbrace') {
         c.next();
-        return;
-      } else parseFieldLine(entity);
+        if (--depth === 0) return;
+      } else if (parseFieldLine(depth === 1 ? entity : null)) depth++;
     }
   };
 
@@ -139,7 +142,7 @@ export function parseErd(c: Cursor): ErdDiagram {
           }
           for (let i = 0; i < lists.length - 1; i++) {
             const arrow = arrows[i]!;
-            const cardinality = CARDINALITY[arrow.text];
+            const cardinality = CARDINALITY[normalizeSymbol(arrow.text)];
             if (!cardinality) {
               c.warn(arrow, `ERD relationships use only <, >, - and <>, not '${arrow.text}'`);
               continue;

@@ -39,8 +39,15 @@ export function detectDiagramType(code: string): DiagramType {
   const marked = stripMarker(code).type;
   if (marked) return marked;
   const text = code.replace(/\/\/.*$/gm, '');
-  if (/^\s*(activate|deactivate|autoNumber|order|loop|alt|else|opt|par|and|break)\b/m.test(text)) return 'sequence';
-  if (/^\s*notation\b/m.test(text) || /\b(pk|fk)\b/.test(text)) return 'erd';
+  // Keywords only count in their statement shape, so names like `break glass` or `order list` stay nodes.
+  const noArrow = String.raw`[^<>\n]*$`;
+  if (
+    /^\s*(loop|alt|else|opt|par|and|break)\s*(\[[^\n]*\])?\s*\{/m.test(text) ||
+    new RegExp(String.raw`^\s*(activate|deactivate|autoNumber|order)[ \t]+\S` + noArrow, 'm').test(text)
+  ) {
+    return 'sequence';
+  }
+  if (/^\s*notation[ \t]+(chen|crows-foot)\b/m.test(text) || /\{[^{}]*?[^{}\s][ \t]+(pk|fk)(?=[ \t]|\r?\n|\}|$)/m.test(text)) return 'erd';
   if (/\bshape\s*:/.test(text)) return 'flowchart';
   return 'cloud-architecture';
 }

@@ -98,7 +98,13 @@ export function endStatement(c: Cursor): void {
   }
 }
 
-export function arrowStyle(symbol: string): ArrowStyle {
+/** `->` and `<-` are typos for `>` and `<` (the tokenizer already warned about them). */
+export function normalizeSymbol(symbol: string): string {
+  return symbol === '->' ? '>' : symbol === '<-' ? '<' : symbol;
+}
+
+export function arrowStyle(raw: string): ArrowStyle {
+  const symbol = normalizeSymbol(raw);
   return {
     symbol,
     lineStyle: symbol.includes('--') ? 'dashed' : 'solid',
