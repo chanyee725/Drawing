@@ -8,6 +8,8 @@ import { Splitter } from './Splitter';
 // TipTap and the diagram renderer are big; they load when a file is first opened.
 const DocPane = lazy(() => import('./DocPane').then((m) => ({ default: m.DocPane })));
 import { CanvasPane } from './CanvasPane';
+import { LazyBoundary } from './LazyBoundary';
+import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
 import { migrateDocument } from './doc/model';
@@ -328,7 +330,7 @@ export function App() {
     (job: Promise<string> | string) =>
       Promise.resolve(job).then(
         (m) => setStatus(m),
-        (e) => setStatus(e instanceof Error ? e.message : '내보내지 못했어요', true),
+        (e) => setStatus(isChunkLoadError(e) ? CHUNK_MESSAGE : e instanceof Error ? e.message : '내보내지 못했어요', true),
       ),
     [setStatus],
   );
@@ -417,6 +419,7 @@ export function App() {
   };
 
   const doc = file && path && (
+    <LazyBoundary onFail={flush}>
     <Suspense
       fallback={
         <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -436,6 +439,7 @@ export function App() {
         onExportBlock={blockExport}
       />
     </Suspense>
+    </LazyBoundary>
   );
   const canvas = (
     <CanvasPane
@@ -446,6 +450,7 @@ export function App() {
       dark={theme === 'dark'}
       onChange={edit}
       handle={canvasHandle}
+      onFail={flush}
     />
   );
 

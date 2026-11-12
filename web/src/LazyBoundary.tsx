@@ -1,0 +1,43 @@
+import { Component, type ReactNode } from 'react';
+import { noticeFor } from './chunkError';
+
+type Props = {
+  /** Called when a child fails (and again before reloading): save the open file here. */
+  onFail?: () => unknown;
+  children: ReactNode;
+};
+type State = { error: unknown; failed: boolean };
+
+/** Catches a failed lazy chunk (or a render crash) so the rest of the app stays up; offers a reload. */
+export class LazyBoundary extends Component<Props, State> {
+  state: State = { error: null, failed: false };
+
+  static getDerivedStateFromError(error: unknown): State {
+    return { error, failed: true };
+  }
+
+  componentDidCatch() {
+    void Promise.resolve(this.props.onFail?.()).catch(() => {});
+  }
+
+  private reload = async () => {
+    try {
+      await this.props.onFail?.();
+    } catch {
+      // The pagehide handler still tries to save on the way out.
+    }
+    window.location.reload();
+  };
+
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div role="alert" className="flex flex-wrap items-center gap-2 p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+        <span>{noticeFor(this.state.error)}</span>
+        <button type="button" className="h-7 rounded-md px-3 font-medium text-white" style={{ background: 'var(--accent)' }} onClick={() => void this.reload()}>
+          새로고침
+        </button>
+      </div>
+    );
+  }
+}
