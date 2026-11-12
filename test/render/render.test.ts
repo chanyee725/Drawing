@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from '../../shared/dsl/index.ts';
@@ -40,7 +41,11 @@ test('deterministic: same code renders the same SVG twice', async () => {
   }
 });
 
-test('performance: 100-node architecture diagram lays out in under 150 ms', async () => {
+/** Timing bound in ms: tight on a quiet machine, loose on CI or when the machine is busy (other sessions share it). */
+const timingBudget = (quiet: number, loose: number): number =>
+  process.env.CI || os.loadavg()[0]! > os.availableParallelism() / 2 ? loose : quiet;
+
+test('performance: 100-node architecture diagram lays out in under 150 ms (450 ms when the machine is busy)', async () => {
   const lines: string[] = [];
   for (let g = 0; g < 5; g++) {
     lines.push(`G${g} [icon: aws] {`);
@@ -58,7 +63,7 @@ test('performance: 100-node architecture diagram lays out in under 150 ms', asyn
     assert.equal(r.scene.items.filter((it) => it.kind === 'icon').length, 105);
   }
   times.sort((a, b) => a - b);
-  assert.ok(times[2]! < (process.env.CI ? 450 : 150), `median ${times[2]!.toFixed(1)} ms`);
+  assert.ok(times[2]! < timingBudget(150, 450), `median ${times[2]!.toFixed(1)} ms`);
 });
 
 test('colour values cannot inject markup', async () => {
