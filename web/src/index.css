@@ -31,3 +31,8 @@ body {
   color: var(--text);
   font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
 }
+
+/* Excalidraw suggests double-click/Enter to crop an image; on diagram blocks those open the code instead. */
+.block-selected .excalidraw .HintViewer {
+  display: none;
+}

@@ -52,6 +52,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   // Set when a save got 409: the server's current revision, so "overwrite" can re-send against it.
   const [conflict, setConflict] = useState<{ revision?: number } | null>(null);
+  // Bumped on every load from disk so the canvas restarts from the loaded content.
+  const [loadSeq, setLoadSeq] = useState(0);
 
   const fileRef = useRef<DpxFile | null>(null);
   const pathRef = useRef<string | null>(null);
@@ -138,7 +140,7 @@ export function App() {
   }, [save]);
 
   const edit = useCallback(
-    (patch: Partial<Pick<DpxFile, 'title' | 'blocks'>>) => {
+    (patch: Partial<Pick<DpxFile, 'title' | 'blocks' | 'canvas'>>) => {
       setFile((cur) => {
         if (!cur) return cur;
         const next = { ...cur, ...patch };
@@ -163,6 +165,7 @@ export function App() {
     pathRef.current = p;
     setFile(f);
     fileRef.current = f;
+    setLoadSeq((n) => n + 1);
     setStatus('');
     setHashPath(p);
   }, []);
@@ -287,7 +290,15 @@ export function App() {
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
   const doc = file && <DocPane blocks={file.blocks} dark={theme === 'dark'} onBlocks={(b: Block[]) => edit({ blocks: b })} />;
-  const canvas = <CanvasPane blocks={file?.blocks ?? []} hasFile={!!file} />;
+  const canvas = (
+    <CanvasPane
+      fileKey={file && path ? `${path}#${loadSeq}` : null}
+      canvas={file?.canvas}
+      blocks={file?.blocks ?? []}
+      dark={theme === 'dark'}
+      onChange={edit}
+    />
+  );
 
   const sidebar = (
     <Sidebar
