@@ -6,7 +6,18 @@ import { DIAGRAM_NODE, type DocNode } from '../doc/model.ts';
 type Mark = { type: string; attrs?: Record<string, unknown> };
 type N = DocNode & { text?: string; marks?: Mark[] };
 
-const escText = (s: string) => s.replace(/([\\`*_[\]<>])/g, '\\$1').replace(/^(#{1,6} |[-+] |\d+\. )/, '\\$1');
+const escInline = (s: string) => s.replace(/([\\`*_[\]<>])/g, '\\$1');
+/** Line-start markers that would turn plain text into a heading, bullet or numbered item. Only the marker is escaped. */
+const escStart = (s: string) => s.replace(/^(#{1,6}) /, '\\$1 ').replace(/^([-+]) /, '\\$1 ').replace(/^(\d+)\. /, '$1\\. ');
+const escText = (s: string, lineStart = true) => (lineStart ? escStart(escInline(s)) : escInline(s));
+
+/** Inline code: a backtick fence longer than any backtick run inside, padded when the code touches a backtick. */
+const codeSpan = (s: string) => {
+  const longest = Math.max(0, ...[...s.matchAll(/`+/g)].map((m) => m[0].length));
+  const f = '`'.repeat(longest + 1);
+  const pad = s.startsWith('`') || s.endsWith('`') ? ' ' : '';
+  return `${f}${pad}${s}${pad}${f}`;
+};
 
 /** A fence longer than any run of backticks inside, so the code cannot close it early. */
 export function fence(code: string, info = ''): string {
@@ -15,20 +26,24 @@ export function fence(code: string, info = ''): string {
   return `${f}${info}\n${code.replace(/\n$/, '')}\n${f}`;
 }
 
-function inline(nodes: N[] | undefined): string {
+function inline(nodes: N[] | undefined, lineStart = true): string {
   let out = '';
+  let start = lineStart;
   for (const n of nodes ?? []) {
     if (n.type === 'hardBreak') {
       out += '  \n';
+      start = true;
       continue;
     }
     if (n.type !== 'text' || typeof n.text !== 'string') {
-      out += inline(n.content as N[] | undefined);
+      out += inline(n.content as N[] | undefined, start);
+      start = false;
       continue;
     }
     const marks = n.marks ?? [];
     const has = (t: string) => marks.find((m) => m.type === t);
-    let t = has('code') ? `\`${n.text.replace(/`/g, '\\`')}\`` : escText(n.text);
+    let t = has('code') ? codeSpan(n.text) : escText(n.text, start);
+    if (n.text) start = false;
     if (has('bold')) t = `**${t}**`;
     if (has('italic')) t = `*${t}*`;
     if (has('strike')) t = `~~${t}~~`;
@@ -56,7 +71,7 @@ function list(n: N, ctx: Ctx): string {
 }
 
 function table(n: N): string {
-  const rows = ((n.content as N[] | undefined) ?? []).map((r) => ((r.content as N[] | undefined) ?? []).map((c) => ((c.content as N[] | undefined) ?? []).map((p) => inline(p.content as N[] | undefined)).join(' ').replace(/\|/g, '\\|').replace(/\n/g, ' ')));
+  const rows = ((n.content as N[] | undefined) ?? []).map((r) => ((r.content as N[] | undefined) ?? []).map((c) => ((c.content as N[] | undefined) ?? []).map((p) => inline(p.content as N[] | undefined, false)).join(' ').replace(/\|/g, '\\|').replace(/\n/g, ' ')));
   if (!rows.length) return '';
   const width = Math.max(1, ...rows.map((r) => r.length));
   const pad = (r: string[]) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? '').join(' | ')} |`;
@@ -71,7 +86,7 @@ function block(n: N, ctx: Ctx): string {
     case 'paragraph':
       return inline(kids);
     case 'heading':
-      return `${'#'.repeat(Math.min(6, Math.max(1, Number(n.attrs?.level) || 1)))} ${inline(kids)}`;
+      return `${'#'.repeat(Math.min(6, Math.max(1, Number(n.attrs?.level) || 1)))} ${inline(kids, false)}`;
     case 'bulletList':
     case 'orderedList':
     case 'taskList':
@@ -99,7 +114,7 @@ export function documentToMarkdown(title: string, document: unknown, blocks: rea
   const ctx: Ctx = { blocks: new Map(blocks.map((b) => [b.id, b])) };
   const content = document && typeof document === 'object' && Array.isArray((document as { content?: unknown }).content) ? ((document as { content: N[] }).content) : [];
   const parts = content.map((n) => block(n, ctx)).filter((s) => s !== '');
-  const head = title.trim() ? [`# ${escText(title.trim())}`] : [];
+  const head = title.trim() ? [`# ${escText(title.trim(), false)}`] : [];
   return [...head, ...parts].join('\n\n') + '\n';
 }
 

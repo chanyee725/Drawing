@@ -52,3 +52,13 @@ test('export names keep path characters out', () => {
   assert.equal(exportName('  ', 'svg'), '제목 없는 파일.svg');
   assert.equal(exportName('..x', 'png'), 'x.png');
 });
+
+test('line-start markers are escaped without changing the rest of the text', () => {
+  const doc = { type: 'doc', content: [p(t('1. 첫째')), p(t('- 빼기')), p(t('# 샵')), p(t('중간 1. 그대로')), p(t('굵게', [{ type: 'bold' }]), t('1. 이어짐')), { type: 'heading', attrs: { level: 1 }, content: [t('1. Plan')] }] };
+  assert.equal(documentToMarkdown('2. 제목', doc, []), '# 2. 제목\n\n1\\. 첫째\n\n\\- 빼기\n\n\\# 샵\n\n중간 1. 그대로\n\n**굵게**1. 이어짐\n\n# 1. Plan\n');
+});
+
+test('inline code keeps backticks by using a longer fence, not backslashes', () => {
+  const doc = { type: 'doc', content: [p(t('a`b', [{ type: 'code' }]), t(' '), t('``x', [{ type: 'code' }]))] };
+  assert.equal(documentToMarkdown('', doc, []), '``a`b`` ``` ``x ```\n');
+});
