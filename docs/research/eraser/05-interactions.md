@@ -6,6 +6,7 @@
 
 - **Eraser는 통합 단축키 표를 현재 docs에 공개하지 않아요.** 기능별 페이지에 흩어져 있어요. (docs 네비게이션: https://docs.eraser.io/)
 - 옛 help 페이지 `help.eraser.io/keyboard-shortcuts-and-markdown-syntax/`에 전체 표가 있었다고 검색 결과에 나오지만, 이 환경에서 호스트가 열리지 않았고 내용은 약 5년 전 기준이에요. 아래 "구 help 표" 항목은 **검색 요약만 본 2차 정보**예요 (미확인).
+- 재확인 (2026-11-12): `help.eraser.io` 호스트는 여전히 연결 안 되고, web.archive.org 사본과 `docs.eraser.io/docs/keyboard-shortcuts` 등 추정 URL은 404예요. 단축키 항목은 상태 그대로예요.
 - Eraser에 없는 부분은 임의로 채우지 않았어요. 대신 "구현 제안" 열에 일반 관례(Excalidraw/tldraw/draw.io 류) 기반 값을 (추정)으로 적었어요.
 - 표기: ✅ 공식 docs 확인 / 🟡 2차 정보 / ❓ 미확인 / 💡 (추정) 구현 제안.
 
