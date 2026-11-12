@@ -15,7 +15,9 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
+import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
+import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
@@ -25,15 +27,6 @@ import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 const NARROW = '(max-width: 767px)';
 
 // The open file lives in the URL hash so a reload reopens it. Only the workspace-relative path is kept.
-const hashPath = () => {
-  const m = /^#file=(.+)$/.exec(window.location.hash);
-  if (!m) return null;
-  try {
-    return decodeURIComponent(m[1]);
-  } catch {
-    return null;
-  }
-};
 const setHashPath = (p: string | null) => {
   const url = `${window.location.pathname}${window.location.search}${p ? `#file=${encodeURIComponent(p)}` : ''}`;
   window.history.replaceState(null, '', url);
@@ -57,11 +50,16 @@ const NO_BLOCKS: Block[] = [];
 type DocSlotProps = {
   session: FileSession;
   dark: boolean;
+  tree: TreeNode[];
+  jump: { id: string; n: number } | null;
+  onOpenFile: (path: string) => void;
+  onNotice: (message: string) => void;
   onShow: (blockId: string) => void;
   onExportBlock: (b: Block, kind: ImageKind) => void;
   onFail: () => Promise<boolean>;
 };
-const DocSlot = memo(function DocSlot({ session, dark, onShow, onExportBlock, onFail }: DocSlotProps) {
+const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onExportBlock, onFail }: DocSlotProps) {
+  const path = useSession(session, (s) => s.path ?? '');
   const key = useSession(session, (s) => `${s.path}#${s.loadSeq}`);
   // Blocks as drawn: a new array only when a block's id, type or code changes, not when it moves.
   const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS, sameDrawing);
@@ -86,6 +84,11 @@ const DocSlot = memo(function DocSlot({ session, dark, onShow, onExportBlock, on
           getBlocks={getBlocks}
           getCanvas={getCanvas}
           dark={dark}
+          path={path}
+          tree={tree}
+          onOpenFile={onOpenFile}
+          jump={jump}
+          onNotice={onNotice}
           onDocument={onDocument}
           onBlocks={onBlocks}
           onShow={onShow}
@@ -122,8 +125,14 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
   const [focus, setFocus] = useState<CanvasFocus | null>(null);
+  // A heading link was opened: the document pane scrolls to it.
+  const [jump, setJump] = useState<{ id: string; n: number } | null>(null);
+  const jumpTo = useCallback((id: string | null) => setJump(id ? { id, n: Date.now() } : null), []);
 
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportOptions, setExportOptions] = useState<ExportOptions>(DEFAULT_EXPORT);
+  const exportOptionsRef = useRef(exportOptions);
+  exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
@@ -154,36 +163,65 @@ export function App() {
     (p: string, f: DpxFile) => {
       session.load(p, f);
       setFocus(null);
+      setJump(null);
       setHashPath(p);
     },
     [session],
   );
 
+  /** Opens `p`; false when the user cancelled or the file could not be read (the current file stays open). */
   const open = useCallback(
-    async (p: string) => {
+    async (p: string): Promise<boolean> => {
       await session.flush();
-      if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return;
+      if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return false;
       setError(null);
       try {
         load(p, await api.readFile(p));
         if (narrow) setNavOpen(false);
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : '파일을 열지 못했어요');
+        return false;
       }
     },
     [session, load, narrow],
   );
+  const openFile = useCallback((p: string) => void open(p), [open]);
 
   useEffect(() => {
     api.info().then((i) => setWorkspace(i.workspace || null)).catch(() => {});
     void refreshTree();
-    const p = hashPath();
-    if (p)
+    const link = parseHash(window.location.hash);
+    if (link)
       api
-        .readFile(p)
-        .then((f) => load(p, f))
+        .readFile(link.path)
+        .then((f) => {
+          load(link.path, f);
+          jumpTo(link.heading);
+        })
         .catch(() => setHashPath(null));
-  }, [refreshTree, load]);
+  }, [refreshTree, load, jumpTo]);
+
+  // A heading link pasted into the address bar of this tab (only the hash changes, so the page does not reload).
+  useEffect(() => {
+    const onHash = () => {
+      const link = parseHash(window.location.hash);
+      if (!link) return;
+      // Drop `&h=` (same file) or restore the open file's hash (cancelled or failed open), so the
+      // address bar always names the open file and following the same link again fires `hashchange`.
+      const current = session.getState().path;
+      if (link.path === current) {
+        setHashPath(current);
+        return jumpTo(link.heading);
+      }
+      void open(link.path).then((ok) => {
+        if (ok) jumpTo(link.heading);
+        else setHashPath(session.getState().path);
+      });
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, [session, open, jumpTo]);
 
   // 409 choices: drop local edits and re-read, or re-send local edits against the server's revision.
   const reload = async () => {
@@ -238,6 +276,8 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
+  // Path this tab is deleting right now (see the SSE handler below).
+  const removing = useRef<string | null>(null);
   // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
     session.close();
@@ -257,7 +297,8 @@ export function App() {
       }
       if (session.external(e, (p) => api.readFile(p), load) === 'close') {
         setHashPath(null);
-        setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
+        // Our own delete can be announced before its response arrives: that close needs no error.
+        if (!removing.current) setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
       }
       void refreshTree();
     });
@@ -267,6 +308,7 @@ export function App() {
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
     if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
+    removing.current = n.path;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
@@ -274,6 +316,8 @@ export function App() {
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');
+    } finally {
+      removing.current = null;
     }
   };
 
@@ -291,7 +335,7 @@ export function App() {
       ),
     [setStatus],
   );
-  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, session.getState().file?.title ?? ''));
+  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, session.getState().file?.title ?? '', exportOptions));
   const markdownExport = () => {
     const f = session.getState().file;
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
@@ -303,7 +347,7 @@ export function App() {
   const blockExport = useCallback(
     (b: Block, kind: ImageKind) => {
       const f = session.getState().file;
-      void report(exportBlock(b, kind, blockExportTitle(f?.title ?? '', b, f?.blocks ?? [])));
+      void report(exportBlock(b, kind, blockExportTitle(f?.title ?? '', b, f?.blocks ?? []), exportOptionsRef.current));
     },
     [report, session],
   );
@@ -334,7 +378,7 @@ export function App() {
       } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen && !editing) {
         e.preventDefault();
         e.stopPropagation();
-        void report(exportCanvas(canvasHandle.current, 'copy', session.getState().file?.title ?? ''));
+        void report(exportCanvas(canvasHandle.current, 'copy', session.getState().file?.title ?? '', exportOptionsRef.current));
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -379,7 +423,9 @@ export function App() {
   };
 
   const dark = theme === 'dark';
-  const doc = hasFile && path && <DocSlot session={session} dark={dark} onShow={showBlock} onExportBlock={blockExport} onFail={flushForReload} />;
+  const doc = hasFile && path && (
+    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onExportBlock={blockExport} onFail={flushForReload} />
+  );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
   const sidebar = (
@@ -423,6 +469,8 @@ export function App() {
               disabled={!hasFile}
               canvasReady={showCanvas}
               selected={exportSelected}
+              options={exportOptions}
+              onOptions={setExportOptions}
               onImage={imageExport}
               onMarkdown={markdownExport}
             />

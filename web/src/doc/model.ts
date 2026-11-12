@@ -94,7 +94,7 @@ export function blockItems(blocks: readonly Pick<Block, 'id' | 'type'>[], typeLa
 }
 
 /** Items whose title or a keyword contains the typed query (case-insensitive); an empty query keeps all. */
-export function filterSlash(items: readonly SlashItem[], query: string): SlashItem[] {
+export function filterSlash<T extends Pick<SlashItem, 'title' | 'keywords'>>(items: readonly T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (!q) return [...items];
   return items.filter((it) => it.title.toLowerCase().includes(q) || it.keywords.some((k) => k.toLowerCase().includes(q)));

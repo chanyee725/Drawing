@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, readdir, rm, symlink, stat, chmod } from 'node:fs/promises';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.js';
@@ -243,7 +244,8 @@ test('external edits emit a workspace SSE event; our own saves and creates do no
       assert.equal((await sse.waitFor((e) => e.path === 'dir/b.dpx.json' && e.kind === 'delete')).kind, 'delete');
       await call('POST', '/api/folder', { path: 'tmpdir' });
       await call('DELETE', `/api/folder?path=${q('tmpdir')}`);
-      await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree');
+      // `from` is set so a tab with a file under the folder open closes it
+      assert.equal((await sse.waitFor((e) => e.path === 'tmpdir' && e.kind === 'tree')).from, 'tmpdir');
       await sleep(400); // the watcher then sees nothing new
       sse.events.length = 0;
 
@@ -671,6 +673,27 @@ test('the revision floors of deleted files are bounded, newest kept', async () =
     assert.equal((await store.createFile('recent', {})).revision, 3, 'a recent deletion keeps its floor');
   } finally {
     store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test('an async fs.watch error is logged once, by code only, and does not crash', async (t) => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const fake = Object.assign(new EventEmitter(), { close() {} });
+  const store = createStore(ws, { watchFn: () => fake });
+  const warn = t.mock.method(console, 'warn', () => {});
+  try {
+    await store.startWatching();
+    const err = Object.assign(new Error(`ENOSPC: watch limit reached at ${ws}`), { code: 'ENOSPC' });
+    fake.emit('error', err);
+    fake.emit('error', err);
+    assert.equal(warn.mock.callCount(), 1);
+    const line = String(warn.mock.calls[0].arguments[0]);
+    assert.match(line, /ENOSPC/);
+    assert.ok(!line.includes(ws), 'no absolute path in the log');
+  } finally {
+    warn.mock.restore();
+    await store.close();
     await rm(ws, { recursive: true, force: true });
   }
 });
