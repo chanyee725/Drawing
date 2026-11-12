@@ -1,5 +1,5 @@
 // The document side of a file: a rich-text editor (TipTap, MIT) saved as ProseMirror JSON in `file.document`.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { EditorContent, useEditor, useEditorState, type Editor } from '@tiptap/react';
 import { getSchema, type Range } from '@tiptap/core';
 import { Placeholder } from '@tiptap/extensions';
@@ -14,9 +14,12 @@ import { blockItems, blocksAfterHistory, newBlockGeometry, diagramNode, embedded
 
 type Props = {
   document: unknown;
+  /** The blocks as drawn (id, type, code); a new array only when one of those changes, not when a block moves. */
   blocks: Block[];
-  /** The canvas drawings, so a new diagram is placed clear of them. */
-  canvas: unknown;
+  /** The latest blocks, positions included. */
+  getBlocks: () => Block[];
+  /** The latest canvas drawings, so a new diagram is placed clear of them. */
+  getCanvas: () => unknown;
   dark: boolean;
   onDocument: (doc: unknown) => void;
   onBlocks: (b: Block[]) => void;
@@ -32,17 +35,17 @@ const newId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
  * Remounted per file (App keys it), so it reads `document` only when it starts. A document the
  * editor cannot read is never saved over: the pane shows an error and stays read-only.
  */
-export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, onShow, onExportBlock }: Props) {
-  const blocksRef = useRef(blocks);
+export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getCanvas, dark, onDocument, onBlocks, onShow, onExportBlock }: Props) {
+  const getBlocksRef = useRef(getBlocks);
+  getBlocksRef.current = getBlocks;
   const onDocumentRef = useRef(onDocument);
   const onBlocksRef = useRef(onBlocks);
-  blocksRef.current = blocks;
   onDocumentRef.current = onDocument;
   onBlocksRef.current = onBlocks;
   // Blocks made with `/새 다이어그램` here, so undo/redo of their embed takes them off / puts them back on the canvas.
   const created = useRef(new Map<string, Block>());
-  const canvasRef = useRef(canvas);
-  canvasRef.current = canvas;
+  const getCanvasRef = useRef(getCanvas);
+  getCanvasRef.current = getCanvas;
   // Size of a new diagram's picture (the template), drawn ahead so `/새 다이어그램` can place it at once.
   const templateSize = useRef<{ width: number; height: number } | null>(null);
   useEffect(() => {
@@ -89,10 +92,10 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
           let id = item.blockId;
           if (!id) {
             id = newId();
-            const geom = newBlockGeometry(templateSize.current, blocksRef.current, canvasRef.current);
+            const geom = newBlockGeometry(templateSize.current, getBlocksRef.current(), getCanvasRef.current());
             const b = { id, type: 'architecture', code: TEMPLATES.architecture, ...geom };
             created.current.set(id, b);
-            onBlocksRef.current([...blocksRef.current, b]);
+            onBlocksRef.current([...getBlocksRef.current(), b]);
           }
           // The embed is an atom: leave the cursor in a new line below it, so typing goes on instead of replacing it.
           return chain().insertContent(diagramNode(id)).createParagraphNear().run();
@@ -102,7 +105,7 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
     return [
       ...docExtensions(DiagramEmbedView),
       Placeholder.configure({ placeholder: ({ editor }) => (editor.isEmpty ? '여기에 적어 보세요. /를 누르면 제목, 표, 다이어그램을 넣을 수 있어요' : '') }),
-      SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(blocksRef.current, typeLabel)], run }),
+      SlashCommands.configure({ getItems: () => [...SLASH_ITEMS, ...blockItems(getBlocksRef.current(), typeLabel)], run }),
     ];
   }, []);
 
@@ -132,7 +135,7 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
       const json = e.getJSON();
       onDocumentRef.current(json);
       if (transaction.getMeta('history$')) {
-        const next = blocksAfterHistory(embeddedBlockIds(transaction.before.toJSON()), embeddedBlockIds(json), created.current, blocksRef.current, !!(transaction.getMeta('history$') as { redo?: boolean }).redo);
+        const next = blocksAfterHistory(embeddedBlockIds(transaction.before.toJSON()), embeddedBlockIds(json), created.current, getBlocksRef.current(), !!(transaction.getMeta('history$') as { redo?: boolean }).redo);
         if (next) onBlocksRef.current(next);
       }
     },
@@ -171,4 +174,4 @@ export function DocPane({ document, blocks, canvas, dark, onDocument, onBlocks, 
       )}
     </section>
   );
-}
+});
