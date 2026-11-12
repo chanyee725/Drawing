@@ -10,6 +10,9 @@ export interface AgentPanelProps {
   dispatch: DispatchInfo;
   loaded: boolean;
   onPick(agent: Agent): void;
+  /** "활동 내용 보기": off by default, since the line comes from the agent's conversation. */
+  showActivity: boolean;
+  onShowActivity(on: boolean): void;
 }
 
 const baseName = (p: string) => p.split('/').pop() || p;
@@ -21,7 +24,7 @@ function order(a: Agent, b: Agent) {
   return d || a.name.localeCompare(b.name);
 }
 
-export function AgentPanel({ agents, dispatch, loaded, onPick }: AgentPanelProps) {
+export function AgentPanel({ agents, dispatch, loaded, onPick, showActivity, onShowActivity }: AgentPanelProps) {
   const now = useNow(1000);
   const list = [...agents].sort(order);
   const note = !loaded
@@ -40,6 +43,18 @@ export function AgentPanel({ agents, dispatch, loaded, onPick }: AgentPanelProps
         <span className="text-sm font-semibold">에이전트</span>
         {list.length > 0 && <span className="text-xs text-neutral-500">{list.length}명</span>}
       </div>
+      <label className="flex cursor-pointer items-start gap-2 border-b border-neutral-200 px-3 py-2" data-testid="activity-toggle">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={showActivity}
+          onChange={(e) => onShowActivity(e.target.checked)}
+        />
+        <span className="flex flex-col">
+          <span className="text-xs font-medium text-neutral-700">활동 내용 보기</span>
+          <span className="text-[11px] text-neutral-500">켜면 대화에서 나온 한 줄이 화면에 보여요.</span>
+        </span>
+      </label>
       {note && <p className="px-3 py-3 text-sm text-neutral-500">{note}</p>}
       <ul className="flex-1 overflow-y-auto">
         {list.map((a) => {
@@ -72,7 +87,7 @@ export function AgentPanel({ agents, dispatch, loaded, onPick }: AgentPanelProps
                   )}
                   <span className="ml-auto shrink-0 text-[11px] text-neutral-400">{st.label}</span>
                 </span>
-                {a.activity && <span className="line-clamp-2 text-xs text-neutral-600">{a.activity}</span>}
+                {showActivity && a.activity && <span className="line-clamp-2 text-xs text-neutral-600" data-testid="activity-line">{a.activity}</span>}
                 <span className="flex items-center gap-2 text-[11px] text-neutral-500">
                   <span className="truncate">{where ?? '아직 바꾼 다이어그램이 없어요'}</span>
                   {ago && <span className="ml-auto shrink-0 tabular-nums">{ago}</span>}

@@ -3,8 +3,11 @@
 // - Maps each session to its worktree folder and attributes watch changes to it.
 // - Pushes `agents` events on the hub and serves GET /api/agents.
 // Stores only names, roles, status, one activity line and what changed.
+// The activity line comes from the session's conversation, so it is sent only to clients
+// that opt in with `?activity=1` (GET /api/agents and SSE /api/events).
 import { resolveDispatchUrl, followDispatch } from './dispatch.js';
 import { createAgentStore } from './model.js';
+import { clientOptions } from '../events.js';
 
 const BROADCAST_MS = 50;
 
@@ -13,12 +16,15 @@ export async function setup(ctx, { fetchImpl } = {}) {
   const dispatch = { url: await resolveDispatchUrl(ctx.projectDir, ctx.dispatch), connected: false };
   let timer = null;
 
-  const payload = () => ({ dispatch: { ...dispatch }, agents: store.list() });
+  const payload = ({ activity = false } = {}) => ({
+    dispatch: { ...dispatch },
+    agents: activity ? store.list() : store.list().map(withoutActivity),
+  });
   const scheduleBroadcast = () => {
     if (timer) return;
     timer = setTimeout(() => {
       timer = null;
-      ctx.hub.broadcast('agents', payload());
+      ctx.hub.broadcast('agents', payload);
     }, BROADCAST_MS);
   };
   const store = createAgentStore(ctx.projectDir, scheduleBroadcast);
@@ -46,13 +52,18 @@ export async function setup(ctx, { fetchImpl } = {}) {
 
   return {
     api: { list: store.list, agentForDir: store.agentForDir, attribute: store.attribute },
-    routes: [{ method: 'GET', path: '/api/agents', handler: (req, res) => sendJson(res, payload()) }],
+    routes: [{ method: 'GET', path: '/api/agents', handler: (req, res, _ctx, _match, url) => sendJson(res, payload(clientOptions(url))) }],
     close() {
       clearTimeout(timer);
       unsubscribe?.();
       follower?.close();
     },
   };
+}
+
+/** Drop the conversation-derived line; names, roles, status and changes stay. */
+export function withoutActivity({ activity, activityAt, ...a }) {
+  return a;
 }
 
 function sendJson(res, body) {

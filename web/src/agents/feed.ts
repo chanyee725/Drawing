@@ -1,20 +1,23 @@
 // Agents feed for the web (T5). Kept apart from data/ so the file feed stays untouched:
 // the real feed reads GET /api/agents once, then follows `agents` events on /api/events.
 // The mock feed moves two pretend agents over the mock diagram's cells.
+import { activityQuery } from './activityPref';
 import { normalizeAgents, type Agent, type AgentsSnapshot } from './model';
 
 export type AgentsListener = (snap: AgentsSnapshot) => void;
 
-export function subscribeApiAgents(onData: AgentsListener, base = ''): () => void {
+/** `activity`: ask the server for the activity line (off unless the user turned it on). */
+export function subscribeApiAgents(onData: AgentsListener, { activity = false, base = '' } = {}): () => void {
+  const q = activityQuery(activity);
   let closed = false;
   let gotEvent = false;
-  fetch(`${base}/api/agents`, { headers: { accept: 'application/json' } })
+  fetch(`${base}/api/agents${q}`, { headers: { accept: 'application/json' } })
     .then((r) => (r.ok ? r.json() : null))
     .then((d) => {
       if (!closed && d && !gotEvent) onData(normalizeAgents(d));
     })
     .catch(() => {});
-  const es = new EventSource(`${base}/api/events`);
+  const es = new EventSource(`${base}/api/events${q}`);
   es.addEventListener('agents', (e) => {
     try {
       const snap = normalizeAgents(JSON.parse((e as MessageEvent).data));
@@ -31,7 +34,7 @@ export function subscribeApiAgents(onData: AgentsListener, base = ''): () => voi
 }
 
 /** Pretend agents for `?mock`: they "edit" cells of the mock pipeline file. */
-export function subscribeMockAgents(onData: AgentsListener, { intervalMs = 2200 } = {}): () => void {
+export function subscribeMockAgents(onData: AgentsListener, { intervalMs = 2200, activity = false } = {}): () => void {
   const fileId = 'main:docs/pipeline.drawio';
   const relPath = 'docs/pipeline.drawio';
   const pages = { p1: '파이프라인', p2: '구성' } as const;
@@ -66,8 +69,8 @@ export function subscribeMockAgents(onData: AgentsListener, { intervalMs = 2200 
     const p = plans[i][Math.floor(tick / 2) % plans[i].length];
     tick++;
     const now = Date.now();
-    a.activity = p.text;
-    a.activityAt = now;
+    a.activity = activity ? p.text : '';
+    a.activityAt = activity ? now : null;
     a.lastChange = {
       fileId,
       relPath,
