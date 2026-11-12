@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { documentToMarkdown, exportName, fence } from '../../web/src/export/markdown.ts';
+import { blockExportTitle, documentToMarkdown, exportName, fence } from '../../web/src/export/markdown.ts';
 
 const t = (text: string, marks?: { type: string; attrs?: Record<string, unknown> }[]) => ({ type: 'text', text, ...(marks ? { marks } : {}) });
 const p = (...c: unknown[]) => ({ type: 'paragraph', content: c });
@@ -61,4 +61,29 @@ test('line-start markers are escaped without changing the rest of the text', () 
 test('inline code keeps backticks by using a longer fence, not backslashes', () => {
   const doc = { type: 'doc', content: [p(t('a`b', [{ type: 'code' }]), t(' '), t('``x', [{ type: 'code' }]))] };
   assert.equal(documentToMarkdown('', doc, []), '``a`b`` ``` ``x ```\n');
+});
+
+test('more line-start markers: "1) ", a lone "-" or "#", rules, setext underlines, and 1-3 leading spaces', () => {
+  const cases: [string, string][] = [
+    ['1) a', '1\\) a'],
+    ['-', '\\-'],
+    ['#', '\\#'],
+    ['---', '\\---'],
+    ['- - -', '\\- - -'],
+    ['===', '\\==='],
+    ['  - x', '  \\- x'],
+    ['   2) x', '   2\\) x'],
+    ['-x', '-x'],
+    ['#tag', '#tag'],
+    ['1)x', '1)x'],
+  ];
+  for (const [input, want] of cases) assert.equal(documentToMarkdown('', { type: 'doc', content: [p(t(input))] }, []), `${want}\n`, input);
+});
+
+test('a block export is named after the document title, the block type and its position', () => {
+  const bs = [blk('a', 'flowchart', ''), blk('b', 'erd', ''), blk('c', 'flowchart', '')];
+  assert.equal(blockExportTitle('설계', bs[2], bs), '설계 - flowchart 3');
+  assert.equal(blockExportTitle('', bs[1], bs), '제목 없는 파일 - erd 2');
+  assert.equal(exportName(blockExportTitle('a/b', bs[0], bs), 'svg'), 'a-b - flowchart 1.svg');
+  assert.equal(blockExportTitle('x', blk('zz', 'erd', ''), bs), 'x - erd 1');
 });

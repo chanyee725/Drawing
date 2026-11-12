@@ -498,3 +498,38 @@ test('a file reads back with the version it was written with; a write stores the
   assert.equal(normalizeContent({ version: 1 }).version, FORMAT_VERSION);
   assert.equal(FORMAT_VERSION, 2);
 });
+
+test('a file written with a newer format version is not overwritten as version 2', async () => {
+  await withApp(async ({ ws, call }) => {
+    const text = JSON.stringify({ version: 3, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 1, extra: 'keep' });
+    await writeFile(join(ws, 'f.dpx.json'), text);
+    const r = await call('GET', `/api/file?path=${q('f')}`);
+    assert.equal(r.body.version, 3);
+    const w = await call('PUT', `/api/file?path=${q('f')}`, { title: 'x', revision: r.body.revision });
+    assert.equal(w.status, 422);
+    assert.match(w.body.error ?? JSON.stringify(w.body), /더 새 버전에서 만든 파일이라 저장하지 않았어요/);
+    assert.equal(await readFile(join(ws, 'f.dpx.json'), 'utf8'), text);
+  });
+});
+
+test('reading a newer-format file after an outside edit leaves it untouched, and saving is still refused', async () => {
+  await withApp(async ({ ws, call }) => {
+    const file = join(ws, 'f.dpx.json');
+    // The server knows this file (created here) before the newer app replaces it on disk.
+    const made = await call('POST', '/api/file', { path: 'f' });
+    assert.equal(made.status, 201);
+    const base = { version: 3, title: 'future', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: made.body.revision };
+    await writeFile(file, JSON.stringify(base));
+    // Outside edit that keeps the revision: a v2 file would get its revision raised on disk here.
+    const edited = JSON.stringify({ ...base, title: 'edited outside', extra: 'keep' });
+    await writeFile(file, edited);
+    const again = await call('GET', `/api/file?path=${q('f')}`);
+    assert.equal(again.body.title, 'edited outside');
+    assert.equal(await readFile(file, 'utf8'), edited);
+    const w = await call('PUT', `/api/file?path=${q('f')}`, { title: 'x', revision: again.body.revision });
+    assert.equal(w.status, 422);
+    const stale = await call('PUT', `/api/file?path=${q('f')}`, { title: 'x', revision: 99 });
+    assert.equal(stale.status, 422);
+    assert.equal(await readFile(file, 'utf8'), edited);
+  });
+});

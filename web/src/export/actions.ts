@@ -30,7 +30,7 @@ export async function exportCanvas(handle: CanvasHandle | null, kind: ImageKind,
   return `${what} 이미지로 복사했어요`;
 }
 
-/** One diagram block, drawn as it looks now (a block with errors exports its last good picture). */
+/** One diagram block, drawn as it looks now (a block with errors exports its last good picture). `title` is the file name stem. */
 export async function exportBlock(block: Block, kind: ImageKind, title: string): Promise<string> {
   // Loaded on use: the renderer (ELK) is big and only needed once something is drawn.
   const { renderBlock } = await import('../canvas/render');

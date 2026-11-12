@@ -5,7 +5,7 @@ import { link, mkdir, readdir, readFile, rename, rm, stat, lstat, unlink, writeF
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { createResolver, parseRelPath, PathError } from './paths.js';
-import { FILE_EXT, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
+import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
 
 export class StoreError extends Error {
   constructor(status, message, extra = {}) {
@@ -180,6 +180,8 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     const k = known.get(rel) ?? (tombstones.has(rel) ? { hash: null, revision: tombstones.get(rel) } : null);
     const h = sha(loaded.text);
     if (!k || k.hash === h) return loaded;
+    // A newer format than this server knows is read-only: rewriting it would store it back as ours.
+    if (loaded.file.version > FORMAT_VERSION) return loaded;
     let file = loaded.file;
     let text = loaded.text;
     if (file.revision <= k.revision) {
@@ -206,6 +208,8 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     }
     return serial(async () => {
       const { file: current } = await syncExternal(rel, await loadStored(abs), abs);
+      // A newer format than this server knows: writing would store it back as ours and drop what it added.
+      if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
       if (current.revision !== base) {
         throw new StoreError(409, 'stale write', { revision: current.revision });
       }

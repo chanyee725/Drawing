@@ -12,10 +12,11 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { migrateDocument } from './doc/model';
+import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
+import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 
@@ -147,7 +148,8 @@ export function App() {
           } else if (!isRetryableSaveError(e)) {
             // The server refused this request (4xx); retrying the same body would fail forever.
             // Keep a pending edit timer: a newer edit may already have fixed the body.
-            setStatus('저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
+            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > DOC_FORMAT_VERSION;
+            setStatus(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
             setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요', true);
@@ -352,7 +354,7 @@ export function App() {
     setExportOpen(o);
   }, []);
   const blockExport = useCallback(
-    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, fileRef.current?.title ?? '')),
+    (b: Block, kind: ImageKind) => void report(exportBlock(b, kind, blockExportTitle(fileRef.current?.title ?? '', b, fileRef.current?.blocks ?? []))),
     [report],
   );
 

@@ -16,7 +16,29 @@ export function CommandPalette({ commands, onClose }: Props) {
   const [index, setIndex] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const list = useMemo(() => filterCommands(commands, query), [commands, query]);
-  useEffect(() => input.current?.focus(), []);
+  // Focus returns to where it was before the palette opened (unless a command moves it itself).
+  const opener = useRef<Element | null>(document.activeElement);
+  // focus() alone puts the caret back at the document start in an editor, so keep the range too.
+  const [saved] = useState<Range | null>(() => {
+    const sel = window.getSelection();
+    return sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
+  });
+  useEffect(() => {
+    input.current?.focus();
+    const back = opener.current;
+    return () => {
+      // Skip when focus already moved on to something real (not the palette's own input or body).
+      const now = document.activeElement;
+      if (back instanceof HTMLElement && back.isConnected && (!now || now === document.body || now === input.current)) {
+        back.focus();
+        const sel = window.getSelection();
+        if (saved && sel && saved.startContainer.isConnected && back.contains(saved.commonAncestorContainer)) {
+          sel.removeAllRanges();
+          sel.addRange(saved);
+        }
+      }
+    };
+  }, []);
   useEffect(() => setIndex(0), [query]);
   useEffect(() => {
     document.querySelector(`[data-cmd-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });

@@ -7,8 +7,20 @@ type Mark = { type: string; attrs?: Record<string, unknown> };
 type N = DocNode & { text?: string; marks?: Mark[] };
 
 const escInline = (s: string) => s.replace(/([\\`*_[\]<>])/g, '\\$1');
-/** Line-start markers that would turn plain text into a heading, bullet or numbered item. Only the marker is escaped. */
-const escStart = (s: string) => s.replace(/^(#{1,6}) /, '\\$1 ').replace(/^([-+]) /, '\\$1 ').replace(/^(\d+)\. /, '$1\\. ');
+/**
+ * Line-start markers that would turn plain text into a heading, bullet, numbered item, rule or setext underline,
+ * also after 1-3 leading spaces. Only the marker character is escaped.
+ */
+const escStart = (s: string) => {
+  const [, lead = '', rest = ''] = /^( {0,3})([\s\S]*)$/.exec(s) ?? [];
+  const esc = (r: string) =>
+    /^#{1,6}(?=[ \t]|$)/.test(r) ? '\\' + r
+    : /^[-+](?=[ \t]|$)/.test(r) ? '\\' + r // bullet, or a lone "-" (setext underline)
+    : /^-+[ \t]*$/.test(r) || /^(-[ \t]*){3,}$/.test(r) ? '\\' + r // "--", "---", "- - -"
+    : /^=+[ \t]*$/.test(r) ? '\\' + r // setext underline
+    : r.replace(/^(\d+)([.)])(?=[ \t]|$)/, '$1\\$2'); // "1. " and "1) "
+  return lead + esc(rest);
+};
 const escText = (s: string, lineStart = true) => (lineStart ? escStart(escInline(s)) : escInline(s));
 
 /** Inline code: a backtick fence longer than any backtick run inside, padded when the code touches a backtick. */
@@ -122,4 +134,10 @@ export function documentToMarkdown(title: string, document: unknown, blocks: rea
 export function exportName(title: string, ext: string): string {
   const stem = title.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim().replace(/^\.+/, '') || '제목 없는 파일';
   return `${stem}.${ext}`;
+}
+
+/** The file name stem for one block: the document title plus the block's type and 1-based position, so exports don't overwrite each other. */
+export function blockExportTitle(title: string, block: Block, blocks: readonly Block[]): string {
+  const i = blocks.findIndex((b) => b.id === block.id);
+  return `${title.trim() || '제목 없는 파일'} - ${block.type} ${i < 0 ? 1 : i + 1}`;
 }
