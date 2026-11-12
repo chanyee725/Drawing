@@ -174,9 +174,17 @@ export async function layoutErd(d: ErdDiagram): Promise<Scene> {
       near(points[points.length - 1]!, points[points.length - 2]!, t1);
     }
     const label = relLabels.get(r);
-    const ll = le.labels?.[0];
-    if (label && ll) {
-      labels.push(textItem(label.lines, (ll.x ?? 0) + o.x + (ll.width ?? 0) / 2, (ll.y ?? 0) + o.y + 2, { size: TYPE_SIZE, font: style.typeface, plate: true, tone: 'muted', color: style.paint.color }));
+    if (label) {
+      let best = -1;
+      let at = points[0]!;
+      for (let k = 1; k < points.length; k++) {
+        const len = Math.hypot(points[k]!.x - points[k - 1]!.x, points[k]!.y - points[k - 1]!.y);
+        if (len > best + 0.5) {
+          best = len;
+          at = { x: (points[k]!.x + points[k - 1]!.x) / 2, y: (points[k]!.y + points[k - 1]!.y) / 2 };
+        }
+      }
+      labels.push(textItem(label.lines, at.x, at.y - label.h / 2, { size: TYPE_SIZE, font: style.typeface, plate: true, tone: 'muted', color: style.paint.color }));
     }
   });
 

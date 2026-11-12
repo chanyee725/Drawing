@@ -113,6 +113,26 @@ function clipToRect(r: { x: number; y: number; w: number; h: number }, p: Point)
   return { x: cx + dx * s, y: cy + dy * s };
 }
 
+/** Label centre on the drawn line: the middle of its longest segment (arc: the curve's midpoint). */
+function labelAnchor(points: Point[], route: string): Point {
+  if (route === 'arc' && points.length === 2) {
+    const [p0, p1] = points as [Point, Point];
+    return { x: (p0.x + p1.x) / 2 - (p1.y - p0.y) * 0.1, y: (p0.y + p1.y) / 2 + (p1.x - p0.x) * 0.1 };
+  }
+  let best = 0;
+  let at = { x: points[0]!.x, y: points[0]!.y };
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!;
+    const b = points[i]!;
+    const len = Math.hypot(b.x - a.x, b.y - a.y);
+    if (len > best + 0.5) {
+      best = len;
+      at = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    }
+  }
+  return at;
+}
+
 export async function layoutGraph(d: GraphDiagram): Promise<Scene> {
   const nodes = new Map<string, NodeGeom>();
   const groups = new Map<string, GroupGeom>();
@@ -277,20 +297,8 @@ export async function layoutGraph(d: GraphDiagram): Promise<Scene> {
     };
     edgeItems.push(edge);
     const label = edgeLabels.get(e.id);
-    const ll = le.labels?.[0];
-    if (label && ll) {
-      let cx = (ll.x ?? 0) + o.x + (ll.width ?? 0) / 2;
-      let cy = (ll.y ?? 0) + o.y + (ll.height ?? 0) / 2;
-      if (route !== 'elbow') {
-        const [p0, p1] = points as [Point, Point];
-        cx = (p0.x + p1.x) / 2;
-        cy = (p0.y + p1.y) / 2;
-        if (route === 'arc') {
-          const len = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
-          cx += ((-(p1.y - p0.y) / len) * len * 0.2) / 2;
-          cy += (((p1.x - p0.x) / len) * len * 0.2) / 2;
-        }
-      }
+    if (label) {
+      const { x: cx, y: cy } = labelAnchor(points, route);
       labelItems.push(textItem(label.lines, cx, cy - label.h / 2, { size: label.size, font: style.typeface, plate: true, color: style.paint.color, tone: 'muted' }));
     }
   }

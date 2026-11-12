@@ -76,6 +76,10 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
       return `<path d="${d}"${attrs}/>`;
     }
     default:
+      if (b.role === 'entity-header') {
+        const r = RADIUS['entity-header'];
+        return `<path d="M${n(x)} ${n(y + h)}V${n(y + r)}Q${n(x)} ${n(y)} ${n(x + r)} ${n(y)}H${n(x + w - r)}Q${n(x + w)} ${n(y)} ${n(x + w)} ${n(y + r)}V${n(y + h)}Z"${attrs}/>`;
+      }
       return `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="${RADIUS[b.role]}"${attrs}/>`;
   }
 }
