@@ -17,7 +17,7 @@ import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, hash, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
-import { LayoutEditOverlay, type EditStart } from './LayoutEditOverlay';
+import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
@@ -141,6 +141,17 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   }, []);
 
   const sameFrame = (a: LayoutFrame | null, b: LayoutFrame | null) => a === b || (!!a && !!b && a.x === b.x && a.y === b.y && a.k === b.k);
+
+  /** Place the overlay again from the edited block's image and picture (both can change without a scene change). */
+  const refreshFrame = useCallback(() => {
+    const ed = editRef.current;
+    const xapi = apiRef.current;
+    const b = ed && blocksRef.current.find((x) => x.id === ed.blockId);
+    if (!xapi || !ed || !b) return;
+    const img = imageOf(xapi.getSceneElements(), ed.blockId);
+    const f = img ? frameOf(img, xapi.getAppState(), b) : null;
+    setFrame((old) => (sameFrame(old, f) ? old : f));
+  }, [frameOf]);
 
   /** Leave layout edit mode: show the image again, and select it unless the press that ended the mode selects something. */
   const exitEdit = useCallback((reselect: boolean) => {
@@ -312,13 +323,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         next.push(...restoreElements(skeletons, null));
       }
       if (changed) api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+      // A comment edit keeps the same picture (no scene change) but gives it a new anchor: the overlay needs it.
+      else refreshFrame();
       tryFocus();
     });
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, drawn, draw, tryFocus]);
+  }, [api, drawn, draw, tryFocus, refreshFrame]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
@@ -482,14 +495,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
   }, [edit, editBlock, sess, exitEdit]);
   // A fresh session (or the first one) can place a picture whose layout was left out; place the overlay again.
-  useEffect(() => {
-    const ed = editRef.current;
-    if (!api || !ed || !editBlock) return;
-    const img = imageOf(api.getSceneElements(), ed.blockId);
-    const f = img ? frameOf(img, api.getAppState(), editBlock) : null;
-    setFrame((old) => (sameFrame(old, f) ? old : f));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, editSess, frameOf]);
+  useEffect(refreshFrame, [api, editSess, refreshFrame]);
   // A notice belongs to one try; it goes when another block is selected, or after a while.
   useEffect(() => {
     if (!notice) return;
@@ -633,8 +639,13 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         onReset={() => {
           const id = edit?.blockId ?? selBlock;
           if (id) resetLayout(id);
+          // The button took focus; Ctrl+Z right after must still reach Excalidraw.
+          focusCanvas(wrap.current);
         }}
-        onDone={() => exitEdit(true)}
+        onDone={() => {
+          exitEdit(true);
+          focusCanvas(wrap.current);
+        }}
       />
       {broken.length > 0 && !block && (
         <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>

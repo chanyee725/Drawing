@@ -200,8 +200,26 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
     begin({ clientX: start.clientX, clientY: start.clientY, shiftKey: false }, start.id);
   }, [start, begin]);
 
-  // Keys while editing: Escape leaves, arrows nudge the selection. Delete would remove the whole block image, so it does
-  // nothing here. Typing in the code panel or any field is left alone.
+  // Entering from the palette or the bar leaves focus outside the canvas; Ctrl+Z must reach Excalidraw.
+  useEffect(() => focusCanvas(wrap), [wrap]);
+
+  // Arrow keys move the selection on screen and commit on key up: one undo step per press or hold, not one per
+  // auto-repeat. `dx, dy` add up from the layout as it was when the press began.
+  const held = useRef<{ leaves: string[]; dx: number; dy: number } | null>(null);
+  const endHold = useCallback(() => {
+    const h = held.current;
+    held.current = null;
+    if (!h) return;
+    const r = dragTo(h.leaves, h.dx, h.dy, true);
+    if (r) commit(r.next);
+  }, [dragTo, commit]);
+  const endHoldRef = useRef(endHold);
+  endHoldRef.current = endHold;
+  useEffect(() => () => endHoldRef.current(), []);
+
+  // Keys while editing: Escape leaves, arrows nudge the selection, Ctrl/Cmd+A selects every node (not every canvas
+  // element). Delete would remove the whole block image, so it does nothing here. Typing in the code panel or any field
+  // is left alone.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing || (e.target instanceof HTMLElement && e.target.closest('aside, input, textarea, select, [contenteditable], [role="dialog"]'))) return;
@@ -214,6 +232,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
           setPreview(null);
           return;
         }
+        endHold();
         onExit();
         return;
       }
@@ -222,18 +241,39 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
         e.stopPropagation();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        e.stopPropagation();
+        const { handles } = live.current;
+        const ids = new Set(handles.map((h) => h.id));
+        setSelected(new Set(handles.filter((h) => !ids.has(h.parent)).map((h) => h.id)));
+        return;
+      }
       const step = e.ctrlKey || e.metaKey ? null : nudgeFor(e.key, e.shiftKey);
       if (!step) return;
       e.preventDefault();
       e.stopPropagation();
       const { selected, handles } = live.current;
       if (!selected.size || gesture.current) return;
-      const r = dragTo(leavesOf(selected, handles), step.dx, step.dy, true);
-      if (r) commit(r.next);
+      const h = held.current ?? { leaves: leavesOf(selected, handles), dx: 0, dy: 0 };
+      h.dx += step.dx;
+      h.dy += step.dy;
+      held.current = h;
+      const r = dragTo(h.leaves, h.dx, h.dy, true);
+      if (r) show(r.next, []);
+    };
+    const onUp = (e: KeyboardEvent) => {
+      if (held.current && nudgeFor(e.key, false)) endHold();
     };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onExit, dragTo, commit]);
+    window.addEventListener('keyup', onUp, true);
+    window.addEventListener('blur', endHold);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keyup', onUp, true);
+      window.removeEventListener('blur', endHold);
+    };
+  }, [onExit, dragTo, commit, show, endHold]);
 
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -267,8 +307,8 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
           if (e.button !== 0) return;
           e.preventDefault();
           e.stopPropagation();
-          // Keep keyboard focus off fields (arrows nudge) without scrolling the page.
-          (document.activeElement as HTMLElement | null)?.blur?.();
+          // Keyboard focus goes to Excalidraw's container: arrows nudge here, and Excalidraw only hears keys (Ctrl+Z) there.
+          focusCanvas(wrap);
           begin(e, hitHandle(shownHandles, local(e))?.id ?? null);
         }}
         onPointerMove={(e) => {
@@ -307,6 +347,11 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
       </svg>
     </div>
   );
+}
+
+/** Focus Excalidraw's container (it handles keys only there) without scrolling the page. */
+export function focusCanvas(wrap: HTMLElement | null | undefined) {
+  wrap?.querySelector<HTMLElement>('.excalidraw')?.focus({ preventScroll: true });
 }
 
 function Mark({ id, h, rect, dashed }: { id?: string; h: LayoutHandle | undefined; rect: (h: LayoutHandle) => { x: number; y: number; w: number; h: number }; dashed?: boolean }) {
