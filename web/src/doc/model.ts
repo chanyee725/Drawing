@@ -25,13 +25,14 @@ const liveElements = (canvas: unknown): CanvasEl[] => {
 
 export type FrameInfo = { id: string; name: string; /** False for an unnamed frame, whose name is its number ("프레임 2"). */ named: boolean };
 
-/** Frames on the canvas, in canvas order. An unnamed frame is numbered by its place among the frames: 프레임 1, 프레임 2. */
+/** Frames on the canvas, in canvas order. An unnamed frame is numbered among the unnamed ones only: 프레임 1, 프레임 2 (a named frame in between does not shift them). */
 export function framesOf(canvas: unknown): FrameInfo[] {
+  let unnamed = 0;
   return liveElements(canvas)
     .filter((e) => e.type === 'frame' || e.type === 'magicframe')
-    .map((e, i) => {
+    .map((e) => {
       const name = typeof e.name === 'string' ? e.name.trim() : '';
-      return name ? { id: e.id, name, named: true } : { id: e.id, name: `프레임 ${i + 1}`, named: false };
+      return name ? { id: e.id, name, named: true } : { id: e.id, name: `프레임 ${++unnamed}`, named: false };
     });
 }
 
@@ -49,6 +50,14 @@ export function blocksInFrame<B extends Placed>(frame: FrameBox, blocks: readonl
     const cy = b.y + b.h / 2;
     return cx >= frame.x && cx <= frame.x + frame.width && cy >= frame.y && cy <= frame.y + frame.height;
   });
+}
+
+/** Where blocks land on a frame's picture: the clip box (the frame, inset by the export padding) and each block's offset in it. */
+export function blockPlacements<B extends Placed & { id: string }>(frame: FrameBox, blocks: readonly B[], pad: number) {
+  return {
+    clip: { x: pad, y: pad, width: frame.width, height: frame.height },
+    images: blocksInFrame(frame, blocks).map((b) => ({ id: b.id, x: b.x - frame.x + pad, y: b.y - frame.y + pad, width: b.w, height: b.h })),
+  };
 }
 
 /** What a frame preview needs: the frame, what sits in it, and the text bound to those (a new array each call; callers compare with `frameSceneSig`). */
