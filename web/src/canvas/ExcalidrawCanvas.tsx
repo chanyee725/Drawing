@@ -19,7 +19,7 @@ import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fi
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 /** Show (scroll to and select) this block's image; a new `n` is a new request. */
-export type CanvasFocus = { blockId: string; n: number };
+export type CanvasFocus = { blockId?: string; frameId?: string; n: number };
 
 type Props = {
   canvas: CanvasData;
@@ -97,7 +97,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const f = focusRef.current;
     const xapi = apiRef.current;
     if (!f || !xapi || focusDone.current === f.n) return;
-    const el = xapi.getSceneElements().find((e) => blockIdOf(e as unknown as SceneEl) === f.blockId);
+    const el = xapi.getSceneElements().find((e) => (f.frameId ? e.id === f.frameId && !e.isDeleted : blockIdOf(e as unknown as SceneEl) === f.blockId));
     if (!el) return;
     focusDone.current = f.n;
     xapi.updateScene({ appState: { selectedElementIds: { [el.id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
