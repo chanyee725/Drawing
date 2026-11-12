@@ -19,7 +19,7 @@
 - 모든 user와 file은 team에 속해요 (1인 team 포함). 한 user가 여러 team에 속할 수 있어요. <https://docs.eraser.io/teams.md>
 - 생성: 가입 시, 또는 대시보드를 처음 열 때. 설정 항목은 team 이름, 멤버 초대, 이메일 도메인 자동 가입. <https://docs.eraser.io/teams.md>
 - 전환: 대시보드의 team switcher 드롭다운 → "Join or Create team". <https://docs.eraser.io/teams.md>
-- 역할: 문서에는 member와 team admin만 나와요. admin 전용: team 설정 변경, team 삭제. <https://docs.eraser.io/teams.md> 그 외 세분화된 role은 **(미확인)**.
+- 역할: 문서에는 member와 team admin만 나와요. admin 전용: team 설정 변경, team 삭제. <https://docs.eraser.io/teams.md> 관리 문서는 admin / member / guest 3종을 말해요. admin 전용: member 승급·강등, member 제거, 도메인 자동 가입·가입 링크 활성화, 유료 플랜 변경, team 이름 변경. guest는 파일 단위로 읽기·쓰기·댓글이 되고 모든 플랜에서 무료·무제한이에요. <https://docs.eraser.io/managing-users.md> (admin 전용 목록은 teams.md와 managing-users.md가 조금 달라요. 더 자세한 role은 여전히 **(미확인)**.)
 - 관리 기능: Allowed email domain, SAML SSO, Organizations, SCIM 문서가 따로 있어요. <https://docs.eraser.io/>
 
 ### 1.4 Folder
@@ -30,18 +30,18 @@
 ### 1.5 Sharing / 권한
 - 파일 타입 2종 (creator만 변경 가능, Share File 메뉴): <https://docs.eraser.io/sharing-a-file.md>
   - **Team file** (기본): team 전원 접근. 전 플랜. folder 가능. link 접근 설정 가능.
-  - **Private file**: creator + 초대된 협업자만. 유료 플랜. folder 불가. link 접근 없음. <https://docs.eraser.io/private-files.md> 에서는 초대(이메일) 또는 public web link로 공유 가능하다고 해요. 두 문서가 약간 달라요: 앞은 "link access disabled", 뒤는 "public web link 가능". 정확한 동작은 **(미확인)**.
+  - **Private file**: creator + 초대된 협업자만. 유료 플랜. folder 불가. link 접근 없음. <https://docs.eraser.io/private-files.md> 에서는 초대(이메일) 또는 public web link로 공유 가능하다고 해요. 재확인(2026-11-12): sharing-a-file은 4가지 link access *설정*(No link / edit / viewable / editable)이 private file에는 없다고 하고, private-files는 별도의 **Share to Web** 토글로 public link 공유가 가능하다고 해요(team 구성원 대시보드에는 안 보임). 즉 두 문서는 서로 다른 장치를 말하는 것으로 보여요. 두 장치의 관계는 공식 문서에 명시가 없어서 **(미확인)**으로 남겨요.
 - Link access (team file): <https://docs.eraser.io/sharing-a-file.md>
   - No link access (유료) / Anyone with the link can edit — Eraser 계정 필요 (기본값) / Publicly viewable — 계정 불필요 / Publicly editable — 계정 불필요, 유료.
   - 유료 team은 Team Settings › Link Access for New Files로 신규 파일 기본값 지정.
-- 가격 페이지 표는 Publicly editable을 Free에도 "Yes"로 표기해서 docs와 충돌해요. 페이지 날짜가 오래됐을 수 있어요(추정). <https://www.eraser.io/pricing>
+- 재확인(2026-11-12): 가격 페이지를 직접 받아 보니 Compare plans 표에서 Publicly editable files가 Free 열에도 "Included"로 나오고, docs는 "Paid plan only"라서 여전히 충돌해요. 오래된 캐시 탓이라는 추정은 틀렸어요(현재 페이지가 그래요). 어느 쪽이 맞는지는 **(미확인)**. <https://www.eraser.io/pricing>, <https://docs.eraser.io/sharing-a-file.md>
 - 게스트: 초대된 파일에서만 편집·댓글 가능. member는 team file 전체 편집 가능. 게스트 무제한. <https://www.eraser.io/pricing>
 - Dashboard에 Private Files 섹션이 따로 있어요. <https://docs.eraser.io/private-files.md>
 
 ### 1.6 Template
 - Template = 일반 Eraser file. diagram, document(SOP 등), 또는 둘 다. AI 생성 시 scaffold로 써서 구조·섹션을 유지해요. <https://docs.eraser.io/templates.md>
 - preset의 Templates 탭에서 관리. team admin이 추가/제거. **publish해야** AI가 써요 (Never published / Pending review / Published). <https://docs.eraser.io/templates.md>
-- 사용자용 템플릿 갤러리(시작 화면)의 UI는 **(미확인)**. 위는 AI 생성용 template 개념이에요.
+- 사용자용 템플릿 갤러리(시작 화면)의 UI는 공개 docs에 없어요 → 여전히 **(미확인)**. docs의 Templates는 AI preset의 Templates 탭(파일 이름·마지막 publish한 사람·시각·publish 상태 Never published/Pending review/Published)과 Publish 단계를 설명하는 개념이에요. <https://docs.eraser.io/templates.md>
 
 ### 1.7 플랜 (참고)
 - Free: 파일 3개, 버전 기록 7일. Business/Business Plus: 파일 무제한, private file. <https://docs.eraser.io/plans.md>
@@ -78,11 +78,11 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 - 커넥터 routing: elbow / straight / arc. `lineStyle`: solid / dashed / dotted. <https://docs.eraser.io/freeform-diagram-format.md>
 - 입력 경로: `/` → Freeform, AI chat, JSON/XML 붙여넣기, `.drawio`·`.eraserdiagram` 파일 드롭. <https://docs.eraser.io/freeform-diagrams.md>
 - Freeform에서 DB table, legend, pool, lane은 렌더 안 돼요 (ERD/BPMN 사용). <https://docs.eraser.io/freeform-diagrams.md>
-- Frame: Figure가 frame 역할 (3.3). "device frame"은 와이어프레임용. 일반 frame 요소는 **(미확인)**.
-- Sticky note: **(미확인)** — 이번에 본 문서에 없어요.
+- Frame: Figure가 frame 역할 (3.3). "device frame"은 와이어프레임용. 일반 frame 요소는 insert menu 목록(Figure, Diagram-as-code, Shape, Icon, Code Block, Image, Device Frame)에 없고, Freeform 포맷에는 container인 `Group`(title 가능, `containerId`로 소속)이 있어요. <https://docs.eraser.io/insert-menu.md>, <https://docs.eraser.io/freeform-diagram-format.md>
+- Sticky note: insert menu와 freeform 요소 목록(Shape, Icon, Textbox, Group, Divider, Relationship)에 없어요. 공개 docs 89쪽을 `sticky` 키워드로 검색해도 0건이라 docs 기준으로는 **없음에 가까움**이지만, 에디터에서 직접 본 건 아니라서 **(미확인)**으로 둬요.
 - Image: PNG/JPEG/GIF/SVG 임베드. `.drawio`는 편집 가능 diagram으로 변환. 다른 Eraser 파일에서 복사한 요소도 붙여넣기 가능. <https://docs.eraser.io/import.md>
-- Freehand(손그림) 도구: **(미확인)**. 위 shortcut 검색 결과도 선택/사각형/텍스트만 언급했어요.
-- Grouping / snapping: Group 요소는 확인(위). 마우스로 묶는 법, snapping 동작은 **(미확인)**.
+- Freehand(손그림) 도구: docs 89쪽 전체에서 `freehand` 0건, insert menu에도 없어요. 단 Freeform의 "freeform"은 자유 배치 뜻이지 손그림이 아니에요. 에디터 툴바는 못 봐서 **(미확인)** 유지.
+- Grouping / snapping: Group 요소는 확인(위). 마우스로 묶는 법, snapping 동작은 docs에 없어요(`snap` 검색 0건) → **(미확인)**. 참고: diagram-as-code는 draggable edit(노드·group·arrow를 끌어 옮기고 크기 조절, 하단 배너의 Reset Layout, 코드를 크게 고치면 자동 리셋)이 있어요. <https://docs.eraser.io/draggable-edits-beta.md>
 
 ### 3.3 Figure
 - 컨테이너로 캔버스를 구획해요. `F` 키 + 드래그로 빈 figure, 기존 요소 위로 드래그하거나 요소 선택 후 우클릭 "Create Figure". <https://docs.eraser.io/figures.md>
@@ -105,11 +105,11 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 | 표 삽입 | `Cmd+Opt+T` / `Ctrl+Alt+T` | tables |
 | 행/열 추가 | `Cmd+Shift++` / `Cmd+Shift+Opt++` | tables |
 
-- 검색 요약이 선택(V 또는 1), 사각형(R 또는 2), 텍스트(T 또는 8), Space 드래그 이동을 전했어요. 하지만 원문 페이지(`help.eraser.io/keyboard-shortcuts-and-markdown-syntax`)는 접속이 안 돼(DNS 실패) 직접 검증 못 했어요. **(미확인)** 검색 결과 링크: <https://help.eraser.io/keyboard-shortcuts-and-markdown-syntax/>
+- 검색 요약이 선택(V 또는 1), 사각형(R 또는 2), 텍스트(T 또는 8), Space 드래그 이동을 전했어요. 원문 페이지(`help.eraser.io/keyboard-shortcuts-and-markdown-syntax`)는 2026-11-12에도 접속이 안 돼(curl 연결 실패) 직접 검증 못 했어요. 대신 docs.eraser.io에서 확인된 단축키: `/` insert menu, Cmd/Ctrl+Alt+1 heading, Cmd/Ctrl+Shift+E archive, Alt+R comment thread resolve, Maps의 Cmd/Ctrl+K·Ctrl 1–3. <https://docs.eraser.io/insert-menu.md>, <https://docs.eraser.io/headers.md>, <https://docs.eraser.io/deleting-files.md>, <https://docs.eraser.io/comments.md>, <https://docs.eraser.io/map-views.md> V/R/T/Space 등 도구 키는 여전히 **(미확인)**. 검색 결과 링크: <https://help.eraser.io/keyboard-shortcuts-and-markdown-syntax/>
 - Command palette: 별도 팔레트는 못 찾았고, `/` insert menu가 그 역할이에요(추정).
 
 ### 3.5 줌/팬/프레젠테이션
-- 줌·팬 단축키: **(미확인)** (위 검색 요약의 Space 드래그는 미검증).
+- 줌·팬 단축키: docs 전체에서 zoom 단축키 언급이 없어요 → **(미확인)**. 다만 figure/wikilink를 누르면 캔버스가 해당 figure 위치로 pan 돼요. <https://docs.eraser.io/figure-embeds.md>, <https://docs.eraser.io/wikilink.md>
 - Present mode: 문서는 **Maps** 기능만 설명해요. 헤더 가운데 Edit/Present 토글, Present는 편집 도구와 AI를 숨겨요. 보기 전용 접근자는 Present로 열려요. <https://docs.eraser.io/presenting-maps.md>, <https://docs.eraser.io/sharing-a-file.md> 일반 canvas 파일의 슬라이드형 프레젠테이션은 **(미확인)**.
 
 ## 4. 문서(노트) 에디터
@@ -124,7 +124,7 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 - 캔버스에서 figure를 복사해 노트에 붙여넣으면 embed가 돼요. Expanded = 실시간 미리보기, Collapsed = 링크. 링크 클릭 시 캔버스가 해당 figure로 이동. <https://docs.eraser.io/figure-embeds.md>
 - 링크 텍스트는 figure 아이콘 → embed modal에서 수정, 원래 이름으로 reset 가능. <https://docs.eraser.io/figure-embeds.md>
 - `<Figure src="..." alt="..." video />` 형태가 문서에 보이지만 사용자용 문법인지는 불분명해요. <https://docs.eraser.io/figure-embeds.md>
-- 노트 내용 마크다운 내보내기 시 embed 처리는 **(미확인)**.
+- 노트 내용 마크다운 내보내기 시 embed 처리는 docs에 없어요 → **(미확인)**.
 
 ### 4.3 Wikilink / Mention
 - Wikilink: 문서나 캔버스 텍스트에서 줄 시작/공백 뒤에 `+` 입력 → 파일·figure·header 검색. figure/header 검색은 현재 파일 안만. <https://docs.eraser.io/wikilink.md>
@@ -138,7 +138,7 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
   - `typeface`: **rough**(손글씨, 기본) / clean(sans serif) / mono
   - `textSize`: small(기본) / medium / large
   - `wrap`: on / off, `connectorStyle`: elbow(기본) / straight / arc
-- 즉 기본 룩은 손글씨(sketchy)체 + 파스텔 + 그림자이고, plain/clean으로 깔끔한 룩으로 바꿀 수 있어요. 구체적 폰트 이름·색상 hex는 **(미확인)**.
+- 즉 기본 룩은 손글씨(sketchy)체 + 파스텔 + 그림자이고, plain/clean으로 깔끔한 룩으로 바꿀 수 있어요. typeface는 `rough`(손글씨 폰트) / `clean`(산세리프) / `mono`로 정의돼요. <https://docs.eraser.io/styling.md> 실제 폰트 파일 이름과 색 hex는 docs에 없어서 **(미확인)**.
 - Custom styles: 요소별 기본값 공급. <https://docs.eraser.io/freeform-diagrams.md>
 - Dark mode: 개인 설정(Appearance 페이지), 파일 설정이 아니에요. 협업자끼리 다른 모드로 볼 수 있어요. <https://docs.eraser.io/dark-mode.md> Export 시 PNG/SVG는 light/dark 선택. <https://docs.eraser.io/export.md>
 
@@ -146,18 +146,18 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 
 ### 6.1 실시간
 - Free 포함 전 플랜에서 real-time collaboration 제공. <https://www.eraser.io/pricing>
-- 공식 Miro 비교 페이지가 Miro를 "multiplayer board with cursors and comments"로 평가하지만, Eraser 자신의 cursor/presence UI는 어떤 자료에서도 확인 못 했어요. 라이브 커서·아바타·선택 표시는 **(미확인)**. 벤더 작성 자료예요. <https://www.eraser.io/alternatives/miro>
-- 동시 편집 충돌 해결 방식(CRDT/OT)은 **(미확인)**.
+- 공식 Miro 비교 페이지가 Miro를 "multiplayer board with cursors and comments"로 평가하지만, Eraser 자신의 cursor/presence UI는 어떤 자료에서도 확인 못 했어요. 라이브 커서·아바타·선택 표시는 2026-11-12 재조사(docs 89쪽 `cursor`/`presence` 검색 포함)에서도 근거가 없어 **(미확인)**. 벤더 작성 자료예요. <https://www.eraser.io/alternatives/miro>
+- 동시 편집 충돌 해결 방식(CRDT/OT)은 재조사(docs 89쪽 + 홈페이지)에서도 언급이 없어 **(미확인)**.
 
 ### 6.2 Comments
 - 캔버스 어디든, 또는 요소에 부착(요소와 함께 이동). 문서는 선택한 텍스트에. 스레드 단위, 3점 메뉴로 Resolve/Delete. 헤더 "Toggle comments"로 전체 숨김/표시. 로그인 필요. <https://docs.eraser.io/comments.md>
-- 알림 방식은 comments 문서에 없어요 **(미확인)**. (mention은 이메일, 4.3)
+- 알림 방식은 comments 문서에 없어요 **(미확인)**. mention은 이메일 알림이에요(확인). <https://docs.eraser.io/mentions.md>
 
 ### 6.3 Version history
 - 편집이 멈춘 뒤 30분에 자동 버전, 수동 "Save version". 파일명 옆 3점 메뉴에서 열고, 우측 사이드바에서 이전 버전 미리보기. <https://docs.eraser.io/version-history.md>
 - Restore는 현재 상태를 새 버전으로 먼저 저장한 뒤 되돌려요. Duplicate는 이전 버전으로 새 파일 생성. <https://docs.eraser.io/version-history.md>
-- 보존: Free 7일, 유료 90일(문서) — 가격 표와 불일치(1.7).
-- 버전 간 diff 표시는 **(미확인)**.
+- 보존: Free 7일, 유료 90일(version-history 문서). 재확인(2026-11-12): 가격 페이지는 유료 "Unlimited version history"라서 여전히 불일치예요. <https://www.eraser.io/pricing>
+- 버전 간 diff 표시: version-history 문서에 preview(오른쪽 사이드바)·Restore·Duplicate만 있고 diff 언급이 없어요 → **(미확인)**. 30분 비활동 뒤 자동 버전, 수동 Save version 가능. <https://docs.eraser.io/version-history.md>
 
 ## 7. 대표 사용 흐름
 
@@ -168,7 +168,7 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 4. 필요 시 다시 프롬프트하거나 캔버스에서 드래그.
 5. 기존 자료(이미지, Terraform, DB 스키마, Git repo)에서 시작 가능.
 
-### 7.2 설계 문서 쓰기 (추정 조합)
+### 7.2 설계 문서 쓰기 (추정 조합, 재확인 불가: 에디터 실사용 순서는 공개 자료에 없음)
 1. 파일 생성 → 노트 에디터에 markdown으로 본문 작성 (`#`, `⌘⌥1`).
 2. 캔버스에서 `F`로 figure를 만들어 diagram을 묶음.
 3. figure 복사 → 노트에 붙여넣어 live embed.
@@ -186,9 +186,9 @@ URL은 모두 `https://docs.eraser.io/<slug>.md` 형식이에요.
 - 핵심 모델은 "파일 = 캔버스 + 문서" 1:N diagram이에요. 데이터 모델을 file → {canvas elements, note doc, diagrams[]}로 잡으면 맞아요.
 - 개인정보/인증이 필요 없는 로컬 도구면 team·sharing·SSO는 범위 밖으로 둘 수 있어요.
 - 차별 핵심: 텍스트(DSL) ↔ 캔버스 양방향 동기화, figure embed, `/` insert menu.
-- 미확인 항목(커서 UI, 줌/팬 키, sticky, freehand, snapping)은 로그인 없이 확인 불가해요. 필요하면 공개 데모/스크린샷 영상으로 보완해야 해요.
+- 미확인 항목(커서 UI, 줌/팬 키, sticky, freehand, snapping)은 2026-11-12 재조사에서도 공개 docs 89쪽에 근거가 없어요(sticky·freehand는 docs에 아예 없어 "없음"에 가까워요). 필요하면 공개 데모/스크린샷 영상으로 보완해야 해요.
 
 ## 9. 출처 한계
 - docs.eraser.io는 `.md` 원문으로 조회했고 WebFetch 요약을 거쳤어요(원문 대조는 안 함).
-- help.eraser.io 접속 실패. 가격 페이지는 오래됐을 수 있어요(검색기가 약 1,367일 전이라 표시).
+- help.eraser.io 접속 실패(재시도 후에도 동일). 가격 페이지는 2026-11-12에 직접 받았고 오래된 캐시가 아니었어요. 재확인은 curl로 원문을 /tmp에 저장해 grep으로 했어요.
 - 독립 제3자 리뷰는 이번 범위에서 못 찾았어요. 위 서술은 전부 벤더 자료예요.
