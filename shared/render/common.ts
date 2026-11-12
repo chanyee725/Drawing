@@ -205,6 +205,7 @@ export function finishScene(type: Scene['type'], d: DiagramBase, items: SceneIte
     items.push(textItem(d.title.split(/\r?\n/), b.x0, b.y0 - 16 - lh * d.title.split(/\r?\n/).length, { size, font: 'clean', anchor: 'start', weight: 600, tone: 'strong' }));
     b = boundsOf(items);
   }
+  const origin = { x: round(PAD - b.x0), y: round(PAD - b.y0) };
   translate(items, PAD - b.x0, PAD - b.y0);
-  return { type, width: Math.ceil(b.x1 - b.x0 + PAD * 2), height: Math.ceil(b.y1 - b.y0 + PAD * 2), items };
+  return { type, width: Math.ceil(b.x1 - b.x0 + PAD * 2), height: Math.ceil(b.y1 - b.y0 + PAD * 2), items, origin };
 }
