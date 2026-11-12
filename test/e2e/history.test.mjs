@@ -52,7 +52,11 @@ test('version history: list, preview, restore', { skip: !ON && 'set DRAW_E2E=1, 
   await title.waitFor();
   await title.fill('New title');
   // Wait for the save itself (the server has the new title), not for a status text that may already be showing.
-  await page.waitForFunction(async () => (await (await fetch('/api/file?path=hist')).json()).title === 'New title');
+  // Poll from Node: waitForFunction treats an async predicate's Promise as truthy and would not wait.
+  for (let i = 0; (await call('GET', '/api/file?path=hist')).title !== 'New title'; i++) {
+    assert.ok(i < 100, 'the new title was not saved within 10 s');
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
   await page.getByRole('button', { name: '버전 기록' }).click();
   const dialog = page.getByRole('dialog', { name: '버전 기록' });
