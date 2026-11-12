@@ -19,7 +19,7 @@ function BlockPreview({ block, index, theme }: { block: Block; index: number; th
     const timer = setTimeout(() => {
       renderPreview(block.type, block.code, theme).then((r) => {
         if (cancelled) return;
-        setPreview((p) => nextPreview(p, r, block.type));
+        setPreview((p) => nextPreview(p, r, block.type, theme));
         setDone(true);
       });
     }, 150);
@@ -39,7 +39,7 @@ function BlockPreview({ block, index, theme }: { block: Block; index: number; th
       aria-label={`다이어그램 ${index + 1}`}
     >
       {shown ? (
-        <div dangerouslySetInnerHTML={{ __html: shown.svg }} />
+        <div className="[&>svg]:h-auto [&>svg]:max-w-full" dangerouslySetInnerHTML={{ __html: shown.svg }} />
       ) : (
         <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
           {!supported ? '이 종류는 아직 그릴 수 없어요' : done ? '그릴 내용이 아직 없어요' : '그리는 중이에요'}

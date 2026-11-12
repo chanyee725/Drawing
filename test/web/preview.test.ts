@@ -57,3 +57,20 @@ test('switching a block to an unsupported type drops the earlier drawing', async
   assert.equal(nextPreview(good, r, 'bpmn'), null);
   assert.equal(analyzeDiagram('bpmn', '').parsed, false);
 });
+
+test('a theme change repaints the last good drawing while the code has errors', async () => {
+  const good = nextPreview(null, await renderPreview('architecture', GOOD, 'light'), 'architecture', 'light');
+  assert.ok(good);
+  assert.equal(good.theme, 'light');
+  const bad = await renderPreview('architecture', 'a [icon: \nb > > \n{{{', 'dark');
+  const kept = nextPreview(good, bad, 'architecture', 'dark');
+  assert.equal(kept?.stale, true);
+  assert.equal(kept?.theme, 'dark');
+  assert.notEqual(kept?.svg, good.svg);
+  const darkGood = await renderPreview('architecture', GOOD, 'dark');
+  assert.equal(kept?.svg, darkGood?.svg);
+  // a failed render repaints too
+  assert.equal(nextPreview(good, null, 'architecture', 'dark')?.svg, darkGood?.svg);
+  // same theme keeps the exact SVG
+  assert.equal(nextPreview(good, bad, 'architecture', 'light')?.svg, good.svg);
+});
