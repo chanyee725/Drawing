@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
 import { isRetryableSaveError } from './saveRetry';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
-import { DocPane } from './DocPane';
+// TipTap and the diagram renderer are big; they load when a file is first opened.
+const DocPane = lazy(() => import('./DocPane').then((m) => ({ default: m.DocPane })));
 import { CanvasPane } from './CanvasPane';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
@@ -416,17 +417,25 @@ export function App() {
   };
 
   const doc = file && path && (
-    <DocPane
-      key={`${path}#${loadSeq}`}
-      document={file.document}
-      blocks={file.blocks}
-      canvas={file.canvas}
-      dark={theme === 'dark'}
-      onDocument={(d) => edit({ document: d })}
-      onBlocks={(b: Block[]) => edit({ blocks: b })}
-      onShow={showBlock}
-      onExportBlock={blockExport}
-    />
+    <Suspense
+      fallback={
+        <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+          문서를 불러오는 중이에요…
+        </p>
+      }
+    >
+      <DocPane
+        key={`${path}#${loadSeq}`}
+        document={file.document}
+        blocks={file.blocks}
+        canvas={file.canvas}
+        dark={theme === 'dark'}
+        onDocument={(d) => edit({ document: d })}
+        onBlocks={(b: Block[]) => edit({ blocks: b })}
+        onShow={showBlock}
+        onExportBlock={blockExport}
+      />
+    </Suspense>
   );
   const canvas = (
     <CanvasPane
