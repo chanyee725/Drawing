@@ -202,3 +202,13 @@ test('children of a rejected group stay in the tree so every edge id resolves', 
     for (const e of ast.edges) assert.ok(ids.has(e.from) && ids.has(e.to), `${code}: ${e.from}>${e.to}`);
   }
 });
+
+test("a '}' glued into a name warns how to keep it; quoted braces and spaced braces stay quiet", () => {
+  const hint = "warning 2:4+1 '}' ends the block here. To use a '}' inside a name or label, put the text in quotes";
+  assert.ok(fmt(parseFlowchart('G {\n  a}b\n}').diagnostics).includes(hint));
+  assert.deepEqual(fmt(parseFlowchart('G {\n  "a}b"\n}').diagnostics), []);
+  assert.deepEqual(fmt(parseFlowchart('A > B: "x } y"').diagnostics), []);
+  assert.deepEqual(fmt(parseFlowchart('G { A }\nH {B}').diagnostics), []);
+  const { ast } = parseFlowchart('G {\n  "a}b" > C\n}');
+  assert.ok(JSON.stringify(ast).includes('"label":"a}b"'));
+});

@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -15,11 +14,8 @@ const OWN_GLYPHS = [
   'container', 'lock', 'globe', 'flag', 'mail', 'file', 'gear', 'chart', 'code', 'bell', 'search', 'placeholder',
 ];
 
-test('our own 24 glyphs are all still there, unchanged', () => {
-  assert.deepEqual(Object.keys(GLYPHS).sort(), [...OWN_GLYPHS].sort());
-  // Hash of the set as of develop 1d4e31b, before the Lucide / Simple Icons switch.
-  const hash = createHash('sha256').update(JSON.stringify(GLYPHS)).digest('hex');
-  assert.equal(hash, 'dd35c71ddd930cca5d4d14fa37f79f0fd0b2ce3e281c9779be098131ef1cdace');
+test('the placeholder is the only glyph drawn from our own artwork', () => {
+  assert.deepEqual(Object.keys(GLYPHS), ['placeholder']);
 });
 
 test('glyphFor gives the same answer as before for every keyword and sample name', () => {
