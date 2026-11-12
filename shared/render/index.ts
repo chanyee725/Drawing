@@ -13,7 +13,8 @@ export type * from './scene.ts';
 export { sceneToSvg } from './svg.ts';
 export type { SvgOptions } from './svg.ts';
 export type { Theme } from './theme.ts';
-export { glyphFor } from './icons.ts';
+export { glyphFor, iconFor } from './icons.ts';
+export type { IconSet, ResolvedIcon } from './icons.ts';
 
 /** Lay out a parsed diagram. Deterministic: the same AST always gives the same scene. */
 export function layoutDiagram(diagram: Diagram): Promise<Scene> {
