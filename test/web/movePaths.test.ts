@@ -83,3 +83,9 @@ test('session.rename can take the revision the server raised', () => {
   s.rename('b.dpx.json', 5);
   assert.equal(s.getState().file?.revision, 5);
 });
+
+test('the rename field starts from the file name without the extension, not the title', async () => {
+  const { renameInitial } = await import('../../web/src/movePaths.ts');
+  assert.equal(renameInitial({ type: 'file', name: 'arch.dpx.json' }), 'arch');
+  assert.equal(renameInitial({ type: 'folder', name: 'team.notes' }), 'team.notes');
+});

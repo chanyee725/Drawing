@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { TreeNode } from './api';
-import { dropTarget } from './movePaths';
+import { dropTarget, renameInitial } from './movePaths';
 
 const DRAG_TYPE = 'application/x-drawing-node';
 
@@ -105,10 +105,10 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
   );
   const nameEl = renaming ? (
     <RenameInput
-      initial={label}
+      initial={renameInitial(node)}
       onDone={(v) => {
         setRenaming(false);
-        if (v !== null && v.trim() !== label) p.onRename(node, v);
+        if (v !== null && v.trim() !== renameInitial(node)) p.onRename(node, v);
       }}
     />
   ) : (
