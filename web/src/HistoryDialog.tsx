@@ -73,7 +73,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
         setVersions(v);
         if (v[0]) setPicked(v[0].id);
       })
-      .catch((e) => live && (setVersions([]), setMessage(errText(e, '버전 기록을 불러오지 못했어요'))));
+      .catch(() => live && (setVersions([]), setMessage('버전 기록을 불러오지 못했어요')));
     return () => {
       live = false;
     };

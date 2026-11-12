@@ -122,7 +122,8 @@ export function createStore(
   const serialize = (file) => JSON.stringify(file, null, 2) + '\n';
 
   // ---- version history ----
-  // `.drawing/history/<file path>/<ms timestamp>.json` holds the serialized file as it was saved.
+  // `.drawing/history/<file path>/<ms timestamp>.json` holds the file as it was on disk just before a save
+  // overwrote it (the timestamp is that save's time), so the end of each edit session is kept.
   // History is a convenience: a failure here never fails the save, delete or move it belongs to.
   const historyDirOf = async (rel) => {
     try {
