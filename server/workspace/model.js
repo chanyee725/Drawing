@@ -6,7 +6,11 @@ export const FILE_EXT = '.dpx.json';
 // 1: before the document editor (E6). 2: `document` is the editor's own content. Every write stores
 // the current version; reads report the version the file was written with, so the web can tell
 // a file it has never opened with the document editor (and fill its document once).
-export const FORMAT_VERSION = 2;
+// 3: blocks may carry `layout` (node position overrides); an older server would drop it, so it must
+// treat v3 files as read-only.
+export const FORMAT_VERSION = 3;
+// Newest block `layout` sub-format this server validates; a higher `v` is kept verbatim.
+const LAYOUT_VERSION = 1;
 
 export const emptyDocument = () => ({ type: 'doc', content: [] });
 export const emptyCanvas = () => ({ elements: [], appState: {} });
@@ -26,6 +30,38 @@ export function newFile({ title = '' } = {}) {
   };
 }
 
+const isInt = (v) => Number.isInteger(v);
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+function normalizeLayout(l, at) {
+  if (!isObj(l)) throw new ValidationError(`${at} must be an object`);
+  if (!isInt(l.v) || l.v < 1) throw new ValidationError(`${at}.v must be an integer >= 1`);
+  if (l.v > LAYOUT_VERSION) return l; // written by a newer client: keep as-is, unread
+  const out = { v: l.v };
+  if (l.items !== undefined) {
+    if (!isObj(l.items)) throw new ValidationError(`${at}.items must be an object`);
+    const keys = Object.keys(l.items);
+    if (keys.length > 2000) throw new ValidationError(`${at}.items has more than 2000 entries`);
+    out.items = {};
+    for (const k of keys) {
+      const it = l.items[k];
+      if (k.length < 1 || k.length > 200) throw new ValidationError(`${at}.items keys must be 1-200 characters`);
+      if (!isObj(it) || !isNum(it.cx) || !isNum(it.cy) || typeof it.parent !== 'string') {
+        throw new ValidationError(`${at}.items["${k.slice(0, 40)}"] needs numeric cx, cy and a string parent`);
+      }
+      out.items[k] = { cx: it.cx, cy: it.cy, parent: it.parent };
+    }
+  }
+  if (l.basis !== undefined) {
+    const b = l.basis;
+    if (!isObj(b) || typeof b.type !== 'string' || typeof b.direction !== 'string' || !isInt(b.count) || b.count < 0) {
+      throw new ValidationError(`${at}.basis needs string type, string direction and integer count >= 0`);
+    }
+    out.basis = { type: b.type, direction: b.direction, count: b.count };
+  }
+  return out;
+}
+
 function normalizeBlock(b, i) {
   if (!isObj(b)) throw new ValidationError(`blocks[${i}] must be an object`);
   if (typeof b.id !== 'string' || !b.id) throw new ValidationError(`blocks[${i}].id must be a non-empty string`);
@@ -34,7 +70,9 @@ function normalizeBlock(b, i) {
   for (const k of ['x', 'y', 'w', 'h']) {
     if (typeof b[k] !== 'number' || !Number.isFinite(b[k])) throw new ValidationError(`blocks[${i}].${k} must be a number`);
   }
-  return { id: b.id, type: b.type, code: b.code, x: b.x, y: b.y, w: b.w, h: b.h };
+  const out = { id: b.id, type: b.type, code: b.code, x: b.x, y: b.y, w: b.w, h: b.h };
+  if (b.layout !== undefined) out.layout = normalizeLayout(b.layout, `blocks[${i}].layout`);
+  return out;
 }
 
 /** Validate client content (everything except `revision`, which the store owns). Missing sections get defaults. */

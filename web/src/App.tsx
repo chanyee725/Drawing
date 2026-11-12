@@ -1,5 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
+import { api, ApiError, type Block, FILE_FORMAT_VERSION, type DpxFile, type TreeNode } from './api';
 import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
 import { externalAction, type WorkspaceEvent } from './externalChange';
@@ -13,7 +13,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { DOC_FORMAT_VERSION, migrateDocument } from './doc/model';
+import { migrateDocument } from './doc/model';
 import { ExportMenu } from './ExportMenu';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
@@ -154,7 +154,7 @@ export function App() {
           } else if (!isRetryableSaveError(e)) {
             // The server refused this request (4xx); retrying the same body would fail forever.
             // Keep a pending edit timer: a newer edit may already have fixed the body.
-            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > DOC_FORMAT_VERSION;
+            const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > FILE_FORMAT_VERSION;
             problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
