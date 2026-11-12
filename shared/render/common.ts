@@ -202,7 +202,7 @@ export function finishScene(type: Scene['type'], d: DiagramBase, items: SceneIte
   if (d.title) {
     const size = 18;
     const lh = lineHeightOf(size);
-    items.push(textItem(d.title.split(/\r?\n/), b.x0, b.y0 - 16 - lh * d.title.split(/\r?\n/).length, { size, font: 'clean', anchor: 'start', weight: 600, tone: 'strong' }));
+    items.push(textItem(d.title.split(/\r?\n/), b.x0, b.y0 - 16 - lh * d.title.split(/\r?\n/).length, { size, font: pick<Typeface>(d.styles.typeface, ['rough', 'clean', 'mono']) ?? 'clean', anchor: 'start', weight: 600, tone: 'strong' }));
     b = boundsOf(items);
   }
   const origin = { x: round(PAD - b.x0), y: round(PAD - b.y0) };

@@ -178,3 +178,15 @@ test('the embedded rough font is the bundled OFL file', async () => {
   const license = readFileSync(fileURLToPath(new URL('shantell-sans-OFL.txt', dir)), 'utf8');
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/i);
 });
+
+test('the diagram title follows the global typeface', async () => {
+  const titleFont = async (code: string) => {
+    const { scene } = await renderDiagram(code, { type: 'flowchart' });
+    const t = scene.items.find((it) => it.kind === 'text' && it.lines[0] === 'My title');
+    assert.ok(t && t.kind === 'text');
+    return t.font;
+  };
+  assert.equal(await titleFont('title My title\nA > B'), 'clean');
+  assert.equal(await titleFont('typeface rough\ntitle My title\nA > B'), 'rough');
+  assert.equal(await titleFont('typeface mono\ntitle My title\nA > B'), 'mono');
+});
