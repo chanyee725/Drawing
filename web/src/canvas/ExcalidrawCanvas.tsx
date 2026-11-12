@@ -9,7 +9,7 @@ import type { Block } from '../api';
 import { BlockEditor } from '../BlockEditor';
 import { DIAGRAM_TYPES, isDiagramType } from '../dsl/templates';
 import { renderBlock, type BlockPicture } from './render';
-import { applyScene, blockIdOf, blockImageSkeleton, fitHeight, freeSignature, splitScene, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
 
@@ -24,6 +24,20 @@ const theme = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
 // Pictures are always drawn light: Excalidraw's dark mode inverts the whole canvas, images included.
 const PIC_THEME = 'light';
 const newElId = (blockId: string) => `blk_${blockId}_${Math.random().toString(36).slice(2, 8)}`;
+const liveRects = (els: readonly ExcalidrawElement[]): Rect[] => els.filter((e) => !e.isDeleted).map((e) => rectOf(e));
+
+/**
+ * Where a block's image goes. A placed block keeps its spot and width (height follows the picture);
+ * a block never placed gets the picture's own size and a spot clear of everything in `taken`.
+ */
+function placeBlock(b: Block, p: BlockPicture, taken: Rect[]): Block {
+  if (!isUnplaced(b)) return { ...b, h: fitHeight(b.w, p.width, p.height) };
+  const spot = findFreeSpot(p.width, p.height, taken);
+  const out = { ...b, ...spot, w: p.width, h: p.height };
+  taken.push(out);
+  return out;
+}
+
 const fileData = (p: BlockPicture): BinaryFileData => ({ id: p.fileId as FileId, mimeType: 'image/svg+xml', dataURL: p.dataURL as BinaryFileData['dataURL'], created: Date.now() });
 
 const UI_OPTIONS = {
@@ -56,8 +70,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
       for (const p of pics) sizes.current.set(p.fileId, p);
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
+      // Placed blocks first, so blocks still to place keep clear of them.
+      const taken = [...liveRects(free), ...blocks.filter((b) => !isUnplaced(b)).map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }))];
       const images = restoreElements(
-        blocks.map((b, i) => blockImageSkeleton({ ...b, h: fitHeight(b.w, pics[i].width, pics[i].height) }, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
+        blocks.map((b, i) => blockImageSkeleton(placeBlock(b, pics[i], taken), pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
       );
       return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), scrollToContent: true };
@@ -101,10 +117,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, dark, onChange }: Pro
       const missing = blocks.filter((b) => !shown.has(b.id));
       if (missing.length) {
         changed = true;
+        const taken = liveRects(next);
         const skeletons = missing.map((b) => {
           const p = pics[index.get(b.id)!];
-          // A block new to the canvas starts at the picture's own size.
-          return blockImageSkeleton({ ...b, w: p.width, h: p.height }, p.fileId, newElId(b.id)) as unknown as ExcalidrawElement;
+          return blockImageSkeleton(placeBlock(b, p, taken), p.fileId, newElId(b.id)) as unknown as ExcalidrawElement;
         });
         next.push(...restoreElements(skeletons, null));
       }

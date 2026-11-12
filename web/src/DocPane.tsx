@@ -11,8 +11,8 @@ export function DocPane({ blocks, dark, onBlocks }: Props) {
   const patch = (id: string, p: Partial<Block>) => onBlocks(blocks.map((b) => (b.id === id ? { ...b, ...p } : b)));
   const add = () => {
     const type: DiagramType = 'architecture';
-    // Position/size are placeholders; E5 places blocks on the canvas.
-    onBlocks([...blocks, { id: newId(), type, code: TEMPLATES[type], x: 80 + blocks.length * 40, y: 80 + blocks.length * 40, w: 640, h: 400 }]);
+    // w = 0 marks a block not yet on the canvas; the canvas gives it the picture's size and a free spot.
+    onBlocks([...blocks, { id: newId(), type, code: TEMPLATES[type], x: 0, y: 0, w: 0, h: 0 }]);
   };
   return (
     <section className="mx-auto flex max-w-3xl flex-col gap-6 p-6" aria-label="문서">

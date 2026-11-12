@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, fitHeight, freeSignature, splitScene, type SceneEl } from '../../web/src/canvas/sync.ts';
+import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from '../../web/src/canvas/sync.ts';
 
 const block = (id: string, x = 0) => ({ id, type: 'flowchart', code: 'A > B', x, y: 0, w: 200, h: 100 });
 const img = (id: string, x: number, extra: Partial<SceneEl> = {}): SceneEl => ({ id: `blk_${id}`, type: 'image', x, y: 0, width: 200, height: 100, customData: { blockId: id }, ...extra });
@@ -68,4 +68,44 @@ test('blockImageSkeleton links the image to its block', () => {
 test('fitHeight keeps the picture aspect ratio', () => {
   assert.equal(fitHeight(400, 200, 100), 200);
   assert.equal(fitHeight(400, 0, 0), 400);
+});
+
+test('isUnplaced flags new blocks and the old 640x400 placeholder only', () => {
+  assert.equal(isUnplaced({ x: 0, y: 0, w: 0, h: 0 }), true);
+  assert.equal(isUnplaced({ x: 80, y: 80, w: 640, h: 400 }), true);
+  assert.equal(isUnplaced({ x: 0, y: 0, w: 200, h: 100 }), false);
+  assert.equal(isUnplaced({ x: 0, y: 0, w: 640, h: 401 }), false);
+});
+
+test('findFreeSpot starts at the origin on an empty canvas', () => {
+  assert.deepEqual(findFreeSpot(100, 50, []), { x: 0, y: 0 });
+});
+
+const hit = (a: Rect, b: Rect) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+test('findFreeSpot never overlaps what is already there', () => {
+  const taken: Rect[] = [];
+  const sizes = [
+    [300, 600],
+    [120, 80],
+    [500, 200],
+    [90, 1300],
+    [200, 200],
+    [640, 100],
+  ];
+  for (const [w, h] of sizes) {
+    const p = findFreeSpot(w, h, taken);
+    const r = { ...p, w, h };
+    for (const t of taken) assert.equal(hit(r, t), false, `${JSON.stringify(r)} overlaps ${JSON.stringify(t)}`);
+    taken.push(r);
+  }
+});
+
+test('findFreeSpot fills a gap next to existing content before going far away', () => {
+  const p = findFreeSpot(100, 100, [{ x: 0, y: 0, w: 200, h: 200 }]);
+  assert.deepEqual(p, { x: 240, y: 0 });
+});
+
+test('rectOf normalizes negative line sizes', () => {
+  assert.deepEqual(rectOf({ x: 10, y: 10, width: -5, height: 20 }), { x: 5, y: 10, w: 5, h: 20 });
 });

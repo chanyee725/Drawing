@@ -130,3 +130,37 @@ export function blockImageSkeleton(b: BlockLike, fileId: string, id: string) {
     customData: { blockId: b.id },
   };
 }
+
+/**
+ * True for a block that was never placed on the canvas: new blocks are created with w = 0. Blocks
+ * saved before the canvas existed carry the old 640×400 placeholder and are treated the same.
+ */
+export const isUnplaced = (b: BlockGeom) => !(b.w > 0 && b.h > 0) || (b.w === 640 && b.h === 400);
+
+export type Rect = { x: number; y: number; w: number; h: number };
+
+const overlaps = (a: Rect, b: Rect, gap: number) => a.x < b.x + b.w + gap && b.x < a.x + a.w + gap && a.y < b.y + b.h + gap && b.y < a.y + a.h + gap;
+
+/** Box of a scene element, for placement. Rotation is ignored; lines may have negative sizes. */
+export const rectOf = (el: Pick<SceneEl, 'x' | 'y' | 'width' | 'height'>): Rect => ({
+  x: Math.min(el.x, el.x + el.width),
+  y: Math.min(el.y, el.y + el.height),
+  w: Math.abs(el.width),
+  h: Math.abs(el.height),
+});
+
+/**
+ * Top-left corner for a `w`×`h` box that keeps `gap` clear of every rect in `taken`. Tries the
+ * spots right of and below each taken rect (plus the top-left of everything), in reading order.
+ */
+export function findFreeSpot(w: number, h: number, taken: readonly Rect[], gap = 40): { x: number; y: number } {
+  if (!taken.length) return { x: 0, y: 0 };
+  const minX = Math.min(...taken.map((r) => r.x));
+  const minY = Math.min(...taken.map((r) => r.y));
+  const spots = [{ x: minX, y: minY }];
+  for (const r of taken) spots.push({ x: r.x + r.w + gap, y: r.y }, { x: minX, y: r.y + r.h + gap }, { x: r.x, y: r.y + r.h + gap });
+  spots.sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const s of spots) if (!taken.some((r) => overlaps({ ...s, w, h }, r, gap))) return { x: round(s.x), y: round(s.y) };
+  // Unreachable: the spot below the lowest rect is always free. Kept as a safe fallback.
+  return { x: minX, y: round(Math.max(...taken.map((r) => r.y + r.h)) + gap) };
+}
