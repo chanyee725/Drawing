@@ -68,13 +68,22 @@ function picture(blockId: string, r: { svg: string; width: number; height: numbe
  */
 export function renderBlock(b: BlockLike, theme: 'light' | 'dark'): Promise<BlockPicture> {
   const key = `${b.id}\n${theme}`;
+  const sig = `${b.type}\n${b.code}`;
+  // Same code as the latest call (a drag or resize calls again with only the position changed): reuse it.
+  const latest = latestCall.get(key);
+  if (latest?.sig === sig) return latest.result;
   const run = (queue.get(key) ?? Promise.resolve())
     .then(() => draw(b, theme, key))
     .catch(() => placeholder('그리지 못했어요. 코드를 확인해 주세요', theme))
     .then((r) => picture(b.id, r));
   queue.set(key, run);
+  latestCall.set(key, { sig, result: run });
+  if (latestCall.size > 500) latestCall.delete(latestCall.keys().next().value!);
   return run;
 }
+
+// The latest call per block + theme, so a call with unchanged code does no work.
+const latestCall = new Map<string, { sig: string; result: Promise<BlockPicture> }>();
 
 async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
   if (!analyzeDiagram(b.type, '').parsed) {

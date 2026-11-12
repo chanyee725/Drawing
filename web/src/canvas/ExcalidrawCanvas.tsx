@@ -113,10 +113,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     [],
   );
 
+  // What the images depend on: which blocks exist and their type and code, not where they sit. Dragging a
+  // block changes `blocks` on every frame; this key stays the same, so nothing below runs.
+  const drawKey = useMemo(() => JSON.stringify(blocks.map((b) => [b.id, b.type, b.code])), [blocks]);
+
   // Keep block images in step with the block list: new code → new picture, new block → new image, removed block → gone.
   useEffect(() => {
     if (!api) return;
     let live = true;
+    const blocks = blocksRef.current;
     void Promise.all(blocks.map((b) => renderBlock(b, PIC_THEME))).then((pics) => {
       if (!live) return;
       for (const p of pics) sizes.current.set(p.fileId, p);
@@ -161,7 +166,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     return () => {
       live = false;
     };
-  }, [api, blocks, tryFocus]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api, drawKey, tryFocus]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
