@@ -1,5 +1,6 @@
 // HTTP app: API routes from feature modules, SSE hub, static files from public/.
 import { createServer } from 'node:http';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHub } from './events.js';
 import { serveStatic } from './static.js';
@@ -19,7 +20,11 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
   const hub = createHub();
   const ctx = { workspaceDir: opts.workspaceDir, hub, modules: {} };
-  const routes = [{ method: 'GET', path: '/api/events', handler: (req, res, _ctx, _match, url) => hub.attach(req, res, url) }];
+  const routes = [
+    { method: 'GET', path: '/api/events', handler: (req, res) => hub.attach(req, res) },
+    // Folder name only, never the full path.
+    { method: 'GET', path: '/api/info', handler: (req, res) => sendJson(res, 200, { workspace: basename(ctx.workspaceDir ?? '') }) },
+  ];
   const closers = [];
 
   for (const { name, setup } of moduleList) {

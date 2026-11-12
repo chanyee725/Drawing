@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { createApp } from '../server/app.js';
 
 test('server serves index.html, unknown API is 404, module routes are mounted', async () => {
@@ -22,6 +22,8 @@ test('server serves index.html, unknown API is 404, module routes are mounted', 
     assert.equal((await fetch(`${base}/some/deep/link`)).status, 200);
     assert.equal(await (await fetch(`${base}/api/demo`)).text(), 'ok');
     assert.equal((await fetch(`${base}/api/nope`)).status, 404);
+    const info = await (await fetch(`${base}/api/info`)).json();
+    assert.equal(info.workspace, basename(pub));
   } finally {
     await app.close();
     await rm(pub, { recursive: true, force: true });

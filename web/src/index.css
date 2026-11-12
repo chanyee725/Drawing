@@ -1,1 +1,33 @@
 @import "tailwindcss";
+
+/* Theme tokens. Dark follows the OS until the theme switch lands in E4. */
+:root {
+  --surface: #ffffff;
+  --elevated: #f7f7f8;
+  --border: #e4e4e7;
+  --text: #18181b;
+  --text-muted: #71717a;
+  --accent: #6d4aff;
+  --accent-soft: #efeaff;
+  --dot: #d4d4d8;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface: #18181b;
+    --elevated: #202024;
+    --border: #2e2e33;
+    --text: #f4f4f5;
+    --text-muted: #a1a1aa;
+    --accent: #9d86ff;
+    --accent-soft: #2a2447;
+    --dot: #3f3f46;
+  }
+}
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: var(--surface);
+  color: var(--text);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+}
