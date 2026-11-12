@@ -46,7 +46,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
       )}
       <span
         className={`min-w-0 shrink-0 truncate text-xs md:shrink md:inline ${statusAlert ? 'inline font-medium' : 'hidden'}`}
-        style={{ color: statusAlert ? 'var(--danger, #c0392b)' : 'var(--text-muted)' }}
+        style={{ color: statusAlert ? 'var(--danger)' : 'var(--text-muted)' }}
         role={statusAlert ? 'alert' : undefined}
         aria-live="polite"
         title={status}
