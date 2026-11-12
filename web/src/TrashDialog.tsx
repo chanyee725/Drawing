@@ -13,6 +13,7 @@ const label = (path: string) => path.replace(/\.dpx\.json$/, '');
 // Server messages are English; show Korean copy by status, never the raw message.
 const errText = (e: unknown) => {
   const status = e instanceof ApiError ? e.status : 0;
+  if (status === 409 && /parent/.test(e instanceof Error ? e.message : '')) return '같은 이름의 파일이 있는 자리라 되살릴 수 없어요. 그 파일의 이름을 바꾼 뒤 다시 해 보세요';
   if (status === 409) return '같은 이름의 파일이 이미 있어요. 이름을 바꾸거나 지운 뒤 다시 해 보세요';
   if (status === 404) return '이미 정리된 파일이에요';
   if (status === 422) return '이 파일은 읽을 수 없어서 되살리지 못했어요';
@@ -34,6 +35,12 @@ export function TrashDialog({ onClose, onRestored }: Props) {
     void load();
     closeRef.current?.focus();
   }, []);
+  // Esc closes from anywhere: after a restore the clicked button is gone and focus would fall to the page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const restore = async (item: TrashItem) => {
     if (busy) return;
@@ -48,6 +55,7 @@ export function TrashDialog({ onClose, onRestored }: Props) {
       if (e instanceof ApiError && e.status === 404) void load();
     } finally {
       setBusy(null);
+      closeRef.current?.focus(); // the restored row (and its button) is gone: keep focus inside the dialog
     }
   };
 
@@ -59,7 +67,6 @@ export function TrashDialog({ onClose, onRestored }: Props) {
         aria-label="최근에 지운 파일"
         className="flex h-[min(32rem,calc(100%-2rem))] w-[min(36rem,100%)] flex-col overflow-hidden rounded-lg border shadow-xl"
         style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-        onKeyDown={(e) => e.key === 'Escape' && onClose()}
       >
         <div className="flex items-center gap-2 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
           <h2 className="mr-auto font-medium">최근에 지운 파일</h2>

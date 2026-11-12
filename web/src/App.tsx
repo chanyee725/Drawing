@@ -374,6 +374,7 @@ export function App() {
     const from = n.path;
     ownMoves.current.add(from);
     setTimeout(() => ownMoves.current.delete(from), 5000);
+    let readFailed = false;
     try {
       await session.flush();
       const r = await api.move(from, to, n.type);
@@ -381,6 +382,7 @@ export function App() {
       if (next) {
         // The revision is re-read: a name that was deleted before makes the server raise it.
         const fresh = await api.readFile(next).catch(() => null);
+        if (!fresh) readFailed = true;
         session.rename(next, fresh?.revision);
         setHashPath(next);
       }
@@ -393,6 +395,8 @@ export function App() {
         }
       }
       await refreshTree();
+      // The move worked but the new revision is unknown: the next save may ask to choose a version, so say why.
+      if (readFailed) setError('옮겼어요. 다만 파일을 다시 읽지 못했어요. 저장이 안 되면 화면을 새로 고쳐 주세요');
     } catch (e) {
       ownMoves.current.delete(from);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));

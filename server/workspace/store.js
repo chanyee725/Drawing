@@ -32,7 +32,7 @@ const TRASH_ID = /^\d{13}-[0-9a-f]{8}$/;
 
 export function createStore(
   workspaceDir,
-  { onExternalChange, watchDebounceMs = 60, watchFn = watch, now = Date.now, historyIntervalMs = HISTORY_INTERVAL_MS, historyMax = HISTORY_MAX } = {},
+  { onExternalChange, watchDebounceMs = 60, watchRestartMs = 1000, watchFn = watch, now = Date.now, historyIntervalMs = HISTORY_INTERVAL_MS, historyMax = HISTORY_MAX } = {},
 ) {
   const fsr = createResolver(workspaceDir);
   const known = new Map(); // rel file path -> { hash, revision } of the content we last wrote or saw
@@ -342,7 +342,14 @@ export function createStore(
       const rel = entry.path;
       if (!isDpx(rel)) throw new StoreError(404, 'not in the trash');
       checkFolderNames(rel.split('/').slice(0, -1));
-      const abs = await wrapPath(rel);
+      let abs;
+      try {
+        abs = await wrapPath(rel);
+      } catch (err) {
+        // A file now sits where one of the folders used to be: say so instead of a generic failure.
+        if (err?.code === 'ENOTDIR') throw new StoreError(409, 'a parent in the path is a file');
+        throw err;
+      }
       if (await statOrNull(abs)) throw new StoreError(409, 'a file already exists at that path');
       const histDir = join(dir, 'history');
       const hasHist = (await statOrNull(histDir))?.isDirectory() === true;
@@ -754,25 +761,68 @@ export function createStore(
     onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: file.revision });
   }
 
+  let closed = false;
+  let restartTimer = null;
+  let restartDelay = watchRestartMs;
+  let healthyTimer = null;
+  // Logged once per server run: a watcher that keeps failing must not fill the log.
+  let warned = false;
+
+  function watchRoot() {
+    watcher = watchFn(fsr.root, { recursive: true }, (_ev, filename) => {
+      if (!filename) return;
+      const rel = String(filename).split('\\').join('/');
+      clearTimeout(timers.get(rel));
+      timers.set(rel, setTimeout(() => {
+        timers.delete(rel);
+        reconcile(rel).catch(() => {});
+      }, watchDebounceMs));
+    });
+    const mine = watcher;
+    // Errors after start (the root removed, watch limit hit, ...) arrive here. Log the code once, no path,
+    // then try to watch again: a dead watcher would stop noticing outside edits without any sign.
+    mine.on('error', (err) => {
+      if (!warned) {
+        warned = true;
+        console.warn(`workspace: watching for outside changes failed (${err?.code ?? 'error'}), retrying`);
+      }
+      try { mine.close(); } catch { /* already closed */ }
+      if (watcher === mine) watcher = null;
+      // A watcher that dies right after starting (ENOSPC on a recursive watch, ...) backs off instead of
+      // restarting every second; the delay resets only after a watcher has stayed up for a while.
+      clearTimeout(healthyTimer);
+      healthyTimer = null;
+      scheduleRestart();
+      restartDelay = Math.min(restartDelay * 2, 30000);
+    });
+  }
+
+  function scheduleRestart() {
+    if (closed || restartTimer) return;
+    restartTimer = setTimeout(async () => {
+      restartTimer = null;
+      if (closed) return;
+      try {
+        watchRoot();
+        healthyTimer = setTimeout(() => { restartDelay = watchRestartMs; }, 60000);
+        healthyTimer.unref?.();
+        // Catch what changed while nothing was watching (known files only; new ones show up with the next tree refresh).
+        for (const rel of [...known.keys()]) {
+          if (closed) break;
+          await reconcile(rel).catch(() => {});
+        }
+      } catch {
+        restartDelay = Math.min(restartDelay * 2, 30000);
+        scheduleRestart();
+      }
+    }, restartDelay);
+    restartTimer.unref?.();
+  }
+
   async function startWatching() {
     await scan(fsr.root, '');
     try {
-      watcher = watchFn(fsr.root, { recursive: true }, (_ev, filename) => {
-        if (!filename) return;
-        const rel = String(filename).split('\\').join('/');
-        clearTimeout(timers.get(rel));
-        timers.set(rel, setTimeout(() => {
-          timers.delete(rel);
-          reconcile(rel).catch(() => {});
-        }, watchDebounceMs));
-      });
-      // Errors after start (the root removed, watch limit hit, ...) arrive here. Log the code once, no path.
-      let warned = false;
-      watcher.on('error', (err) => {
-        if (warned) return;
-        warned = true;
-        console.warn(`workspace: watching for outside changes failed (${err?.code ?? 'error'})`);
-      });
+      watchRoot();
     } catch (err) {
       // EACCES, ENOSPC (watch limit), ...: the app still works, outside edits are just not noticed until a file is read or saved. No path in the log.
       console.warn(`workspace: not watching for outside changes (${err?.code ?? 'error'})`);
@@ -780,6 +830,9 @@ export function createStore(
   }
 
   function close() {
+    closed = true;
+    clearTimeout(restartTimer);
+    clearTimeout(healthyTimer);
     watcher?.close();
     for (const t of timers.values()) clearTimeout(t);
     timers.clear();

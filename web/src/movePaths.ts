@@ -8,6 +8,9 @@ export const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 export const parentPath = (p: string) => (p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '');
 const join = (dir: string, name: string) => (dir ? `${dir}/${name}` : name);
 
+/** What the rename field starts with: the file name without its extension (the title is not the name), or the folder name. */
+export const renameInitial = (node: Pick<TreeNode, 'type' | 'name'>): string => (node.type === 'file' ? stem(node.name) : node.name);
+
 /** Where `node` lands when dropped on folder `dir` ('' = the workspace root); null when that is a no-op or impossible. */
 export function dropTarget(node: Pick<TreeNode, 'type' | 'path'>, dir: string): string | null {
   if (node.type === 'folder' && (dir === node.path || dir.startsWith(`${node.path}/`))) return null;

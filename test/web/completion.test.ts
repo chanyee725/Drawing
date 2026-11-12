@@ -68,3 +68,19 @@ test('bpmn gets no attribute suggestions', () => {
   assert.equal(attributeCompletions('bpmn', 'Open website ['), null);
   assert.equal(attributeCompletions('bpmn', 'A [icon: '), null);
 });
+
+test('a word that only ends in "legend" is not a legend block', () => {
+  assert.ok(!labels(attributeCompletions('flowchart', '[', 'my-legend {\n')).includes('connection'));
+  assert.ok(!labels(attributeCompletions('flowchart', '[', 'legend-x {\n')).includes('connection'));
+  assert.ok(!labels(attributeCompletions('flowchart', 'my-legend [')).includes('connection'));
+  assert.ok(labels(attributeCompletions('flowchart', '[', 'legend {\n')).includes('connection'));
+});
+
+test('the text above the cursor is only read at the start of an item line', () => {
+  let reads = 0;
+  const above = () => (reads++, 'legend {\n');
+  attributeCompletions('flowchart', 'A [co', above);
+  assert.equal(reads, 0);
+  assert.ok(labels(attributeCompletions('flowchart', '  [', above)).includes('connection'));
+  assert.equal(reads, 1);
+});

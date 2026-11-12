@@ -203,3 +203,9 @@ test('the legend follows the global typeface like the title', async () => {
   assert.ok(legendText, 'legend label is drawn');
   assert.match(legendText![1]!, /mono|Mono/i);
 });
+
+test('an icon name equal to any glyph name picks that glyph', async () => {
+  const { glyphFor } = await import('../../shared/render/index.ts');
+  for (const g of ['user', 'queue', 'balancer', 'bucket', 'placeholder', 'search'] as const) assert.equal(glyphFor(g), g);
+  assert.equal(glyphFor('  Queue '), 'queue');
+});
