@@ -74,7 +74,7 @@ export function parseErd(c: Cursor): ErdDiagram {
     for (;;) {
       const t = c.peek();
       if (t.kind === 'eof') {
-        c.error(open, `Missing closing '}' for entity '${entity?.name ?? ''}'`);
+        c.error(open, entity ? `Missing closing '}' for entity '${entity.name}'` : "Missing closing '}'");
         return;
       }
       if (t.kind === 'newline') c.next();

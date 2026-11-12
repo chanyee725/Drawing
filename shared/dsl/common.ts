@@ -245,13 +245,16 @@ export interface ConnectionTail {
   attrsSpan?: Span;
 }
 
-/** Parses `: label [attrs]` to the end of the line. Without a colon returns an empty tail. */
-export function parseConnectionTail(c: Cursor): ConnectionTail {
+/**
+ * Parses `: label [attrs]` to the end of the line. Without a colon returns an empty tail.
+ * Inside a group (`inGroup`) a `}` ends the label too, so `G { a > b: hi }` closes the group.
+ */
+export function parseConnectionTail(c: Cursor, inGroup = false): ConnectionTail {
   if (c.peek().kind !== 'colon') return { hasColon: false, attrs: {} };
   c.next();
   const start = c.pos;
   let end = start;
-  while (c.tokens[end]!.kind !== 'newline' && c.tokens[end]!.kind !== 'eof') end++;
+  while (c.tokens[end]!.kind !== 'newline' && c.tokens[end]!.kind !== 'eof' && !(inGroup && c.tokens[end]!.kind === 'rbrace')) end++;
   let bracket = -1;
   for (let k = end - 1; k >= start; k--) {
     if (c.tokens[k]!.kind === 'lbracket') {

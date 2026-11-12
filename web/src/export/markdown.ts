@@ -6,12 +6,18 @@ import { DIAGRAM_NODE, type DocNode } from '../doc/model.ts';
 type Mark = { type: string; attrs?: Record<string, unknown> };
 type N = DocNode & { text?: string; marks?: Mark[] };
 
-const escInline = (s: string) => s.replace(/([\\`*_[\]<>])/g, '\\$1');
+const escInline = (s: string) => s.replace(/([\\`*_[\]<>~])/g, '\\$1');
 /**
  * Line-start markers that would turn plain text into a heading, bullet, numbered item, rule or setext underline,
  * also after 1-3 leading spaces. Only the marker character is escaped.
  */
 const escStart = (s: string) => {
+  // 4+ spaces or a tab would make an indented code block: the first space or tab becomes an entity.
+  const deep = /^( {0,3}\t| {4})/.exec(s);
+  if (deep) {
+    const at = deep[0].length - 1;
+    return s.slice(0, at) + (s[at] === '\t' ? '&#9;' : '&#32;') + s.slice(at + 1);
+  }
   const [, lead = '', rest = ''] = /^( {0,3})([\s\S]*)$/.exec(s) ?? [];
   const esc = (r: string) =>
     /^#{1,6}(?=[ \t]|$)/.test(r) ? '\\' + r
@@ -136,8 +142,9 @@ export function exportName(title: string, ext: string): string {
   return `${stem}.${ext}`;
 }
 
-/** The file name stem for one block: the document title plus the block's type and 1-based position, so exports don't overwrite each other. */
+/** The file name stem for one block: the document title plus the block's type and its 1-based position among blocks of that type, so exports don't overwrite each other. */
 export function blockExportTitle(title: string, block: Block, blocks: readonly Block[]): string {
-  const i = blocks.findIndex((b) => b.id === block.id);
+  const same = blocks.filter((b) => b.type === block.type);
+  const i = same.findIndex((b) => b.id === block.id);
   return `${title.trim() || '제목 없는 파일'} - ${block.type} ${i < 0 ? 1 : i + 1}`;
 }
