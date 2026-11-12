@@ -73,6 +73,14 @@ const inFrames = (blocks: Block[], els: CanvasEl[]): Block[] => {
   return blocks.filter((b) => frames.some((f) => blocksInFrame({ x: f.x ?? 0, y: f.y ?? 0, width: f.width ?? 0, height: f.height ?? 0 }, [b]).length));
 };
 const sameFrameBlocks = (a: Block[], b: Block[]) => sameDrawing(a, b) && a.every((x, i) => x.x === b[i].x && x.y === b[i].y && x.w === b[i].w && x.h === b[i].h);
+function useSettled<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
 const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onShowFrame, onExportBlock, onFail }: DocSlotProps) {
   const path = useSession(session, (s) => s.path ?? '');
   const key = useSession(session, (s) => `${s.path}#${s.loadSeq}`);
@@ -81,7 +89,9 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
   // Frames and their contents: a new array only when one of those changes (not when a block or other drawing does).
   const frameScene = useSession(session, (s) => sceneOf(elementsOf(s.file?.canvas)), (a, b) => frameSceneSig(a) === frameSceneSig(b));
   // Blocks inside a frame, with where they sit: the frame preview draws them (they are not canvas elements).
-  const frameBlocks = useSession(session, (s) => inFrames(s.file?.blocks ?? NO_BLOCKS, elementsOf(s.file?.canvas)), sameFrameBlocks);
+  const liveFrameBlocks = useSession(session, (s) => inFrames(s.file?.blocks ?? NO_BLOCKS, elementsOf(s.file?.canvas)), sameFrameBlocks);
+  // A block dragged inside a frame changes this many times a second; the preview (and the pane's context) follows once it settles.
+  const frameBlocks = useSettled(liveFrameBlocks, 250);
   const getBlocks = useCallback(() => session.getState().file?.blocks ?? NO_BLOCKS, [session]);
   const getCanvas = useCallback(() => session.getState().file?.canvas, [session]);
   const onDocument = useCallback((d: unknown) => session.edit({ document: d }), [session]);

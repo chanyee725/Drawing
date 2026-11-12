@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { getSchema } from '@tiptap/core';
 import { Node as PMNode } from '@tiptap/pm/model';
 import { docExtensions } from '../../web/src/doc/extensions.ts';
-import { blocksInFrame, filterSlash, frameItems, frameLabel, frameNode, frameScene, frameSceneSig, framesOf, resolveFrame } from '../../web/src/doc/model.ts';
+import { blockPlacements, blocksInFrame, filterSlash, frameItems, frameLabel, frameNode, frameScene, frameSceneSig, framesOf, resolveFrame } from '../../web/src/doc/model.ts';
 
 const canvas = {
   elements: [
@@ -17,7 +17,7 @@ const canvas = {
 };
 
 test('framesOf lists live frames; unnamed ones are numbered', () => {
-  assert.deepEqual(framesOf(canvas), [{ id: 'f1', name: '개요', named: true }, { id: 'f2', name: '프레임 2', named: false }]);
+  assert.deepEqual(framesOf(canvas), [{ id: 'f1', name: '개요', named: true }, { id: 'f2', name: '프레임 1', named: false }]);
   assert.deepEqual(framesOf(null), []);
 });
 
@@ -62,4 +62,32 @@ test('blocksInFrame keeps blocks whose centre is inside the frame', () => {
     { id: 'unplaced', x: 150, y: 150, w: 0, h: 0 },
   ];
   assert.deepEqual(blocksInFrame(frame, blocks).map((b) => b.id), ['in', 'edge']);
+});
+
+test('unnamed frames are numbered among themselves; a named frame in between does not shift them', () => {
+  const els = [
+    { id: 'a', type: 'frame', name: '' },
+    { id: 'b', type: 'frame', name: '구조도' },
+    { id: 'c', type: 'magicframe' },
+    { id: 'd', type: 'frame', name: 'x', isDeleted: true },
+    { id: 'e', type: 'frame', name: '  ' },
+  ];
+  assert.deepEqual(framesOf({ elements: els }).map((f) => f.name), ['프레임 1', '구조도', '프레임 2', '프레임 3']);
+});
+
+test('blockPlacements offsets blocks by the frame origin and padding, clipped to the frame', () => {
+  const frame = { x: 100, y: 50, width: 400, height: 300 };
+  const blocks = [
+    { id: 'in', x: 120, y: 60, w: 200, h: 100 },
+    { id: 'edge', x: 450, y: 300, w: 200, h: 100 }, // centre (550, 350) is outside
+    { id: 'out', x: 900, y: 900, w: 50, h: 50 },
+    { id: 'half', x: 400, y: 100, w: 200, h: 100 }, // centre (500, 150) is on the edge, kept; sticks out and is clipped
+  ];
+  const { clip, images } = blockPlacements(frame, blocks, 8);
+  assert.deepEqual(clip, { x: 8, y: 8, width: 400, height: 300 });
+  assert.deepEqual(images, [
+    { id: 'in', x: 28, y: 18, width: 200, height: 100 },
+    { id: 'half', x: 308, y: 58, width: 200, height: 100 },
+  ]);
+  assert.deepEqual(blockPlacements(frame, [], 8).images, []);
 });
