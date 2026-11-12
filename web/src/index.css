@@ -197,3 +197,4 @@ body {
   outline: none;
 }
 .canvas-insert input:focus { border-color: var(--accent); }
+.doc-frame .doc-diagram-pic img { background: #fff; }

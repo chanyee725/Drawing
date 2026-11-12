@@ -2,6 +2,7 @@ import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from '
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
+import { frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
@@ -15,6 +16,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
+import { dropTarget, moveErrorText, nameProblem, pathAfterMove, renameTarget } from './movePaths';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
@@ -56,14 +58,21 @@ type DocSlotProps = {
   onOpenFile: (path: string) => void;
   onNotice: (message: string) => void;
   onShow: (blockId: string) => void;
+  onShowFrame: (frameId: string) => void;
   onExportBlock: (b: Block, kind: ImageKind) => void;
   onFail: () => Promise<boolean>;
 };
-const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onExportBlock, onFail }: DocSlotProps) {
+const elementsOf = (canvas: unknown): CanvasEl[] => {
+  const els = (canvas as { elements?: unknown } | null | undefined)?.elements;
+  return Array.isArray(els) ? (els as CanvasEl[]) : [];
+};
+const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, onNotice, onShow, onShowFrame, onExportBlock, onFail }: DocSlotProps) {
   const path = useSession(session, (s) => s.path ?? '');
   const key = useSession(session, (s) => `${s.path}#${s.loadSeq}`);
   // Blocks as drawn: a new array only when a block's id, type or code changes, not when it moves.
   const blocks = useSession(session, (s) => s.file?.blocks ?? NO_BLOCKS, sameDrawing);
+  // Frames and their contents: a new array only when one of those changes (not when a block or other drawing does).
+  const frameScene = useSession(session, (s) => sceneOf(elementsOf(s.file?.canvas)), (a, b) => frameSceneSig(a) === frameSceneSig(b));
   const getBlocks = useCallback(() => session.getState().file?.blocks ?? NO_BLOCKS, [session]);
   const getCanvas = useCallback(() => session.getState().file?.canvas, [session]);
   const onDocument = useCallback((d: unknown) => session.edit({ document: d }), [session]);
@@ -93,6 +102,8 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
           onDocument={onDocument}
           onBlocks={onBlocks}
           onShow={onShow}
+          frameScene={frameScene}
+          onShowFrame={onShowFrame}
           onExportBlock={onExportBlock}
         />
       </Suspense>
@@ -317,6 +328,11 @@ export function App() {
       } catch {
         return;
       }
+      // This tab's own move already renames the open file; the echo must not close it.
+      if (e.kind === 'tree' && e.from !== undefined && ownMoves.current.delete(e.from)) {
+        void refreshTree();
+        return;
+      }
       if (session.external(e, (p) => api.readFile(p), load) === 'close') {
         setHashPath(null);
         // Our own delete can be announced before its response arrives: that close needs no error.
@@ -326,6 +342,48 @@ export function App() {
     });
     return () => es.close();
   }, [session, load, refreshTree]);
+
+  // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
+  const ownMoves = useRef(new Set<string>());
+  // `title`: a renamed file takes the new name as its title too, because the sidebar shows the title.
+  const move = async (n: TreeNode, to: string, title?: string) => {
+    const from = n.path;
+    ownMoves.current.add(from);
+    setTimeout(() => ownMoves.current.delete(from), 5000);
+    try {
+      await session.flush();
+      const r = await api.move(from, to, n.type);
+      const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
+      if (next) {
+        // The revision is re-read: a name that was deleted before makes the server raise it.
+        const fresh = await api.readFile(next).catch(() => null);
+        session.rename(next, fresh?.revision);
+        setHashPath(next);
+      }
+      if (title) {
+        const dest = (r as { path?: string }).path ?? to;
+        if (next) session.edit({ title });
+        else {
+          const f = await api.readFile(dest);
+          await api.saveFile(dest, { ...f, title });
+        }
+      }
+      await refreshTree();
+    } catch (e) {
+      ownMoves.current.delete(from);
+      setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
+    }
+  };
+  const moveInto = (n: TreeNode, dir: string) => {
+    const to = dropTarget(n, dir);
+    if (to) void move(n, to);
+  };
+  const rename = (n: TreeNode, name: string) => {
+    const problem = nameProblem(n, name);
+    if (problem) return setError(problem);
+    const to = renameTarget(n, name);
+    if (to) void move(n, to, n.type === 'file' ? fileStem(name) : undefined);
+  };
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
@@ -348,6 +406,10 @@ export function App() {
   const showBlock = useCallback((blockId: string) => {
     setView((v) => (v === 'doc' ? 'both' : v));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
+  }, []);
+  const showFrame = useCallback((frameId: string) => {
+    setView((v) => (v === 'doc' ? 'both' : v));
+    setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
   }, []);
   const report = useCallback(
     (job: Promise<string> | string) =>
@@ -447,7 +509,7 @@ export function App() {
 
   const dark = theme === 'dark';
   const doc = hasFile && path && (
-    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onExportBlock={blockExport} onFail={flushForReload} />
+    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
@@ -460,6 +522,8 @@ export function App() {
       onNewFile={() => void newFile()}
       onNewFolder={() => void newFolder()}
       onDelete={(n) => void remove(n)}
+      onMove={moveInto}
+      onRename={rename}
       theme={theme}
       onToggleTheme={toggleTheme}
     />

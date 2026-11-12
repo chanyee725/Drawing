@@ -98,3 +98,8 @@ test('text that looks like a ~~~ fence, strikethrough or an indented code block 
   assert.equal(md('  \tcode'), '  &#9;code\n');
   assert.equal(md('   three'), '   three\n');
 });
+
+test('a canvas frame embed leaves a marker instead of vanishing', () => {
+  const doc = { type: 'doc', content: [{ type: 'frameEmbed', attrs: { frameId: 'f1', name: 'Login *flow*' } }, { type: 'frameEmbed', attrs: { frameId: 'f2', name: '' } }] };
+  assert.equal(documentToMarkdown('', doc, []), '_\\[Login \\*flow\\* (캔버스 그림)\\]_\n\n_\\[프레임 (캔버스 그림)\\]_\n');
+});
