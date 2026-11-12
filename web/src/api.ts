@@ -18,9 +18,10 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
+async function call<T>(method: string, url: string, body?: unknown, keepalive = false): Promise<T> {
   const res = await fetch(url, {
     method,
+    keepalive,
     headers: body === undefined ? undefined : { 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
@@ -36,8 +37,8 @@ export const api = {
   tree: () => call<{ tree: TreeNode[] }>('GET', '/api/tree').then((r) => r.tree),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
   createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
-  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>) =>
-    call<DpxFile>('PUT', `/api/file${q(path)}`, f),
+  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>
+    call<DpxFile>('PUT', `/api/file${q(path)}`, f, keepalive),
   removeFile: (path: string) => call<unknown>('DELETE', `/api/file${q(path)}`),
   createFolder: (path: string) => call<unknown>('POST', '/api/folder', { path }),
   removeFolder: (path: string) => call<unknown>('DELETE', `/api/folder${q(path)}`),

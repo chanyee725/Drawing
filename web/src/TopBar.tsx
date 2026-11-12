@@ -13,35 +13,42 @@ type Props = {
   view: View;
   onView: (v: View) => void;
   onTitle: (t: string) => void;
+  /** Set on narrow screens, where the sidebar is collapsed behind this toggle. */
+  onToggleNav?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, view, onView, onTitle }: Props) {
+export function TopBar({ title, hasFile, status, view, onView, onTitle, onToggleNav }: Props) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b px-4" style={{ borderColor: 'var(--border)' }}>
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4" style={{ borderColor: 'var(--border)' }}>
+      {onToggleNav && (
+        <button type="button" onClick={onToggleNav} aria-label="파일 목록 열기" className="h-8 shrink-0 rounded-md px-2 text-lg leading-none">
+          ☰
+        </button>
+      )}
       {hasFile ? (
         <input
           value={title}
           onChange={(e) => onTitle(e.target.value)}
           placeholder="제목 없는 파일"
           aria-label="파일 제목"
-          className="h-8 w-56 rounded-md bg-transparent px-2 font-medium outline-none focus:ring-2"
+          className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-2 font-medium outline-none focus:ring-2 md:w-56 md:flex-none"
         />
       ) : (
-        <span className="px-2" style={{ color: 'var(--text-muted)' }}>
+        <span className="min-w-0 flex-1 truncate px-2 md:flex-none" style={{ color: 'var(--text-muted)' }}>
           파일을 골라 주세요
         </span>
       )}
-      <span className="text-xs" style={{ color: 'var(--text-muted)' }} aria-live="polite">
+      <span className="hidden min-w-0 truncate text-xs md:inline" style={{ color: 'var(--text-muted)' }} aria-live="polite">
         {status}
       </span>
-      <div className="mx-auto flex rounded-md border p-0.5" style={{ borderColor: 'var(--border)' }} role="group" aria-label="보기 방식">
+      <div className="flex shrink-0 rounded-md border p-0.5 md:mx-auto" style={{ borderColor: 'var(--border)' }} role="group" aria-label="보기 방식">
         {VIEWS.map((v) => (
           <button
             key={v.id}
             type="button"
             aria-pressed={view === v.id}
             onClick={() => onView(v.id)}
-            className="h-7 rounded px-3 text-sm"
+            className="h-7 whitespace-nowrap rounded px-2 text-sm md:px-3"
             style={view === v.id ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 600 } : { color: 'var(--text-muted)' }}
           >
             {v.label}
@@ -52,7 +59,7 @@ export function TopBar({ title, hasFile, status, view, onView, onTitle }: Props)
         type="button"
         disabled
         title="내보내기는 아직 준비 중이에요"
-        className="h-8 rounded-md border px-3 text-sm opacity-50"
+        className="hidden h-8 shrink-0 whitespace-nowrap rounded-md border px-3 text-sm opacity-50 md:block"
         style={{ borderColor: 'var(--border)' }}
       >
         내보내기
