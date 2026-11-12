@@ -3,7 +3,10 @@
 // type (Y.XmlFragment / Y.Array / Y.Array) without changing the file shape.
 
 export const FILE_EXT = '.dpx.json';
-export const FORMAT_VERSION = 1;
+// 1: before the document editor (E6). 2: `document` is the editor's own content. Every write stores
+// the current version; reads report the version the file was written with, so the web can tell
+// a file it has never opened with the document editor (and fill its document once).
+export const FORMAT_VERSION = 2;
 
 export const emptyDocument = () => ({ type: 'doc', content: [] });
 export const emptyCanvas = () => ({ elements: [], appState: {} });
@@ -68,7 +71,9 @@ export function parseStored(text) {
     throw new ValidationError('file is not valid JSON');
   }
   const content = normalizeContent(raw);
+  const v = raw.version;
+  const version = Number.isInteger(v) && v >= 1 ? v : 1;
   const revision = raw.revision;
   if (!Number.isInteger(revision) || revision < 1) throw new ValidationError('file has no valid revision');
-  return { ...content, revision };
+  return { ...content, version, revision };
 }

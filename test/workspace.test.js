@@ -42,7 +42,7 @@ test('CRUD: create, read, list, rename, move, delete files and folders', async (
     assert.equal(r.body.path, 'proj/arch.dpx.json');
     assert.deepEqual(
       { v: r.body.version, t: r.body.title, rev: r.body.revision, doc: r.body.document, canvas: r.body.canvas, blocks: r.body.blocks },
-      { v: 1, t: 'Arch', rev: 1, doc: { type: 'doc', content: [] }, canvas: { elements: [], appState: {} }, blocks: [] },
+      { v: 2, t: 'Arch', rev: 1, doc: { type: 'doc', content: [] }, canvas: { elements: [], appState: {} }, blocks: [] },
     );
     assert.equal((await call('POST', '/api/file', { path: 'proj/arch' })).status, 409);
     assert.equal((await call('POST', '/api/folder', { path: 'proj' })).status, 409);
@@ -92,7 +92,7 @@ test('write: whole-file save bumps revision and keeps content; stale write gets 
     assert.equal(r.status, 200);
     assert.deepEqual(r.body, { path: 'a.dpx.json', revision: 2 });
     r = await call('GET', `/api/file?path=${q('a')}`);
-    assert.deepEqual({ ...r.body, path: undefined }, { ...content, path: undefined, version: 1, revision: 2 });
+    assert.deepEqual({ ...r.body, path: undefined }, { ...content, path: undefined, version: 2, revision: 2 });
 
     // a second client still holding revision 1 is rejected and told the current revision
     r = await call('PUT', `/api/file?path=${q('a')}`, { ...content, title: 'stale', revision: 1 });
@@ -488,4 +488,13 @@ test('no folder can be named like a file: create, move and parent segments are a
     const r = await call('GET', '/api/tree');
     assert.deepEqual(r.body.tree.map((n) => n.path).sort(), ['a', 'f.dpx.json']);
   });
+});
+
+test('a file reads back with the version it was written with; a write stores the current one', async () => {
+  const { parseStored, normalizeContent, FORMAT_VERSION } = await import('../server/workspace/model.js');
+  const old = JSON.stringify({ version: 1, title: 'old', document: { type: 'doc', content: [] }, canvas: {}, blocks: [], revision: 3 });
+  assert.equal(parseStored(old).version, 1);
+  assert.equal(parseStored(JSON.stringify({ title: 'x', revision: 1 })).version, 1);
+  assert.equal(normalizeContent({ version: 1 }).version, FORMAT_VERSION);
+  assert.equal(FORMAT_VERSION, 2);
 });
