@@ -62,3 +62,20 @@ test('inline code keeps backticks by using a longer fence, not backslashes', () 
   const doc = { type: 'doc', content: [p(t('a`b', [{ type: 'code' }]), t(' '), t('``x', [{ type: 'code' }]))] };
   assert.equal(documentToMarkdown('', doc, []), '``a`b`` ``` ``x ```\n');
 });
+
+test('more line-start markers: "1) ", a lone "-" or "#", rules, setext underlines, and 1-3 leading spaces', () => {
+  const cases: [string, string][] = [
+    ['1) a', '1\\) a'],
+    ['-', '\\-'],
+    ['#', '\\#'],
+    ['---', '\\---'],
+    ['- - -', '\\- - -'],
+    ['===', '\\==='],
+    ['  - x', '  \\- x'],
+    ['   2) x', '   2\\) x'],
+    ['-x', '-x'],
+    ['#tag', '#tag'],
+    ['1)x', '1)x'],
+  ];
+  for (const [input, want] of cases) assert.equal(documentToMarkdown('', { type: 'doc', content: [p(t(input))] }, []), `${want}\n`, input);
+});
