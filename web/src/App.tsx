@@ -7,7 +7,7 @@ import { AgentPanel } from './agents/AgentPanel';
 import { LiveCursors } from './agents/LiveCursors';
 import { PageAgentChips } from './agents/PageAgentChips';
 import { agentsByOtherPage, type Agent } from './agents/model';
-import { useLiveAgents, useNow } from './agents/useLiveAgents';
+import { useActivityPref, useLiveAgents, useNow } from './agents/useLiveAgents';
 
 function readUrl() {
   const q = new URLSearchParams(window.location.search);
@@ -36,7 +36,8 @@ export function App() {
   const [conn, setConn] = useState<ConnectionState>('connecting');
   const [notice, setNotice] = useState<string | null>(null);
   const [api, setApi] = useState<DiagramApi | null>(null);
-  const live = useLiveAgents(ds?.name ?? null);
+  const [showActivity, setShowActivity] = useActivityPref();
+  const live = useLiveAgents(ds?.name ?? null, showActivity);
   const now = useNow(5000);
 
   const filesRef = useRef(files);
@@ -245,7 +246,14 @@ export function App() {
           </div>
         )}
       </main>
-      <AgentPanel agents={live.agents} dispatch={live.dispatch} loaded={live.loaded} onPick={jumpTo} />
+      <AgentPanel
+        agents={live.agents}
+        dispatch={live.dispatch}
+        loaded={live.loaded}
+        onPick={jumpTo}
+        showActivity={showActivity}
+        onShowActivity={setShowActivity}
+      />
       </div>
     </div>
   );
