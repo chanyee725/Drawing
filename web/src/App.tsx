@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pickDataSource, type ConnectionState, type DataSource, type FileDetail, type FileSummary } from './data';
 import { applyFileEvent, paths, pickFile, sortFiles, sourcesFor } from './data/files';
 import { DiagramView, type DiagramApi } from './view/DiagramView';
+import { HistoryHighlight, HistoryPanel, useHistory } from './history';
 
 function readUrl() {
   const q = new URLSearchParams(window.location.search);
@@ -29,7 +30,7 @@ export function App() {
   const [detail, setDetail] = useState<FileDetail | null>(null);
   const [conn, setConn] = useState<ConnectionState>('connecting');
   const [notice, setNotice] = useState<string | null>(null);
-  const [, setApi] = useState<DiagramApi | null>(null);
+  const [api, setApi] = useState<DiagramApi | null>(null);
 
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -112,6 +113,7 @@ export function App() {
   const pages = detail?.pages ?? current?.pages ?? [];
   const page = pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
   const pageXml = detail && page ? (detail.pages.find((p) => p.id === page.id)?.xml ?? null) : null;
+  const hist = useHistory({ enabled: ds?.name === 'api', fileId: current?.id ?? null, pageId: page?.id ?? null, setPageId });
 
   useEffect(() => writeUrl(fileId, page?.id ?? null), [fileId, page?.id]);
 
@@ -203,12 +205,15 @@ export function App() {
           </div>
         ) : (
           <DiagramView
-            xml={pageXml}
+            xml={hist.view ? hist.view.xml : pageXml}
             resetKey={`${current?.path}\n${page?.id}`}
-            flashKey={`${current?.id}\n${page?.id}`}
+            flashKey={hist.view ? hist.view.key : `${current?.id}\n${page?.id}`}
             onApi={setApi}
-          />
+          >
+            <HistoryHighlight api={api} cells={hist.view?.cells ?? null} viewKey={hist.view?.key ?? null} />
+          </DiagramView>
         )}
+        {files.length > 0 && <HistoryPanel h={hist} />}
         {notice && (
           <div className="absolute left-1/2 top-3 -translate-x-1/2 rounded-md bg-neutral-900 px-3 py-1.5 text-sm text-white shadow" role="status">
             {notice}
