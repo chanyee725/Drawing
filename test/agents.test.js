@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { worktreeDirFor, toAgent, createAgentStore, activityLine } from '../server/agents/model.js';
 import { createSseParser } from '../server/agents/sse.js';
-import { resolveDispatchUrl } from '../server/agents/dispatch.js';
+import { resolveDispatchUrl, followDispatch } from '../server/agents/dispatch.js';
 import { setup } from '../server/agents/index.js';
 
 const PROJECT = '/tmp/fake-project';
@@ -117,6 +117,8 @@ test('dispatch URL from --dispatch or <project>/.dispatch/server.port', async ()
     await writeFile(join(dir, '.dispatch/server.port'), '4318\n');
     assert.equal(await resolveDispatchUrl(dir, null), 'http://127.0.0.1:4318');
     assert.equal(await resolveDispatchUrl(dir, 'http://127.0.0.1:9/'), 'http://127.0.0.1:9');
+    await mkdir(join(dir, 'docs/handover'), { recursive: true });
+    assert.equal(await resolveDispatchUrl(join(dir, 'docs/handover'), null), 'http://127.0.0.1:4318', 'found from a subfolder');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -162,8 +164,55 @@ test('module: follows Dispatch with GET only, attributes watch changes, broadcas
     const res = { writeHead() {}, end(b) { this.body = JSON.parse(b); } };
     mod.routes.find((r) => r.path === '/api/agents').handler({}, res);
     assert.equal(res.body.agents.length, 3);
+    assert.ok(res.body.agents.every((a) => !('dir' in a)), 'no absolute folders in API output');
+    assert.ok(last.agents.every((a) => !('dir' in a)), 'no absolute folders in SSE output');
   } finally {
     mod.close();
   }
   assert.equal(listeners.size, 0, 'unsubscribed from watch on close');
+});
+
+test('project dir below the Dispatch root: mapping and attribution use the root', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'draw-root-'));
+  const sim = join(base, 'sim');
+  const projectDir = join(sim, 'docs/handover');
+  try {
+    await mkdir(join(sim, '.dispatch/wt/impl-1/docs/handover'), { recursive: true });
+    await mkdir(projectDir, { recursive: true });
+    const store = createAgentStore(projectDir);
+    assert.equal(store.root, sim);
+    store.replaceAll([
+      { id: 'w', name: 'Wren', role: 'impl', cwd: join(sim, '.dispatch/wt/impl-1'), status: 'running' },
+      { id: 'l', name: 'Lark', role: 'lead', cwd: sim, status: 'idle' },
+      { id: 'n', name: 'Nell', role: 'impl', worktree: 'impl-7', branch: 'feat/other', status: 'idle' },
+    ]);
+    assert.equal(store.attribute(change(join(sim, '.dispatch/wt/impl-1/docs/handover'))), 'w');
+    assert.equal(store.attribute(change(projectDir)), 'l', 'main checkout subfolder → root session');
+    assert.equal(store.attribute(change(join(sim, '.dispatch/wt/impl-7/docs/handover'))), 'n', 'worktree field before branch');
+    assert.ok(store.list().every((a) => !('dir' in a)));
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('worktree field: used before the branch guess, no path escape', () => {
+  const root = '/r';
+  assert.equal(worktreeDirFor({ worktree: 'impl-9', branch: 'dispatch/impl-1' }, root), '/r/.dispatch/wt/impl-9');
+  assert.equal(worktreeDirFor({ worktree: '/r/.dispatch/wt/x', branch: 'dispatch/y' }, root), '/r/.dispatch/wt/x');
+  assert.equal(worktreeDirFor({ worktree: '..', branch: 'dispatch/y' }, root), '/r/.dispatch/wt/y');
+  assert.equal(worktreeDirFor({ worktree: '/etc', branch: 'main' }, root), null);
+  assert.equal(worktreeDirFor({ worktree: true, branch: 'dispatch/z' }, root), '/r/.dispatch/wt/z');
+});
+
+test('state request times out and reports disconnected', async () => {
+  const statuses = [];
+  const fetchImpl = (url, { signal }) =>
+    new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason)));
+  const f = followDispatch('http://127.0.0.1:1', { onStatus: (ok) => statuses.push(ok) }, { fetchImpl, stateTimeoutMs: 30, retryMs: 10_000 });
+  try {
+    await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(statuses, [false]);
+  } finally {
+    f.close();
+  }
 });

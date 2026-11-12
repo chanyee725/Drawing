@@ -1,6 +1,9 @@
 // Agent model: whitelist Dispatch session fields, map sessions to worktree folders,
-// and attribute file changes to agents. Pure functions plus a small store; no I/O.
+// and attribute file changes to agents. Pure functions plus a small store.
+// Paths are computed from the Dispatch root (where `.dispatch/` lives), which may be
+// an ancestor of the project dir given on the command line.
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { findDispatchRoot } from './root.js';
 
 const MAX_ACTIVITY = 140;
 const MAX_CELL_IDS = 50;
@@ -15,23 +18,34 @@ export function activityLine(s) {
 }
 
 /**
- * Folder whose files this session edits.
- * 1. a worktree session's cwd; 2. `<project>/.dispatch/wt/<x>` from a `dispatch/<x>` branch;
- * 3. the project root for a session working in the main checkout; else null.
+ * Folder whose files this session edits, relative to the Dispatch root `root`:
+ * 1. the session's cwd when inside the root (worktree or main checkout);
+ * 2. the session's `worktree` field when it names a folder (path inside the root, or a folder name);
+ * 3. `<root>/.dispatch/wt/<x>` guessed from a `dispatch/<x>` branch; else null.
  */
-export function worktreeDirFor(s, projectDir) {
-  const root = resolve(projectDir);
+export function worktreeDirFor(s, root) {
+  root = resolve(root);
   if (typeof s.cwd === 'string' && s.cwd && isAbsolute(s.cwd)) {
     const cwd = resolve(s.cwd);
     if (isInside(cwd, root)) return cwd;
   }
-  const m = typeof s.branch === 'string' && s.branch.match(/^dispatch\/(\w[\w.-]*)$/);
-  if (m) return join(root, '.dispatch', 'wt', m[1]);
+  const wt = typeof s.worktree === 'string' ? s.worktree : '';
+  if (wt && isAbsolute(wt)) {
+    const dir = resolve(wt);
+    if (isInside(dir, root)) return dir;
+  } else if (SAFE_NAME.test(wt)) {
+    return join(root, '.dispatch', 'wt', wt);
+  }
+  const m = typeof s.branch === 'string' && s.branch.match(/^dispatch\/(.+)$/);
+  if (m && SAFE_NAME.test(m[1])) return join(root, '.dispatch', 'wt', m[1]);
   return null;
 }
 
+// A single folder name: no separators, not `.` or `..`.
+const SAFE_NAME = /^\w[\w.-]*$/;
+
 /** Keep only names, roles, status and activity. Never prompts, transcripts, usage, cost or ids of provider sessions. */
-export function toAgent(s, projectDir) {
+export function toAgent(s, root) {
   return {
     id: String(s.id),
     name: String(s.name ?? ''),
@@ -41,7 +55,7 @@ export function toAgent(s, projectDir) {
     status: String(s.status ?? ''),
     state: String(s.state ?? ''),
     branch: String(s.branch ?? ''),
-    dir: worktreeDirFor(s, projectDir),
+    dir: worktreeDirFor(s, root), // internal only; list() leaves it out
     activity: activityLine(s),
     activityAt: Number(s.activity?.since ?? s.updatedAt ?? 0) || null,
   };
@@ -56,13 +70,13 @@ export function isInside(child, parent) {
  * Agent store. Holds agents by id plus each agent's last change.
  * onUpdate() is called whenever something visible changed.
  */
-export function createAgentStore(projectDir, onUpdate = () => {}) {
-  const root = resolve(projectDir);
+export function createAgentStore(projectDir, onUpdate = () => {}, { root = findDispatchRoot(projectDir) ?? resolve(projectDir) } = {}) {
   const agents = new Map(); // id -> agent
   const lastChange = new Map(); // id -> change summary (survives session refreshes)
 
   function list() {
-    return [...agents.values()].map((a) => ({ ...a, lastChange: lastChange.get(a.id) ?? null }));
+    // Absolute folders stay server-side; the web only needs names and status.
+    return [...agents.values()].map(({ dir, ...a }) => ({ ...a, lastChange: lastChange.get(a.id) ?? null }));
   }
 
   function replaceAll(sessions) {
@@ -130,5 +144,5 @@ export function createAgentStore(projectDir, onUpdate = () => {}) {
     return a.id;
   }
 
-  return { list, replaceAll, upsert, remove, agentForDir, attribute };
+  return { root, list, replaceAll, upsert, remove, agentForDir, attribute };
 }

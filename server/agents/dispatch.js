@@ -3,12 +3,17 @@
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createSseParser } from './sse.js';
+import { findDispatchRoot } from './root.js';
 
-/** Dispatch base URL from --dispatch, else `<project>/.dispatch/server.port`, else null. */
+const STATE_TIMEOUT_MS = 5000;
+
+/** Dispatch base URL from --dispatch, else `<dispatch root>/.dispatch/server.port`, else null. */
 export async function resolveDispatchUrl(projectDir, override) {
   if (override) return override.replace(/\/+$/, '');
+  const root = findDispatchRoot(projectDir);
+  if (!root) return null;
   try {
-    const port = Number((await readFile(join(projectDir, '.dispatch', 'server.port'), 'utf8')).trim());
+    const port = Number((await readFile(join(root, '.dispatch', 'server.port'), 'utf8')).trim());
     if (Number.isInteger(port) && port > 0 && port < 65536) return `http://127.0.0.1:${port}`;
   } catch {}
   return null;
@@ -19,7 +24,7 @@ export async function resolveDispatchUrl(projectDir, override) {
  * onSession(s) for one update, onRemoved(id), onStatus(connected).
  * Reconnects with backoff. Returns { close() }.
  */
-export function followDispatch(baseUrl, handlers, { fetchImpl = fetch, retryMs = 1000, maxRetryMs = 30_000 } = {}) {
+export function followDispatch(baseUrl, handlers, { fetchImpl = fetch, retryMs = 1000, maxRetryMs = 30_000, stateTimeoutMs = STATE_TIMEOUT_MS } = {}) {
   let closed = false;
   let ctrl = null;
   let timer = null;
@@ -43,7 +48,7 @@ export function followDispatch(baseUrl, handlers, { fetchImpl = fetch, retryMs =
   async function run() {
     ctrl = new AbortController();
     try {
-      const st = await get('/api/state', ctrl.signal);
+      const st = await get('/api/state', AbortSignal.any([ctrl.signal, AbortSignal.timeout(stateTimeoutMs)]));
       if (!st.ok) throw new Error(`state ${st.status}`);
       const state = await st.json();
       handlers.onSessions?.(Array.isArray(state?.sessions) ? state.sessions : []);
