@@ -27,7 +27,7 @@ function Sidebar({ workspace }: { workspace: string | null }) {
     >
       <div className="flex h-12 items-center gap-2 px-4 font-semibold">
         <span className="inline-block size-5 rounded-md" style={{ background: 'var(--accent)' }} aria-hidden />
-        <span className="truncate">{workspace ?? 'Draw-Pipelines'}</span>
+        <span className="truncate">{workspace ?? 'Drawing'}</span>
       </div>
       <div className="px-3 pb-2">
         <input
