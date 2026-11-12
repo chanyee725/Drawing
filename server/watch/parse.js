@@ -4,15 +4,19 @@ import { inflateRaw } from 'node:zlib';
 import { promisify } from 'node:util';
 import { parseXml, findAll, findFirst } from './xml.js';
 
-// Cap on file size and on inflated page size: a small compressed page must not
-// expand into gigabytes (zip bomb). Larger files are treated as broken.
+// Cap on file size and on the total inflated size of all pages in one file: a
+// small compressed file must not expand into gigabytes (zip bomb), whether in one
+// page or spread over many. Over the cap the file is treated as broken.
 export const MAX_BYTES = 20 * 1024 * 1024;
 const inflateRawAsync = promisify(inflateRaw);
 
-export async function decompressDiagram(text) {
+/** budget = { left: bytes } shared by all pages of one file; decremented here. */
+export async function decompressDiagram(text, budget = { left: MAX_BYTES }) {
+  if (budget.left <= 0) throw new RangeError('inflate budget exhausted');
   const bytes = Buffer.from(text.trim(), 'base64');
-  const inflated = (await inflateRawAsync(bytes, { maxOutputLength: MAX_BYTES })).toString('latin1');
-  return decodeURIComponent(inflated);
+  const out = await inflateRawAsync(bytes, { maxOutputLength: budget.left });
+  budget.left -= out.length;
+  return decodeURIComponent(out.toString('latin1'));
 }
 
 /**
@@ -26,7 +30,8 @@ export async function parseDrawio(src) {
   const pages = [];
   if (mxfile) {
     const diagrams = mxfile.children.filter((c) => c.name === 'diagram');
-    for (const [i, d] of diagrams.entries()) pages.push(await parsePage(src, d, i));
+    const budget = { left: MAX_BYTES };
+    for (const [i, d] of diagrams.entries()) pages.push(await parsePage(src, d, i, budget));
   } else {
     // A bare <mxGraphModel> file is one page.
     const model = findFirst(doc, 'mxGraphModel');
@@ -36,7 +41,7 @@ export async function parseDrawio(src) {
   return { pages };
 }
 
-async function parsePage(src, diagram, index) {
+async function parsePage(src, diagram, index, budget) {
   const id = diagram.attrs.id || `page-${index}`;
   const name = diagram.attrs.name || `Page-${index + 1}`;
   let model = findFirst(diagram, 'mxGraphModel');
@@ -44,7 +49,7 @@ async function parsePage(src, diagram, index) {
   if (model) {
     xml = src.slice(model.start, model.end);
   } else if (diagram.text.trim()) {
-    xml = await decompressDiagram(diagram.text);
+    xml = await decompressDiagram(diagram.text, budget);
     model = findFirst(parseXml(xml), 'mxGraphModel');
     if (!model) throw new Error('compressed diagram without mxGraphModel');
   } else {

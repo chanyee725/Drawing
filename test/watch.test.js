@@ -44,6 +44,14 @@ test('parse: zip bomb is refused (inflated size capped at MAX_BYTES)', async () 
   await assert.rejects(parseDrawio(file([['p', 'P', bomb]])), /RangeError|larger than|maxOutputLength|buffer/i);
 });
 
+test('parse: pages each under the cap but over it in total are refused', async () => {
+  // Valid compressed pages padded with a comment: each inflates to ~40% of the cap.
+  const page = (id) => compress(`<!--${'x'.repeat(Math.floor(MAX_BYTES * 0.4))}-->` + model(box(id)));
+  const one = await parseDrawio(file([['p1', 'A', page('a')], ['p2', 'B', page('b')]]));
+  assert.equal(one.pages.length, 2); // 80% of the cap: fine
+  await assert.rejects(parseDrawio(file([['p1', 'A', page('a')], ['p2', 'B', page('b')], ['p3', 'C', page('c')]])), RangeError);
+});
+
 test('parse: real handover files (scratch copy)', { skip: !existsSync(HANDOVER) && 'sim-studio handover not present' }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'draw-handover-'));
   try {
