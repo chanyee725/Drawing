@@ -146,7 +146,7 @@ function iconMarkup(ic: SceneIcon, theme: Theme): string {
   if (ic.inside && ic.paint.mode === 'bold') color = resolvePaint(ic.paint, theme).text;
   // Logos keep their brand colour unless a colour was asked for, they sit on a bold fill, or the
   // brand colour would vanish into the background (black logos on the dark theme).
-  else if (icon.hex && !ic.paint.color && contrast(icon.hex, t.background) >= 1.8) color = icon.hex;
+  else if (icon.hex && !ic.paint.color && contrast(icon.hex, t.background) >= 3) color = icon.hex;
   const s = ic.size / 24;
   const open = `<g data-icon="${esc(ic.name)}" data-icon-set="${icon.set}" transform="translate(${n(ic.x)} ${n(ic.y)}) scale(${n(s)})">`;
   if (icon.fill) return `${open}<path d="${icon.d}" fill="${color}"/></g>`;

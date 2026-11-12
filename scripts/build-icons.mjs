@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const OUT = fileURLToPath(new URL('../shared/render/icon-data.ts', import.meta.url));
@@ -139,7 +139,7 @@ export function generate() {
   ].join('\n');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   const out = generate();
   if (process.argv.includes('--check')) {
     let cur = '';
