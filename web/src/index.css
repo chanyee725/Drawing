@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
-/* Theme tokens. Dark follows the OS until the theme switch lands in E4. */
-:root {
+/* Theme tokens. data-theme on <html> is set by the theme switch (web/src/theme.ts). */
+:root, :root[data-theme="light"] {
+  color-scheme: light;
   --surface: #ffffff;
   --elevated: #f7f7f8;
   --border: #e4e4e7;
@@ -11,17 +12,16 @@
   --accent-soft: #efeaff;
   --dot: #d4d4d8;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --surface: #18181b;
-    --elevated: #202024;
-    --border: #2e2e33;
-    --text: #f4f4f5;
-    --text-muted: #a1a1aa;
-    --accent: #9d86ff;
-    --accent-soft: #2a2447;
-    --dot: #3f3f46;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #18181b;
+  --elevated: #202024;
+  --border: #2e2e33;
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --accent: #9d86ff;
+  --accent-soft: #2a2447;
+  --dot: #3f3f46;
 }
 
 html, body, #root { height: 100%; }
