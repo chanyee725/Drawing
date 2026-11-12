@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
-import { isRetryableSaveError } from './saveRetry';
+import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 // TipTap and the diagram renderer are big; they load when a file is first opened.
@@ -92,6 +92,8 @@ export function App() {
   const inFlight = useRef(false);
   const retryDelay = useRef(0);
   const conflictRef = useRef(false);
+  // Set when a reload was stopped because the save failed: that notice stays until a save succeeds.
+  const reloadStopped = useRef(false);
   fileRef.current = file;
   pathRef.current = path;
 
@@ -126,7 +128,7 @@ export function App() {
         if (!p || !f || !dirty.current || conflictRef.current) return;
         const seq = editSeq.current;
         inFlight.current = true;
-        setStatus('저장 중이에요…');
+        if (!reloadStopped.current) setStatus('저장 중이에요…');
         try {
           const saved = await api.saveFile(p, f, keepalive);
           if (pathRef.current !== p) return;
@@ -135,24 +137,27 @@ export function App() {
           retryDelay.current = 0;
           if (editSeq.current === seq) {
             dirty.current = false;
+            reloadStopped.current = false;
             setStatus('저장했어요');
           }
           void refreshTree();
         } catch (e) {
           if (pathRef.current !== p) return;
+          // A retry or refusal must not hide the notice that the reload was stopped.
+          const problem = (text: string) => setStatus(saveProblemText(text, reloadStopped.current), true);
           if (e instanceof ApiError && e.status === 409) {
             clearTimer();
             conflictRef.current = true;
             setConflict({ revision: e.revision });
-            setStatus('다른 곳에서 바뀌었어요', true);
+            problem('다른 곳에서 바뀌었어요');
           } else if (!isRetryableSaveError(e)) {
             // The server refused this request (4xx); retrying the same body would fail forever.
             // Keep a pending edit timer: a newer edit may already have fixed the body.
             const newer = e instanceof ApiError && e.status === 422 && (fileRef.current?.version ?? 1) > DOC_FORMAT_VERSION;
-            setStatus(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
+            problem(newer ? '더 새 버전에서 만든 파일이라 저장하지 않았어요' : '저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요');
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
-            setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요', true);
+            problem('저장하지 못했어요. 잠시 뒤 다시 시도할게요');
             // A pending edit timer will save sooner; otherwise back off and retry.
             if (timer.current === null) schedule(retryDelay.current);
           }
@@ -175,7 +180,8 @@ export function App() {
   const flushForReload = useCallback(async () => {
     await flush();
     if (!dirty.current && !conflictRef.current) return true;
-    setStatus('저장하지 못해서 새로고침을 멈추었어요', true);
+    reloadStopped.current = true;
+    setStatus(RELOAD_STOPPED, true);
     return false;
   }, [flush, setStatus]);
 
@@ -189,7 +195,7 @@ export function App() {
       });
       dirty.current = true;
       editSeq.current += 1;
-      if (!conflictRef.current) setStatus('');
+      if (!conflictRef.current && !reloadStopped.current) setStatus('');
       schedule(SAVE_DELAY);
     },
     [schedule],
@@ -200,6 +206,7 @@ export function App() {
     dirty.current = false;
     retryDelay.current = 0;
     conflictRef.current = false;
+    reloadStopped.current = false;
     setConflict(null);
     setPath(p);
     pathRef.current = p;
