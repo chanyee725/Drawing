@@ -503,6 +503,14 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       exitEdit(true);
     }
   }, [edit, editBlock, sess, exitEdit]);
+  // While the code changes, the new session and picture come a moment later; the overlay keeps the last picture it
+  // placed (not editable) instead of leaving the hidden block blank.
+  const lastShown = useRef<{ blockId: string; sess: LayoutSession; frame: LayoutFrame } | null>(null);
+  if (!edit) lastShown.current = null;
+  else if (editSess && frame) lastShown.current = { blockId: edit.blockId, sess: editSess, frame };
+  const kept = edit && !(editSess && frame) && lastShown.current?.blockId === edit.blockId ? lastShown.current : null;
+  const overlaySess = editSess && frame ? editSess : kept?.sess;
+  const overlayFrame = editSess && frame ? frame : kept?.frame;
   // A fresh session (or the first one) can place a picture whose layout was left out; place the overlay again.
   useEffect(refreshFrame, [api, editSess, refreshFrame]);
   // A notice belongs to one try; it goes when another block is selected, or after a while.
@@ -627,11 +635,12 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           setEditing(b.id);
         }}
       />
-      {edit && editBlock && editSess && frame && wrap.current && (
+      {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
         <LayoutEditOverlay
           layout={editBlock.layout}
-          session={editSess}
-          frame={frame}
+          session={overlaySess}
+          frame={overlayFrame}
+          stale={!!kept}
           dark={dark}
           wrap={wrap.current}
           start={edit.start}

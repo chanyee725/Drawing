@@ -33,6 +33,8 @@ type Props = {
   /** Wrapper element, to turn client coordinates into frame coordinates. */
   wrap: HTMLElement;
   start: EditStart | null;
+  /** The picture is the one from before a code edit, kept until the new one is placed: shown, but not editable. */
+  stale?: boolean;
   onCommit: (layout: BlockLayout) => void;
   onExit: () => void;
   onOpenCode: () => void;
@@ -51,7 +53,7 @@ type Gesture =
   | { kind: 'drag'; x0: number; y0: number; leaves: string[]; moved: boolean; clickId: string | null }
   | { kind: 'marquee'; x0: number; y0: number; keep: Set<string> };
 
-export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, onCommit, onExit, onOpenCode, onWheel }: Props) {
+export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, stale = false, onCommit, onExit, onOpenCode, onWheel }: Props) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(start ? [start.id] : []));
   // Drawing of an uncommitted drag; kept after the commit until the block's layout catches up, so nothing flickers.
   const [preview, setPreview] = useState<{ sig: string; scene: Scene; svg: string; guides: Line[] } | null>(null);
@@ -62,8 +64,8 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
   const shownHandles = useMemo(() => (preview ? layoutHandles(preview.scene.handles, preview.scene.origin) : handles), [preview, handles]);
 
   // Latest values for the window listeners of a gesture.
-  const live = useRef({ layout, session, frame, handles, selected, onCommit });
-  live.current = { layout, session, frame, handles, selected, onCommit };
+  const live = useRef({ layout, session, frame, handles, selected, stale, onCommit });
+  live.current = { layout, session, frame, handles, selected, stale, onCommit };
   const gesture = useRef<Gesture | null>(null);
   const frameReq = useRef(0);
 
@@ -118,6 +120,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
 
   const begin = useCallback(
     (e: { clientX: number; clientY: number; shiftKey: boolean }, hitId: string | null) => {
+      if (live.current.stale) return;
       const p = local(e);
       const sel = live.current.selected;
       if (hitId) {
@@ -267,8 +270,8 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, o
       if (!step) return;
       e.preventDefault();
       e.stopPropagation();
-      const { selected, handles } = live.current;
-      if (!selected.size || gesture.current) return;
+      const { selected, handles, stale } = live.current;
+      if (!selected.size || gesture.current || stale) return;
       const h = held.current ?? { leaves: leavesOf(selected, handles), dx: 0, dy: 0 };
       h.dx += step.dx;
       h.dy += step.dy;
