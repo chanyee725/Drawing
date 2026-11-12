@@ -539,6 +539,21 @@ test('block layout: valid layouts round-trip, unknown fields are dropped, bad on
   });
 });
 
+test('block layout: 200-character names are the limit and a "__proto__" key is refused by name', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const blk = { id: 'b1', type: 'architecture', code: 'A', x: 0, y: 0, w: 10, h: 10 };
+    const n = 'n'.repeat(200);
+    const layout = { v: 1, basis: { type: 't'.repeat(200), direction: 'd'.repeat(200), count: 1 }, items: { [n]: { cx: 0, cy: 0, parent: 'p'.repeat(200) } } };
+    assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { revision: 1, blocks: [{ ...blk, layout }] })).status, 200);
+    assert.deepEqual((await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0].layout, layout);
+    const proto = JSON.parse('{"v":1,"items":{"__proto__":{"cx":0,"cy":0,"parent":""}}}');
+    const r = await call('PUT', `/api/file?path=${q('a')}`, { revision: 2, blocks: [{ ...blk, layout: proto }] });
+    assert.equal(r.status, 400);
+    assert.match(JSON.stringify(r.body), /__proto__/);
+  });
+});
+
 test('block layout: a layout with a newer sub-format version is kept verbatim', async () => {
   await withApp(async ({ call }) => {
     await call('POST', '/api/file', { path: 'a' });
