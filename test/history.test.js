@@ -108,6 +108,28 @@ test('history: hidden folder is not in the tree; move carries it, delete moves i
 const trashPaths = async (store) => (await store.trash()).items.map((i) => i.path);
 const DAY = 24 * 60 * MIN;
 
+test('history: failures never break a save', async () => {
+  await withStore({}, async ({ store, ws }) => {
+    await store.createFile('a');
+    // `.drawing/history` is a file, so snapshots cannot be written
+    await mkdir(join(ws, '.drawing'));
+    await (await import('node:fs/promises')).writeFile(join(ws, '.drawing/history'), 'x');
+    await save(store, 'a', 'one');
+    assert.equal((await store.readFile('a')).title, 'one');
+  });
+});
+
+test('trash: a trash that cannot be written never breaks a delete', async () => {
+  await withStore({}, async ({ store, ws }) => {
+    await store.createFile('a');
+    // `.drawing/trash` is a file, so the deleted file cannot be kept, but the delete itself still succeeds
+    await mkdir(join(ws, '.drawing'), { recursive: true });
+    await (await import('node:fs/promises')).writeFile(join(ws, '.drawing/trash'), 'x');
+    await store.removeFile('a');
+    assert.equal((await store.tree()).some((n) => n.path === 'a.dpx.json'), false);
+  });
+});
+
 test('trash: a deleted file is listed, restorable with its history, and purged after 30 days', async () => {
   await withStore({}, async ({ store, clock }) => {
     await store.createFile('a');
