@@ -165,16 +165,19 @@ export function App() {
     [session],
   );
 
+  /** Opens `p`; false when the user cancelled or the file could not be read (the current file stays open). */
   const open = useCallback(
-    async (p: string) => {
+    async (p: string): Promise<boolean> => {
       await session.flush();
-      if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return;
+      if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 다른 파일을 열까요?')) return false;
       setError(null);
       try {
         load(p, await api.readFile(p));
         if (narrow) setNavOpen(false);
+        return true;
       } catch (e) {
         setError(e instanceof Error ? e.message : '파일을 열지 못했어요');
+        return false;
       }
     },
     [session, load, narrow],
@@ -200,8 +203,17 @@ export function App() {
     const onHash = () => {
       const link = parseHash(window.location.hash);
       if (!link) return;
-      if (link.path === session.getState().path) return jumpTo(link.heading);
-      void open(link.path).then(() => jumpTo(link.heading));
+      // Drop `&h=` (same file) or restore the open file's hash (cancelled or failed open), so the
+      // address bar always names the open file and following the same link again fires `hashchange`.
+      const current = session.getState().path;
+      if (link.path === current) {
+        setHashPath(current);
+        return jumpTo(link.heading);
+      }
+      void open(link.path).then((ok) => {
+        if (ok) jumpTo(link.heading);
+        else setHashPath(session.getState().path);
+      });
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
