@@ -191,6 +191,69 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     assert.ok(png.data.readUInt32BE(16) > 50 && png.data.readUInt32BE(20) > 50, 'PNG has a size');
   });
 
+  await t.test('PNG options: scale, transparent, dark', async () => {
+    step = 'PNG options';
+    const opt = async (sel) => {
+      await page.locator(sel).click();
+    };
+    const open = async () => {
+      await page.keyboard.press('Control+e');
+      await page.getByRole('menu', { name: '내보내기' }).waitFor();
+    };
+    // First pixel's [r, g, b, a] of a PNG, decoded in the page.
+    const corner = (data) =>
+      page.evaluate(async (b64) => {
+        const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        const c = document.createElement('canvas');
+        c.width = bmp.width;
+        c.height = bmp.height;
+        const x = c.getContext('2d');
+        x.drawImage(bmp, 0, 0);
+        return [...x.getImageData(0, 0, 1, 1).data];
+      }, data.toString('base64'));
+    const w = (d) => d.readUInt32BE(16);
+
+    await open();
+    const x2 = await downloadVia('png');
+    assert.equal(x2.name, 'E7 내보내기.png');
+    await open();
+    await opt('[data-export-scale="1"]');
+    const x1 = await downloadVia('png');
+    assert.equal(x1.name, 'E7 내보내기@1x.png');
+    assert.ok(Math.abs(w(x2.data) - 2 * w(x1.data)) <= 2, `2x is twice 1x (${w(x2.data)} vs ${w(x1.data)})`);
+    await open();
+    await opt('[data-export-scale="3"]');
+    const x3 = await downloadVia('png');
+    assert.equal(x3.name, 'E7 내보내기@3x.png');
+    assert.ok(Math.abs(w(x3.data) - 3 * w(x1.data)) <= 3, `3x is three times 1x (${w(x3.data)} vs ${w(x1.data)})`);
+    assert.deepEqual(await corner(x3.data), [255, 255, 255, 255], 'light PNG has a white background');
+
+    await open();
+    await opt('[data-export-transparent]');
+    const tr = await downloadVia('png');
+    assert.equal(tr.name, 'E7 내보내기@3x-transparent.png');
+    assert.equal((await corner(tr.data))[3], 0, 'transparent PNG has an empty corner');
+
+    await open();
+    await opt('[data-export-transparent]');
+    await opt('[data-export-dark="true"]');
+    const dk = await downloadVia('png');
+    assert.equal(dk.name, 'E7 내보내기@3x-dark.png');
+    const [r, g, b, a] = await corner(dk.data);
+    assert.ok(a === 255 && r < 60 && g < 60 && b < 60, `dark PNG has a dark background, got ${[r, g, b, a]}`);
+
+    await open();
+    const dsvg = await downloadVia('svg');
+    assert.equal(dsvg.name, 'E7 내보내기-dark.svg');
+
+    // Back to the defaults for the tests that follow.
+    await open();
+    await opt('[data-export-scale="2"]');
+    await opt('[data-export-dark="false"]');
+    await page.keyboard.press('Escape');
+  });
+
   await t.test('export only the selected diagram', async () => {
     step = 'export only the selected diagram';
     await page.getByRole('button', { name: '둘 다', exact: true }).click();

@@ -14,6 +14,7 @@ import { analyzeDiagram } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
 import type { CanvasHandle } from '../export/types';
+import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, newBlockId, picturesFor, rectOf, sameDrawing, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -279,23 +280,24 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       const sel = picked.length ? all.filter((e) => ids.has(e.id) || (e.type === 'text' && e.containerId && ids.has(e.containerId))) : [];
       return { selected: sel.length > 0, elements: sel.length ? sel : all };
     };
-    const opts = () => ({ exportBackground: true, viewBackgroundColor: '#ffffff', exportWithDarkMode: false });
+    // Excalidraw inverts the white background itself in dark mode; a transparent export skips the background.
+    const opts = (o: ExportOptions) => ({ exportBackground: !o.transparent, viewBackgroundColor: '#ffffff', exportWithDarkMode: o.dark });
     handle.current = {
       scope: () => {
         const s = scope();
         return { selected: s.selected, count: s.elements.length };
       },
-      svg: async () => {
+      svg: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        const el = await exportToSvg({ elements, appState: opts(), files: api.getFiles(), exportPadding: 16 });
+        const el = await exportToSvg({ elements, appState: opts(o), files: api.getFiles(), exportPadding: 16 });
         el.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         return { svg: new XMLSerializer().serializeToString(el), width: parseFloat(el.getAttribute('width') ?? '0'), height: parseFloat(el.getAttribute('height') ?? '0') };
       },
-      png: async () => {
+      png: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        return await exportToBlob({ elements, appState: opts(), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16 });
+        return await exportToBlob({ elements, appState: opts(o), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
       },
       key: ({ key, code, ctrl, meta, shift, alt }) => {
         const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');

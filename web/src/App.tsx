@@ -17,6 +17,7 @@ import { useTheme } from './theme';
 import { fileStem } from './fileName';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
+import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
 import { CommandPalette, type Command } from './CommandPalette';
 import { exportBlock, exportCanvas, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
@@ -129,6 +130,9 @@ export function App() {
   const jumpTo = useCallback((id: string | null) => setJump(id ? { id, n: Date.now() } : null), []);
 
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportOptions, setExportOptions] = useState<ExportOptions>(DEFAULT_EXPORT);
+  const exportOptionsRef = useRef(exportOptions);
+  exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
@@ -331,7 +335,7 @@ export function App() {
       ),
     [setStatus],
   );
-  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, session.getState().file?.title ?? ''));
+  const imageExport = (kind: ImageKind) => void report(exportCanvas(canvasHandle.current, kind, session.getState().file?.title ?? '', exportOptions));
   const markdownExport = () => {
     const f = session.getState().file;
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
@@ -343,7 +347,7 @@ export function App() {
   const blockExport = useCallback(
     (b: Block, kind: ImageKind) => {
       const f = session.getState().file;
-      void report(exportBlock(b, kind, blockExportTitle(f?.title ?? '', b, f?.blocks ?? [])));
+      void report(exportBlock(b, kind, blockExportTitle(f?.title ?? '', b, f?.blocks ?? []), exportOptionsRef.current));
     },
     [report, session],
   );
@@ -374,7 +378,7 @@ export function App() {
       } else if (!mod && e.shiftKey && e.altKey && k === 'KeyC' && fileOpen && !editing) {
         e.preventDefault();
         e.stopPropagation();
-        void report(exportCanvas(canvasHandle.current, 'copy', session.getState().file?.title ?? ''));
+        void report(exportCanvas(canvasHandle.current, 'copy', session.getState().file?.title ?? '', exportOptionsRef.current));
       }
     };
     window.addEventListener('keydown', onKey, true);
@@ -465,6 +469,8 @@ export function App() {
               disabled={!hasFile}
               canvasReady={showCanvas}
               selected={exportSelected}
+              options={exportOptions}
+              onOptions={setExportOptions}
               onImage={imageExport}
               onMarkdown={markdownExport}
             />
