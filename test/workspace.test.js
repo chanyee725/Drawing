@@ -342,6 +342,30 @@ test('outside edit seen first by PUT (no watcher event yet) still cannot be over
   });
 });
 
+test('outside save of broken JSON then valid JSON with the same revision: old-revision PUT is 409', async () => {
+  await withApp(async ({ ws, base, call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    assert.equal((await call('PUT', `/api/file?path=${q('a')}`, { title: 'mine', revision: 1 })).body.revision, 2);
+    const cur = JSON.parse(await readFile(join(ws, 'a.dpx.json'), 'utf8'));
+    const sse = sseReader(base);
+    await sleep(100);
+    try {
+      await writeFile(join(ws, 'a.dpx.json'), '{ broken');
+      await sse.waitFor((e) => e.path === 'a.dpx.json' && e.revision === null);
+      await writeFile(join(ws, 'a.dpx.json'), JSON.stringify({ ...cur, title: 'outside' })); // still revision 2
+      const ev = await sse.waitFor((e) => e.path === 'a.dpx.json' && e.revision !== null);
+      assert.equal(ev.revision, 3);
+
+      const r = await call('PUT', `/api/file?path=${q('a')}`, { title: 'stale client', revision: 2 });
+      assert.equal(r.status, 409);
+      assert.equal(r.body.revision, 3);
+      assert.equal((await call('GET', `/api/file?path=${q('a')}`)).body.title, 'outside');
+    } finally {
+      await sse.stop();
+    }
+  });
+});
+
 test('fs errors become 4xx, and neither response nor server log contains absolute paths', async () => {
   await withApp(async ({ ws, call }) => {
     const logged = [];

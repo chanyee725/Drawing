@@ -373,7 +373,7 @@ export function createStore(workspaceDir, { onExternalChange, watchDebounceMs = 
     const prev = known.get(rel);
     if (prev?.hash === sha(loaded.text)) return; // our own write
     if (!prev || !loaded.file) {
-      known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? 0 });
+      known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? prev?.revision ?? 0 });
       onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: loaded.file?.revision ?? null });
       return;
     }
