@@ -19,7 +19,7 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
   const hub = createHub();
   const ctx = { projectDir: opts.projectDir, dispatch: opts.dispatch ?? null, hub, modules: {} };
-  const routes = [{ method: 'GET', path: '/api/events', handler: (req, res) => hub.attach(req, res) }];
+  const routes = [{ method: 'GET', path: '/api/events', handler: (req, res, _ctx, _match, url) => hub.attach(req, res, url) }];
   const closers = [];
 
   for (const { name, setup } of moduleList) {

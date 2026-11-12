@@ -152,18 +152,27 @@ test('module: follows Dispatch with GET only, attributes watch changes, broadcas
     assert.ok(requests.every(([m]) => m === 'GET'), 'never anything but GET');
     assert.deepEqual(requests.map(([, p]) => p), ['/api/state', '/api/events']);
 
-    const last = events.filter(([e]) => e === 'agents').at(-1)?.[1];
-    assert.ok(last, 'agents event broadcast');
+    const lastFn = events.filter(([e]) => e === 'agents').at(-1)?.[1];
+    assert.equal(typeof lastFn, 'function', 'agents event built per client');
+    const last = lastFn({ activity: true });
     assert.equal(last.dispatch.connected, true);
     const byId = Object.fromEntries(last.agents.map((a) => [a.id, a]));
     assert.equal(byId.s2.activity, 'Reading diff');
+    const off = lastFn({ activity: false });
+    assert.ok(off.agents.every((a) => !('activity' in a) && !('activityAt' in a)), 'no activity line unless asked');
+    assert.equal(off.agents.find((a) => a.id === 's2').roleName, last.agents.find((a) => a.id === 's2').roleName);
+    assert.doesNotMatch(JSON.stringify(off), /Reading diff/);
     assert.equal(byId.s4, undefined);
     assert.equal(byId.s1.lastChange.summary, '1 text changed');
-    assert.doesNotMatch(JSON.stringify(events), /transcript|SYSTEM PROMPT/);
+    assert.doesNotMatch(JSON.stringify(events.map(([e, d]) => [e, typeof d === 'function' ? d({ activity: true }) : d])), /transcript|SYSTEM PROMPT/);
 
     const res = { writeHead() {}, end(b) { this.body = JSON.parse(b); } };
-    mod.routes.find((r) => r.path === '/api/agents').handler({}, res);
+    const route = mod.routes.find((r) => r.path === '/api/agents');
+    route.handler({}, res, ctx, null, new URL('http://127.0.0.1/api/agents'));
     assert.equal(res.body.agents.length, 3);
+    assert.ok(res.body.agents.every((a) => !('activity' in a)), 'GET /api/agents leaves activity out by default');
+    route.handler({}, res, ctx, null, new URL('http://127.0.0.1/api/agents?activity=1'));
+    assert.equal(res.body.agents.find((a) => a.id === 's2').activity, 'Reading diff');
     assert.ok(res.body.agents.every((a) => !('dir' in a)), 'no absolute folders in API output');
     assert.ok(last.agents.every((a) => !('dir' in a)), 'no absolute folders in SSE output');
   } finally {
