@@ -53,7 +53,12 @@
 
 ### 상세 메모
 
-- **tldraw**: 기본 라이선스는 "개발 중에만" 쓸 수 있고, 프로덕션은 trial/commercial/hobby 키가 필요해요. 워터마크("made with tldraw")는 hobby 라이선스에서만 요구돼요. trial은 100일 무료이고, 그동안 SDK가 라이선스 키 해시를 tldraw 서버로 보내요. hobby는 비상업 프로젝트에 한해 재량으로 발급돼요. 가격은 공개돼 있지 않고 영업 문의예요. 출처: <https://tldraw.dev/community/license>, <https://tldraw.dev/pricing>. 이 프로젝트는 개인정보를 밖으로 내보내지 않는 로컬 도구라서, 키 확인 통신이 없는 쪽(Excalidraw)이 더 안전해요 (추정). 상업 배포 계획이 생기면 tldraw는 다시 따져야 해요.
+- **tldraw** (원문 직접 확인, 2026-11-12): 라이선스 본문(LICENSE.md)과 tldraw.dev 문서가 말하는 범위가 달라서 나눠 적어요.
+  - LICENSE.md 본문: 허용은 "Use the Software in Development Environments", 조건은 "Not to use the Software in Production Environments"예요. 키 집행을 끄거나 바꾸면 안 돼요. 트라이얼은 "for the specified period"라고만 하고 일수가 없어요. hobby 라이선스는 본문에 없어요. 데이터는 "may collect and transmit usage data to tldraw for license compliance purposes"라고만 해요. 출처: <https://github.com/tldraw/tldraw/blob/main/LICENSE.md>
+  - tldraw.dev 문서: 프로덕션에는 trial(100일 무료, 상업 단위당 1회)·commercial·hobby 중 하나의 키가 필요해요. 워터마크("made with tldraw")는 hobby에서 의무예요. hobby는 비상업 프로젝트에 재량 발급이에요. 데이터는 commercial·hobby는 "no information is sent", 프로덕션 trial은 키 해시만 보낸다고 해요. 키는 클라이언트에서 검증하고 오프라인에서도 쓸 수 있어요. 출처: <https://tldraw.dev/community/license>
+  - 가격 페이지는 "Value-based pricing", "Talk to sales"만 있고 금액이 없어요. 출처: <https://tldraw.dev/pricing>
+  - 코드(5.6.0)는 키 상태에 따라 tldraw CDN으로 추적 요청을 보내는 분기가 있고, 그 유형에 hobby로 보이는 `with_watermark`도 있어 문서와 어긋나 보여요. 키가 없어도 글꼴·아이콘을 CDN에서 35건 받아요. 자세한 건 [08](08-spike-oss.md) §2.
+  - 이 프로젝트는 외부 통신을 피하는 로컬 도구라서, 외부 요청이 0건이었던 Excalidraw가 더 안전해요 (추정).
 - **Excalidraw**: MIT이고 `@excalidraw/excalidraw` React 컴포넌트로 임베드할 수 있어요. 출처: <https://github.com/excalidraw/excalidraw>. 손그림 스타일이 Eraser의 `typeface: rough` 기본값과 결이 비슷해요 (추정). 단, freeform 편집기이지 DSL 레이아웃 엔진이 아니에요.
 - **rough.js**: MIT. canvas와 SVG 양쪽에서 쓸 수 있고 hachure, zigzag 같은 채움을 지원해요. 출처: <https://github.com/rough-stuff/rough>. `styleMode: watercolor`에 해당하는 효과는 기본 제공이 아니에요 (추정, 직접 구현 필요).
 - **ELK.js**: ELK 알고리즘을 JS로 옮긴 것이고 레이아웃만 계산해요. 렌더링은 따로 해야 해요. `new ELK().layout(graph)`가 Promise를 반환하고, Web Worker로 돌릴 수 있어요. 출처: <https://github.com/kieler/elkjs>. 라이선스는 EPL-2.0이고 Secondary License로 GPL-3.0-or-later를 명시해요. 출처: <https://github.com/kieler/elkjs/blob/master/LICENSE.md>. EPL은 약한 카피레프트라서, 수정 없이 의존성으로 쓰는 로컬 앱에는 보통 문제가 없어요 (추정, 배포 시 법률 확인 필요). 중첩 group에 잘 맞아요 (추정).
