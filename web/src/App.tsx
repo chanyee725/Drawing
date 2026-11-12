@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import { Sidebar } from './Sidebar';
+import { isRetryableSaveError } from './saveRetry';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 import { DocPane } from './DocPane';
@@ -49,7 +50,13 @@ export function App() {
   const [file, setFile] = useState<DpxFile | null>(null);
   const [view, setView] = useState<View>('both');
   const [ratio, setRatio] = useState(0.45);
-  const [status, setStatus] = useState('');
+  const [status, setStatusText] = useState('');
+  // True while the status is a problem (failed save or conflict), so the top bar shows it on narrow screens too.
+  const [statusAlert, setStatusAlert] = useState(false);
+  const setStatus = useCallback((text: string, alert = false) => {
+    setStatusText(text);
+    setStatusAlert(alert);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   // Set when a save got 409: the server's current revision, so "overwrite" can re-send against it.
   const [conflict, setConflict] = useState<{ revision?: number } | null>(null);
@@ -118,10 +125,14 @@ export function App() {
             clearTimer();
             conflictRef.current = true;
             setConflict({ revision: e.revision });
-            setStatus('다른 곳에서 바뀌었어요');
+            setStatus('다른 곳에서 바뀌었어요', true);
+          } else if (!isRetryableSaveError(e)) {
+            // The server refused this request (4xx); retrying the same body would fail forever.
+            // Keep a pending edit timer: a newer edit may already have fixed the body.
+            setStatus('저장하지 못했어요. 내용이나 파일 이름을 확인해 주세요', true);
           } else {
             retryDelay.current = Math.min(RETRY_MAX, Math.max(RETRY_MIN, retryDelay.current * 2));
-            setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요');
+            setStatus('저장하지 못했어요. 잠시 뒤 다시 시도할게요', true);
             // A pending edit timer will save sooner; otherwise back off and retry.
             if (timer.current === null) schedule(retryDelay.current);
           }
@@ -330,6 +341,7 @@ export function App() {
           title={file?.title ?? ''}
           hasFile={!!file}
           status={status}
+          statusAlert={statusAlert}
           view={view}
           onView={setView}
           onTitle={(title) => edit({ title })}

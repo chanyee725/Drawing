@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parse, parseArchitecture, parseErdDiagram, parseFlowchart, tokenize } from '../../shared/dsl/index.ts';
+import { detectDiagramType, parse, parseArchitecture, parseErdDiagram, parseFlowchart, tokenize } from '../../shared/dsl/index.ts';
 import { fmt } from './helpers.ts';
 
 test('many unclosed parentheses on one line stay fast', () => {
@@ -78,4 +78,13 @@ test('type detection needs the statement shape, not just a keyword', () => {
     ['notation crows-foot', 'erd'],
   ];
   for (const [code, type] of cases) assert.equal(parse(code).ast.type, type, code);
+});
+
+test('type detection allows leading spaces and tabs and stays fast with many blank lines', () => {
+  assert.equal(detectDiagramType('  loop {\n  A > B\n}'), 'sequence');
+  assert.equal(detectDiagramType('\tactivate API'), 'sequence');
+  assert.equal(detectDiagramType('  notation crows-foot\nA { id pk }'), 'erd');
+  const t = Date.now();
+  assert.equal(detectDiagramType('\n'.repeat(50000) + 'a > b'), 'cloud-architecture');
+  assert.ok(Date.now() - t < 2000);
 });

@@ -42,12 +42,12 @@ export function detectDiagramType(code: string): DiagramType {
   // Keywords only count in their statement shape, so names like `break glass` or `order list` stay nodes.
   const noArrow = String.raw`[^<>\n]*$`;
   if (
-    /^\s*(loop|alt|else|opt|par|and|break)\s*(\[[^\n]*\])?\s*\{/m.test(text) ||
-    new RegExp(String.raw`^\s*(activate|deactivate|autoNumber|order)[ \t]+\S` + noArrow, 'm').test(text)
+    /^[ \t]*(loop|alt|else|opt|par|and|break)\s*(\[[^\n]*\])?\s*\{/m.test(text) ||
+    new RegExp(String.raw`^[ \t]*(activate|deactivate|autoNumber|order)[ \t]+\S` + noArrow, 'm').test(text)
   ) {
     return 'sequence';
   }
-  if (/^\s*notation[ \t]+(chen|crows-foot)\b/m.test(text) || /\{[^{}]*?[^{}\s][ \t]+(pk|fk)(?=[ \t]|\r?\n|\}|$)/m.test(text)) return 'erd';
+  if (/^[ \t]*notation[ \t]+(chen|crows-foot)\b/m.test(text) || /\{[^{}]*?[^{}\s][ \t]+(pk|fk)(?=[ \t]|\r?\n|\}|$)/m.test(text)) return 'erd';
   if (/\bshape\s*:/.test(text)) return 'flowchart';
   return 'cloud-architecture';
 }

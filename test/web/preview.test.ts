@@ -74,3 +74,11 @@ test('a theme change repaints the last good drawing while the code has errors', 
   // same theme keeps the exact SVG
   assert.equal(nextPreview(good, bad, 'architecture', 'light')?.svg, good.svg);
 });
+
+test('analyzeDiagram and renderPreview ignore prototype keys as block types', async () => {
+  for (const type of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+    assert.deepEqual(analyzeDiagram(type, GOOD), { ast: null, diagnostics: [], parsed: false });
+    assert.equal(await renderPreview(type, GOOD, 'light'), null);
+    assert.equal(nextPreview(null, null, type), null);
+  }
+});
