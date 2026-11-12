@@ -521,6 +521,14 @@ export function App() {
       keywords: ['layout', 'reset', '배치', '초기화', '자동 배치'],
       run: () => canvasHandle.current?.layout.reset(),
     });
+    const freeformCmd = (): Command => ({
+      id: 'block-freeform',
+      title: '자유 도형으로 바꾸기',
+      disabled: !lay?.block,
+      hint: lay?.block ? undefined : '블록을 하나 고를 때',
+      keywords: ['freeform', 'convert', 'shapes', 'ungroup', '자유', '도형', '변환', '바꾸기'],
+      run: () => canvasHandle.current?.layout.freeform(),
+    });
     const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[] = []): Command => ({ id, title, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
     return [
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
@@ -554,6 +562,7 @@ export function App() {
       canvasCmd('select-all', '전체 선택', `${M}A`, { key: 'a', ctrl: true }, ['select', 'all']),
       layoutEditCmd(),
       layoutResetCmd(),
+      freeformCmd(),
     ];
   };
 

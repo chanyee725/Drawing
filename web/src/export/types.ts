@@ -18,5 +18,7 @@ export type CanvasHandle = {
     edit(): void;
     /** Drop the block's moved layout, as one undo step. */
     reset(): void;
+    /** Replace the selected graph block with plain shapes, as one undo step (or say why not on the canvas). */
+    freeform(): void;
   };
 };
