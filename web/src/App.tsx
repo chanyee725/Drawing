@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
 import type { CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { Sidebar } from './Sidebar';
+import { externalAction, type WorkspaceEvent } from './externalChange';
 import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRetry';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
@@ -316,21 +317,61 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
+  // The open file is gone (deleted or moved away): drop it and its pending save, or the timer would write to a path that no longer exists.
+  const closeOpenFile = useCallback(() => {
+    clearTimer();
+    dirty.current = false;
+    conflictRef.current = false;
+    reloadStopped.current = false;
+    setConflict(null);
+    setPath(null);
+    pathRef.current = null;
+    setFile(null);
+    fileRef.current = null;
+    setHashPath(null);
+  }, []);
+
+  // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
+  useEffect(() => {
+    if (typeof EventSource === 'undefined') return;
+    const es = new EventSource('/api/events');
+    let busy = false;
+    es.addEventListener('workspace', (m) => {
+      let e: WorkspaceEvent;
+      try {
+        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
+      } catch {
+        return;
+      }
+      const act = externalAction(e, pathRef.current, dirty.current || inFlight.current);
+      if (act === 'close') {
+        closeOpenFile();
+        setError('열어 둔 파일이 지워졌거나 옮겨졌어요');
+      } else if (act === 'reload' && !busy) {
+        const p = pathRef.current!;
+        busy = true;
+        void saving.current
+          .then(() => (dirty.current || pathRef.current !== p ? null : api.readFile(p)))
+          .then((f) => {
+            if (f && !dirty.current && pathRef.current === p && f.revision > (fileRef.current?.revision ?? 0)) load(p, f);
+          })
+          .catch(() => {})
+          .finally(() => {
+            busy = false;
+          });
+      }
+      void refreshTree();
+    });
+    return () => es.close();
+  }, [closeOpenFile, load, refreshTree]);
+
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
     if (!window.confirm(`"${label}"을(를) 지울까요?`)) return;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) {
-        clearTimer();
-        dirty.current = false;
-        conflictRef.current = false;
-        setConflict(null);
-        setPath(null);
-        setFile(null);
-        setHashPath(null);
-      }
+      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');
