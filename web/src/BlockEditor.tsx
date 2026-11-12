@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { EditorState, Compartment } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
+import { EditorView, keymap, tooltips, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -60,6 +60,7 @@ export function BlockEditor({ code, type, dark, onChange }: Props) {
           dslLanguage,
           hl.current.of(highlightFor(dark)),
           baseTheme,
+          tooltips({ parent: document.body }),
           autocompletion({ override: [dslCompletionSource(() => typeRef.current)], icons: false }),
           lintGutter(),
           lint,
