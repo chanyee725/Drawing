@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { getSchema } from '@tiptap/core';
 import { Node as PMNode } from '@tiptap/pm/model';
-import { EditorState } from '@tiptap/pm/state';
+import { EditorState, Plugin } from '@tiptap/pm/state';
+import { history, undo } from '@tiptap/pm/history';
 import { buildHash, fileItems, figureItems, filterWiki, headingItems, headingsNeedingId, outlineOf, parseHash } from '../../web/src/doc/outline.ts';
 import { docExtensions, withHeadingIds } from '../../web/src/doc/extensions.ts';
 import { documentToMarkdown } from '../../web/src/export/markdown.ts';
@@ -56,6 +57,18 @@ test('headings get unique ids in the editor, and stored ids are kept', () => {
   assert.equal(new Set(ids).size, 3);
   assert.ok(ids.every(Boolean));
   assert.equal(withHeadingIds(EditorState.create({ doc: tr.doc }).tr), null);
+});
+
+test('undo after typing in a heading keeps its id (ids are not in the undo history)', () => {
+  const schema = getSchema(docExtensions());
+  const ids = new Plugin({ appendTransaction: (trs, _old, state) => (trs.some((t) => t.docChanged) ? withHeadingIds(state.tr) : null) });
+  let state = EditorState.create({ schema, doc: PMNode.fromJSON(schema, { type: 'doc', content: [h(1, 'A')] }), plugins: [history(), ids] });
+  // One letter typed: the heading gets its id in the same update.
+  state = state.applyTransaction(state.tr.insertText('x', 2)).state;
+  const id = outlineOf(state.doc.toJSON())[0].id;
+  assert.ok(id);
+  assert.ok(undo(state, (tr) => (state = state.apply(tr))));
+  assert.deepEqual(outlineOf(state.doc.toJSON()), [{ id, level: 1, text: 'A' }]);
 });
 
 test('a wikilink fits the schema and exports as [[label]]', () => {

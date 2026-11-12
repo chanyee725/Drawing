@@ -88,7 +88,8 @@ export function withHeadingIds(tr: import('@tiptap/pm/state').Transaction): impo
     const node = tr.doc.nodeAt(heads[i].pos);
     if (node) tr.setNodeMarkup(heads[i].pos, undefined, { ...node.attrs, id: newHeadingId() });
   }
-  return tr;
+  // Ids are not an edit: undo must not take them off (a fresh id would break links copied meanwhile).
+  return tr.setMeta('addToHistory', false);
 }
 
 /** A canvas diagram block shown in the document. It stores only the block id; the picture is drawn live. */
