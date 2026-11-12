@@ -2,3 +2,4 @@ node_modules/
 .dispatch/
 *.log
 public/
+.playwright-mcp/
