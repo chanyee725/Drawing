@@ -122,7 +122,7 @@ export function parseSequence(c: Cursor): SequenceDiagram {
     }
     if (c.peek().kind === 'arrow') {
       const { lists, arrows } = parseChain(c, first);
-      const tail = parseConnectionTail(c);
+      const tail = parseConnectionTail(c, stack.length > 1);
       if (lists.length > 1) {
         for (const list of lists) for (const ep of list) column(ep);
         if (tail.label !== undefined && lists.length > 2) {

@@ -3,6 +3,9 @@ import { realpathSync } from 'node:fs';
 import { lstat, realpath } from 'node:fs/promises';
 import { join, sep, dirname } from 'node:path';
 
+// A drive path (`C:/x`). On Windows `C:x` is drive-relative, so any `X:` start is refused there; elsewhere `a:memo` is a fine name.
+const DRIVE = process.platform === 'win32' ? /^[a-zA-Z]:/ : /^[a-zA-Z]:(\/|$)/;
+
 export class PathError extends Error {}
 
 /** Validate an API path and return its segments. Throws PathError. */
@@ -10,7 +13,7 @@ export function parseRelPath(p) {
   if (typeof p !== 'string' || p === '') throw new PathError('path is required');
   if (p.length > 1024) throw new PathError('path too long');
   if (p.includes('\0') || p.includes('\\')) throw new PathError('invalid path');
-  if (p.startsWith('/') || /^[a-zA-Z]:/.test(p)) throw new PathError('absolute paths are not allowed');
+  if (p.startsWith('/') || DRIVE.test(p)) throw new PathError('absolute paths are not allowed');
   const segs = p.split('/');
   for (const s of segs) {
     if (s === '' || s === '.' || s === '..') throw new PathError('invalid path segment');

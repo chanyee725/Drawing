@@ -544,3 +544,11 @@ test('a typed .dpx suffix is dropped: demo.dpx is the file demo.dpx.json', async
     assert.equal((await call('POST', '/api/file', { path: 'a/demo' })).status, 409);
   });
 });
+
+test('names like a:memo are fine; only drive paths are refused', async () => {
+  await withApp(async ({ call }) => {
+    assert.equal((await call('POST', '/api/file', { path: 'a:memo' })).status, 201);
+    assert.equal((await call('GET', `/api/file?path=${q('a:memo')}`)).status, 200);
+    if (process.platform !== 'win32') assert.equal((await call('POST', '/api/file', { path: 'C:/x' })).status, 400);
+  });
+});

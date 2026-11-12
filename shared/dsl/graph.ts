@@ -107,7 +107,7 @@ export function parseGraph(c: Cursor, type: GraphDiagram['type']): GraphDiagram 
     const nx = c.peek();
     if (nx.kind === 'arrow') {
       const { lists, arrows } = parseChain(c, first);
-      const tail = parseConnectionTail(c);
+      const tail = parseConnectionTail(c, stack.length > 1);
       if (lists.length > 1) {
         for (const list of lists) for (const ep of list) reference(ep);
         if (tail.label !== undefined && lists.length > 2) {
