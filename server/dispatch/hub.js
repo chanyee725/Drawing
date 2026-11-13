@@ -3,7 +3,7 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnCli } from "./cli.js";
-import { redact } from "./redact.js";
+import { redact, redactDeep } from "./redact.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
 import { CHILD_PROMPT, NAMES, PERMS, SPAWN_PROMPT } from "./roles.js";
@@ -91,6 +91,11 @@ export function activityOf(name = "", text = "") {
   return name.replace(/^mcp__[^_]+__/, "");
 }
 
+/** A permission request as the UI may see it: tool input, description and suggestions masked. */
+function maskedPerm(req) {
+  return { ...req, input: redactDeep(req.input), description: redact(req.description), suggestions: redactDeep(req.suggestions) };
+}
+
 export class Hub extends EventEmitter {
   constructor({ root, store, models, roles, port, limits, spawnCli: spawner = spawnCli }) {
     super();
@@ -139,7 +144,8 @@ export class Hub extends EventEmitter {
   publicSession(s) {
     const r = this.live.get(s.id);
     const busy = s.status === "running" || s.status === "starting";
-    const pending = r ? [...r.perms.values()] : [];
+    // The UI gets a masked copy; the raw input stays in r.perms for the allow answer.
+    const pending = r ? [...r.perms.values()].map(maskedPerm) : [];
     // stateSince moves only on a change of state, so "사람 기다림 · 8분째" counts from the real start.
     const state = sessionState(s, pending.length);
     if (state !== s.state) { s.state = state; s.stateSince = Date.now(); }
@@ -766,7 +772,7 @@ export class Hub extends EventEmitter {
           id, lead, leadName: ls?.name ?? null, status: "open", reason: hit.reason, resetAt: hit.resetAt,
           createdAt: now, updatedAt: now,
           items: items.map(t => ({ title: t.title, stage: t.stage, owner: t.owner, note: t.note })),
-          leadLast: clip(this.rt(lead).lastText || ls?.last || "", 1500),
+          leadLast: clip(redact(this.rt(lead).lastText || ls?.last || ""), 1500),
           team: this.sessions.filter(c => c.parent === lead && c.status !== "done")
             .map(c => ({ name: c.name, status: c.status, branch: c.branch, last: clip(c.last || "", 200) })),
         };
