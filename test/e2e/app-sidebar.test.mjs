@@ -157,8 +157,16 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   await page.keyboard.press('b');
   await page.getByRole('dialog').waitFor();
   await page.keyboard.press('Escape');
-  // The model strip reads only status: nothing is connected in a scratch repo.
-  await nav.getByText('연결 안 됨', { exact: false }).or(nav.getByText('모델 연결 꺼짐')).or(nav.getByRole('list', { name: '모델 연결' })).first().waitFor();
+  // One model row each, with text next to the dot (nothing is connected in a scratch repo); a row opens its
+  // connect dialog, which is closed again without connecting.
+  const models = nav.getByRole('list', { name: '모델 연결' });
+  await models.waitFor();
+  assert.deepEqual((await models.locator('li').allInnerTexts()).map((s) => s.split('\n')[0]), ['Claude', 'Codex', 'Gemini']);
+  for (const s of await models.locator('li').allInnerTexts()) assert.match(s, /연결 안 됨|꺼짐|연결됨|%|한도/);
+  await models.getByRole('button', { name: /^Codex / }).click();
+  await page.getByRole('dialog', { name: 'Codex 연결' }).waitFor();
+  await page.keyboard.press('Escape');
+  await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page.close();
 
   page = await open('dark', 1440);

@@ -68,6 +68,18 @@ test('percent clamps and rounds', () => {
   assert.equal(percent(Number.NaN), null);
 });
 
+test('modelStatus: text next to every dot, warn above 75%', async () => {
+  const { modelStatus } = await import('../../web/src/projectNav.ts');
+  const m = { id: 'claude', name: 'Claude', installed: true, connected: true, pct: 42, reached: false };
+  assert.deepEqual(modelStatus(m, true), { text: '42%', long: '연결됨, 5시간 한도 42% 사용', tone: 'ok' });
+  assert.equal(modelStatus({ ...m, pct: 81 }, true).tone, 'warn');
+  assert.equal(modelStatus({ ...m, pct: 75 }, true).tone, 'ok');
+  assert.deepEqual(modelStatus({ ...m, pct: null }, true), { text: '연결됨', long: '연결됨', tone: 'ok' });
+  assert.equal(modelStatus({ ...m, reached: true }, true).text, '한도 도달');
+  assert.deepEqual(modelStatus({ ...m, connected: false }, true), { text: '연결 안 됨', long: '연결 안 됨', tone: 'off' });
+  assert.equal(modelStatus(m, false).text, '꺼짐');
+});
+
 test('paletteScope follows the screen: open file on the document, shown project on its home, none on the dashboard', () => {
   // A file of A stays loaded while the user is on "모든 파일": no stale A chip there.
   assert.equal(paletteScope({ kind: 'all' }, view, 'A/login.dpx.json'), null);

@@ -79,7 +79,13 @@ function Sidebar({ className, children, label, ...props }: React.ComponentProps<
   if (!isMobile) return nav;
   return (
     <Sheet open={openMobile} onOpenChange={setOpenMobile}>
-      <SheetContent side="left" className={cn('w-[min(var(--sidebar-width),85vw)] p-0', C.bg, C.border)} aria-describedby={undefined}>
+      {/* The sheet is portalled out of the wrapper, so it sets the width variable itself. */}
+      <SheetContent
+        side="left"
+        style={{ '--sidebar-width': SIDEBAR_WIDTH } as React.CSSProperties}
+        className={cn('w-[min(var(--sidebar-width),85vw)] p-0', C.bg, C.border)}
+        aria-describedby={undefined}
+      >
         <SheetTitle className="sr-only">{label}</SheetTitle>
         <SheetDescription className="sr-only">보기, 프로젝트, 모델 연결</SheetDescription>
         {nav}

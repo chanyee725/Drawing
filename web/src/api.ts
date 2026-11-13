@@ -44,7 +44,7 @@ export type ProjectsView = { projects: Project[]; loose: DocNode[] };
 
 /** Model connection summary for the sidebar (Dispatch routes; GET only, nothing here starts a CLI). */
 export type DispatchStatus = { enabled: boolean; reason?: string; message?: string };
-export type ProviderState = { installed: boolean | null; connected: boolean };
+export type ProviderState = { installed: boolean | null; connected: boolean; busy?: boolean; url?: string | null; error?: string | null };
 export type LimitWindow = { label: string; used: number | null; reset: number | null };
 export type ProviderLimits = {
   claude?: { windows: LimitWindow[] } | null;

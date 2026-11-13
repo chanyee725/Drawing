@@ -3,6 +3,7 @@
 import * as workspace from './workspace/index.js';
 import * as runs from './runs/index.js';
 import * as dispatch from './dispatch/index.js';
+import * as pipeline from './pipeline/index.js';
 
 export const modules = [
   { name: 'workspace', setup: workspace.setup },
@@ -10,4 +11,6 @@ export const modules = [
   { name: 'runs', setup: runs.setup },
   // Agent sessions for the git project holding the workspace; off outside a git project.
   { name: 'dispatch', setup: dispatch.setup },
+  // Plans and approval (E20): write_plan, 시작하기, note_step; gates the lead's create_sessions.
+  { name: 'pipeline', setup: pipeline.setup },
 ];
