@@ -10,8 +10,11 @@ export type LayoutSession = {
   /** type + code this session was made for. */
   key: string;
   basis: LayoutBasis;
-  /** Picture for `layout` (light theme, like the block images), with its scene for hit boxes and origin. */
-  compose(layout: BlockLayout | undefined): { scene: Scene; svg: string };
+  /**
+   * Picture for `layout` in `theme` (default light), with its scene for hit boxes and origin. It is shown outside
+   * the canvas filter, so the dark one is the plain dark palette, not the pre-filtered block image.
+   */
+  compose(layout: BlockLayout | undefined, theme?: 'light' | 'dark'): { scene: Scene; svg: string };
 };
 
 const keyOf = (type: string, code: string) => `${type}\n${code}`;
@@ -78,10 +81,10 @@ export async function openLayoutSession(b: { type: string; code: string; layout?
   return {
     key,
     basis: basisOf(ast),
-    compose(layout) {
+    compose(layout, theme = 'light') {
       // Same as drawing the block: overrides the code no longer fits are left out (design §4.3).
       const scene = composeGraph(ast, base, reconcileLayout(ast, layout).layout);
-      return { scene, svg: sceneToSvg(scene, { theme: 'light' }) };
+      return { scene, svg: sceneToSvg(scene, { theme }) };
     },
   };
 }
