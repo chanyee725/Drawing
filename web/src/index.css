@@ -378,7 +378,7 @@ body {
 .run-ring { fill: none; stroke: currentColor; stroke-width: 2; }
 .run-ring[data-view='pending'] { stroke-dasharray: 4 3; }
 .run-ring[data-view='done'] { stroke-width: 1.5; }
-.run-corner circle { fill: var(--background); stroke: currentColor; stroke-width: 1.5; }
+.run-corner rect { fill: var(--background); stroke: currentColor; stroke-width: 1.5; }
 .run-corner text { fill: currentColor; font: 600 11px var(--font-sans); }
 .run-label rect { fill: var(--background); stroke: currentColor; stroke-width: 1; }
 .run-label text { fill: var(--foreground); font: 500 11px var(--font-sans); }

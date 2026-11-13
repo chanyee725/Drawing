@@ -5,12 +5,14 @@ import { finishScene, fontSize, measureLabel, round, styleFor, textItem } from '
 import type { ElementStyle, Label } from './common.ts';
 import { absolutePositions, edgeOffset, runElk } from './elk.ts';
 import type { ElkExtendedEdge, ElkNode } from './elk.ts';
-import { PLATE_PAD } from './text.ts';
+import { PLATE_PAD, textWidth } from './text.ts';
+import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT, badgeRect } from './badge.ts';
+import { sanitizeColor } from './theme.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
 import { routeEdges, straightPorts } from './layout-routes.ts';
-import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
+import type { Point, Scene, SceneBadge, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
   'rectangle', 'circle', 'cylinder', 'diamond', 'document', 'ellipse',
@@ -67,6 +69,15 @@ const MODEL_ORDER = {
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
   'elk.layered.crossingMinimization.forceNodeModelOrder': 'true',
 } as const;
+/**
+ * Divider (`shape: divider`, spec §2.1, issue #115): a 1.3px line broken by its label in the middle. Its label
+ * is the group-title size (12.18 / 13.05), its box at least DIVIDER_MIN_W wide, with DIVIDER_GAP either side of
+ * the label before the line resumes.
+ */
+const DIVIDER_SCALE = 0.93;
+const DIVIDER_MIN_W = 200;
+const DIVIDER_GAP = 8;
+const DIVIDER_H = 28;
 /** Group padding around its children; `top` includes the title line. */
 const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
 
@@ -81,6 +92,8 @@ interface NodeGeom {
   iconOnly: boolean;
   /** Box card: icon on the left, text centred in the rest (architecture nodes with an icon, the default). */
   card: boolean;
+  /** `shape: divider`: a line broken by the label instead of a box. */
+  divider?: boolean;
   iconSize: number;
   /** Second line from `subtitle:`, smaller and muted. */
   sub?: Label;
@@ -113,6 +126,11 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
   const size = fontSize(style);
   const icon = node.attrs.icon;
   const shapeAttr = node.attrs.shape?.toLowerCase();
+  if (shapeAttr === 'divider') {
+    const label = measureLabel(node.label, round(size * DIVIDER_SCALE), style.typeface, style.wrap, NODE_TEXT_MAX * 2);
+    const w = Math.ceil(Math.max(DIVIDER_MIN_W, label.w + 2 * (DIVIDER_GAP + 40)));
+    return { node, style, label, shape: 'rectangle', iconOnly: false, card: false, divider: true, iconSize: 0, w, h: Math.max(DIVIDER_H, Math.ceil(label.h + 8)) };
+  }
   const shape = (SHAPES as readonly string[]).includes(shapeAttr ?? '') ? (shapeAttr as ShapeKind) : 'rectangle';
   const card = d.type === 'cloud-architecture' && !!icon && !node.attrs.shape;
   if (card && d.styles.nodeStyle === 'icon') {
@@ -209,7 +227,7 @@ function unifySizes(
 ): void {
   const sets = new Map<string, NodeGeom[]>();
   for (const g of nodes) {
-    if (g.iconOnly || !BUCKETED.has(g.shape)) continue;
+    if (g.iconOnly || g.divider || !BUCKETED.has(g.shape)) continue;
     const p = parent.get(g.node.id);
     const layer = p === undefined ? rootLayer.get(g.node.id) : undefined;
     const at = p !== undefined ? `group:${p}` : loose.has(g.node.id) ? 'loose' : layer !== undefined ? `layer:${layer}` : undefined;
@@ -826,6 +844,30 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   };
 
   /**
+   * Free nodes in a row-first grid. Dividers (#115) break it into rows: the nodes before a divider form one
+   * grid, the divider its own row under it, the nodes after it the next grid, all stacked.
+   */
+  const leafGrid = (leaves: Piece[]): Piece => {
+    const isDivider = (p: Piece): boolean => [...p.rects.keys()].some((id) => nodes.get(id)?.divider);
+    if (!leaves.some(isDivider)) return packGrid(leaves, gridColumns(leaves.length), GRID_GAP.x, GRID_GAP.y, true);
+    const rows: Piece[] = [];
+    let run: Piece[] = [];
+    const flush = (): void => {
+      if (run.length) rows.push(packGrid(run, gridColumns(run.length), GRID_GAP.x, GRID_GAP.y, true));
+      run = [];
+    };
+    for (const leaf of leaves) {
+      if (!isDivider(leaf)) run.push(leaf);
+      else {
+        flush();
+        rows.push(leaf);
+      }
+    }
+    flush();
+    return packGrid(rows, 1, GRID_GAP.x, GRID_GAP.y, true);
+  };
+
+  /**
    * Free siblings as one block (spec §1.4): free nodes in a row-first grid, then each free group as a cell
    * of a second grid whose columns keep the block near BAND_ASPECT (wide bands stack, as Eraser's do in
    * either direction).
@@ -840,7 +882,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
         leaves.push({ w: g.w, h: g.h, rects: new Map([[c.id, { x: 0, y: 0, w: g.w, h: g.h }]]), edges: new Map() });
       } else bands.push(await groupPiece(c));
     }
-    if (leaves.length > 0) bands.unshift(packGrid(leaves, gridColumns(leaves.length), GRID_GAP.x, GRID_GAP.y, true));
+    if (leaves.length > 0) bands.unshift(leafGrid(leaves));
     if (bands.length === 1) return bands[0]!;
     return packGrid(bands, bandColumns(bands), BAND_GAP.row, BAND_GAP.stack, false);
   };
@@ -1051,8 +1093,9 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   const edgeItems: SceneEdge[] = [];
   const labelItems: SceneItem[] = [];
   const handles: SceneHandle[] = [];
+  const drawn = dividerSpans(d, base, rects);
   const handle = (id: string, kind: 'node' | 'group'): void => {
-    const r = rects.get(id)!;
+    const r = drawn.get(id) ?? rects.get(id)!;
     handles.push({ id, kind, parent: base.parent.get(id) ?? '', x: r.x, y: r.y, w: r.w, h: r.h, moved: !isZero(deltaOf(id)) });
   };
 
@@ -1076,10 +1119,29 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   };
   drawGroups(d.children);
 
+  const badgeItems: SceneBadge[] = [];
   for (const g of nodes.values()) {
-    const r = rects.get(g.node.id)!;
+    const r = drawn.get(g.node.id) ?? rects.get(g.node.id)!;
     handle(g.node.id, 'node');
-    const { style, label, sub } = g;
+    const { style, label } = g;
+    const badge = g.node.attrs.badge?.trim();
+    if (badge && !g.divider) {
+      const box = badgeRect(r.x + r.w, r.y, textWidth(badge, BADGE_FONT_SIZE, 'clean', BADGE_FONT_WEIGHT === 600));
+      badgeItems.push({ kind: 'badge', of: g.node.id, text: badge, ...box, color: sanitizeColor(g.node.attrs.badgeColor ?? g.node.attrs.color) });
+    }
+    if (g.divider) {
+      // The line stops DIVIDER_GAP short of the label on both sides; an empty label leaves one unbroken line.
+      const cy = round(r.y + r.h / 2);
+      const half = label.lines.some((l) => l.trim()) ? label.w / 2 + DIVIDER_GAP : 0;
+      const mid = r.x + r.w / 2;
+      const line = (x0: number, x1: number): SceneItem => ({ kind: 'line', points: [{ x: x0, y: cy }, { x: x1, y: cy }], dashed: false, tone: 'muted', width: EDGE_W });
+      if (half) {
+        nodeItems.push(line(r.x, mid - half), line(mid + half, r.x + r.w));
+        nodeItems.push(textItem(label.lines, mid, cy - label.h / 2, { size: label.size, font: style.typeface, tone: 'muted' }));
+      } else nodeItems.push(line(r.x, r.x + r.w));
+      continue;
+    }
+    const { sub } = g;
     // The subtitle is muted, kept readable on the node's fill (svg.ts); on a bold fill it takes the contrast colour.
     const subItem = (x: number, y: number, anchor: 'start' | 'middle', on?: ElementStyle['paint']): SceneItem =>
       textItem(sub!.lines, x, y, { size: sub!.size, font: style.typeface, anchor, tone: 'muted', ...(on ? { on } : {}) });
@@ -1180,10 +1242,46 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     labelItems.push(textItem(label.lines, cx, cy - label.h / 2, { size: label.size, font: style.typeface, plate: true, color: style.paint.color, tone: 'muted' }));
   }
 
-  const scene = finishScene(d.type, d, [...groupItems, ...edgeItems, ...nodeItems, ...labelItems]);
+  const scene = finishScene(d.type, d, [...groupItems, ...edgeItems, ...nodeItems, ...labelItems, ...badgeItems]);
   const o = scene.origin ?? { x: 0, y: 0 };
   scene.handles = handles.map((h) => ({ ...h, x: round(h.x + o.x), y: round(h.y + o.y), w: round(h.w), h: round(h.h) }));
   return scene;
+}
+
+/** Connector width (svg.ts EDGE_W): dividers draw at the same 1.3px (spec §2.1). */
+const EDGE_W = 1.3;
+
+/**
+ * Where each divider draws. A divider with no connections that shares no rows with its siblings (nothing
+ * beside it) runs the full width of its parent: the group's inside, or the span of the root elements.
+ * Otherwise it keeps its own box.
+ */
+function dividerSpans(d: GraphDiagram, base: GraphBase, rects: ReadonlyMap<string, Rect>): Map<string, Rect> {
+  const out = new Map<string, Rect>();
+  const linked = new Set(d.edges.flatMap((e) => [e.from, e.to]));
+  for (const g of base.nodes.values()) {
+    const id = g.node.id;
+    const r = rects.get(id);
+    if (!g.divider || !r || linked.has(id)) continue;
+    const p = base.parent.get(id);
+    const siblings = [...base.parent.entries()].filter(([o, q]) => q === p && o !== id).map(([o]) => rects.get(o)).filter((s): s is Rect => !!s);
+    if (siblings.some((s) => s.y < r.y + r.h && r.y < s.y + s.h)) continue;
+    let x0: number;
+    let x1: number;
+    if (p !== undefined) {
+      const pr = rects.get(p)!;
+      x0 = pr.x + GROUP_PAD.side;
+      x1 = pr.x + pr.w - GROUP_PAD.side;
+    } else {
+      if (siblings.length === 0) continue;
+      x0 = Math.min(...siblings.map((s) => s.x));
+      x1 = Math.max(...siblings.map((s) => s.x + s.w));
+    }
+    x0 = Math.min(x0, r.x);
+    x1 = Math.max(x1, r.x + r.w);
+    out.set(id, { x: x0, y: r.y, w: x1 - x0, h: r.h });
+  }
+  return out;
 }
 
 /** ELK layout with optional overrides: `composeGraph(d, await graphBase(d), layout)`. */

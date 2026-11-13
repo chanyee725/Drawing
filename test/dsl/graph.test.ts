@@ -142,7 +142,7 @@ test('first-line markers and type detection', () => {
 test('errors carry exact positions', () => {
   const cases: [string, DiagramLike, string[]][] = [
     ['direction sideways', 'flowchart', ["error 1:11+8 Unknown direction 'sideways'. Use one of: down, up, left, right"]],
-    ['A [shape: blob]', 'flowchart', ["warning 1:11+4 Unknown shape 'blob'. Use one of: rectangle, circle, cylinder, diamond, document, ellipse, hexagon, oval, parallelogram, star, trapezoid, triangle"]],
+    ['A [shape: blob]', 'flowchart', ["warning 1:11+4 Unknown shape 'blob'. Use one of: rectangle, circle, cylinder, diamond, document, ellipse, hexagon, oval, parallelogram, star, trapezoid, triangle, divider"]],
     ['A [colour: red]', 'flowchart', ["warning 1:4+6 Unknown attribute 'colour'"]],
     ['A [color: red, color: blue]', 'flowchart', ["warning 1:16+5 Duplicate attribute 'color'"]],
     ['A [color: #12]', 'flowchart', ["warning 1:11+3 Invalid hex color '#12'"]],

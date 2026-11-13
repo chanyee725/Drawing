@@ -111,9 +111,25 @@ export interface SceneLine {
   points: Point[];
   dashed: boolean;
   tone: 'muted' | 'normal';
+  /** Stroke width; default 1 (sequence lifelines). Dividers use the connector width. */
+  width?: number;
 }
 
-export type SceneItem = SceneBox | SceneText | SceneIcon | SceneEdge | SceneLine;
+/** A solid chip on an element's top-right corner (`badge:`). The box is the chip itself (shared/render/badge.ts). */
+export interface SceneBadge {
+  kind: 'badge';
+  /** The element the badge belongs to. */
+  of: string;
+  text: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  /** Sanitized palette name or hex; `undefined` = the default indigo. */
+  color?: string;
+}
+
+export type SceneItem = SceneBox | SceneText | SceneIcon | SceneEdge | SceneLine | SceneBadge;
 
 /** Hit box of a draggable diagram element (graph types), in scene coordinates. Not painted. */
 export interface SceneHandle {
