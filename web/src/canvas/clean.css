@@ -1,19 +1,27 @@
 /* Canvas chrome in the app's own tokens (index.css), so it reads less like stock Excalidraw. */
 .excalidraw.excalidraw {
-  --island-bg-color: var(--surface);
+  --island-bg-color: var(--background);
   --default-border-color: var(--border);
   --sidebar-border-color: var(--border);
-  --color-primary: var(--accent);
-  --color-primary-light: var(--accent-soft);
-  /* Excalidraw's own violets (selected tool, hover/active, primary buttons) follow the neutral accent (#130). */
-  --color-primary-darker: var(--accent);
-  --color-primary-darkest: var(--accent);
-  --color-primary-hover: var(--accent);
-  --color-brand-hover: var(--accent);
-  --color-brand-active: var(--accent);
-  --color-surface-primary-container: var(--accent-soft);
+  /* Excalidraw's own violets follow the neutral shadcn tokens (#130, #132). Fills are opaque mixes, so a glyph
+     drawn in --color-primary-light on a --color-primary box (library checkbox) stays visible. */
+  --color-primary: var(--primary);
+  --color-primary-hover: color-mix(in oklab, var(--primary) 90%, var(--background));
+  --color-primary-darker: color-mix(in oklab, var(--primary) 80%, var(--background));
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 80%, var(--background));
+  --color-brand-hover: color-mix(in oklab, var(--primary) 90%, var(--background));
+  --color-brand-active: color-mix(in oklab, var(--primary) 80%, var(--background));
+  --color-primary-light: color-mix(in oklab, var(--primary) 12%, var(--background));
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 20%, var(--background));
+  --color-surface-primary-container: color-mix(in oklab, var(--primary) 12%, var(--background));
   --color-on-primary-container: var(--foreground);
-  --color-surface-lowest: var(--surface);
+  /* Selection box and handles: grey, not violet (doc 6 §4.1 keeps hue for status only). */
+  --color-selection: var(--ring);
+  /* Surfaces, three steps: buttons rest on --sidebar (the old --panel), hover on --muted, selected is the mix above. */
+  --color-surface-low: var(--sidebar);
+  --color-surface-mid: var(--muted);
+  --color-surface-high: var(--muted);
+  --color-surface-lowest: var(--background);
   --border-radius-lg: 8px;
   --border-radius-md: 6px;
   --shadow-island: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.05);
@@ -26,6 +34,10 @@
 }
 .excalidraw.excalidraw.theme--dark {
   --shadow-island: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  /* Dark: a 12% mix (L~0.24) sits under the --muted hover (0.269); 30% (L~0.37) reads as selected, above hover. */
+  --color-primary-light: color-mix(in oklab, var(--primary) 30%, var(--background));
+  --color-surface-primary-container: color-mix(in oklab, var(--primary) 30%, var(--background));
+  --color-primary-light-darker: color-mix(in oklab, var(--primary) 38%, var(--background));
 }
 /* Usage hints stay visible (some are needed: how to pan, how to finish a multi-point arrow,
    how to undo an erase), just smaller and quieter. */
@@ -33,9 +45,9 @@
   font-size: 0.6875rem;
   opacity: 0.8;
 }
-/* Excalidraw hard-codes white text on primary buttons; the dark accent is near-white, so use its foreground. */
+/* Excalidraw hard-codes white text on primary buttons; dark --primary is near-white, so use its foreground. */
 .excalidraw.excalidraw .Dialog__action-button--primary,
 .excalidraw.excalidraw .library-menu-browse-button,
 .excalidraw.excalidraw .ttd-dialog-panel-button {
-  color: var(--brand-foreground);
+  color: var(--primary-foreground);
 }
