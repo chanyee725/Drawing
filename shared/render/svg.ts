@@ -290,9 +290,9 @@ function lineMarkup(l: SceneLine, { t, c }: Ctx): string {
   return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
 }
 
-/** A solid pill with its text centred (shared/render/badge.ts): the same fill and white text in both themes (§2.3). */
-function badgeMarkup(b: SceneBadge, { c }: Ctx): string {
-  const { fill, text } = badgeColors(b.color);
+/** A solid pill with its text centred (shared/render/badge.ts); dark fills stay in the dark filter's reach (§2.3). */
+function badgeMarkup(b: SceneBadge, { c, theme }: Ctx): string {
+  const { fill, text } = badgeColors(b.color, theme);
   const ty = b.y + b.h / 2 + BADGE_FONT_SIZE * 0.35;
   return (
     `<g data-badge="${esc(b.of)}"><rect x="${n(b.x)}" y="${n(b.y)}" width="${n(b.w)}" height="${n(b.h)}" rx="${n(b.h / 2)}" fill="${c(fill)}"/>` +

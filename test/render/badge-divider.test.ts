@@ -68,10 +68,13 @@ test('badge: colour from badgeColor, else the node colour; white text reads at 4
   }
 });
 
-test('badge: the same fill in light and dark', async () => {
+test('badge: dark draws the in-reach fill of the same colour (#244, checked on the canvas in dark-filter.test.ts)', async () => {
   const s = await scene('A [badge: v2, badgeColor: red]', 'flowchart');
-  const fill = (svg: string) => /data-badge="A"><rect [^>]*fill="(#[0-9a-f]+)"/.exec(svg)![1];
-  assert.equal(fill(sceneToSvg(s, { theme: 'light' })), fill(sceneToSvg(s, { theme: 'dark' })));
+  const chip = (svg: string) => /data-badge="A"><rect [^>]*fill="(#[0-9a-f]+)"\/><text [^>]*fill="(#[0-9a-f]+)"/.exec(svg)!.slice(1);
+  assert.deepEqual(chip(sceneToSvg(s, { theme: 'light' })), ['#d92d20', '#ffffff']);
+  const dark = badgeColors('red', 'dark');
+  assert.deepEqual(chip(sceneToSvg(s, { theme: 'dark' })), [dark.fill, dark.text]);
+  assert.ok(contrast(dark.fill, dark.text) >= 4.5);
 });
 
 test('badge: text is escaped, an invalid colour falls back to indigo', async () => {
