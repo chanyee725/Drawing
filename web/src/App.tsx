@@ -40,6 +40,7 @@ import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type Imag
 import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
+import { PlanStrip } from './run/PlanStrip';
 
 const NARROW = '(max-width: 767px)';
 
@@ -861,6 +862,7 @@ export function App() {
               />
             }
           />
+          <PlanStrip session={session} />
               {view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
