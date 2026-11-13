@@ -78,6 +78,8 @@ const DIVIDER_SCALE = 0.93;
 const DIVIDER_MIN_W = 200;
 const DIVIDER_GAP = 8;
 const DIVIDER_H = 28;
+/** Gap above and below a divider that splits connected siblings into rows. */
+const DIVIDER_ROW_GAP = 24;
 /** Group padding around its children; `top` includes the title line. */
 const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
 
@@ -738,8 +740,46 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   /** Groups whose children all went in one grid: they keep the grid's fitted size (spec §1.2 exception). */
   const gridGroups = new Set<string>();
 
+  /** An unconnected divider: it splits its siblings into rows instead of sitting among them. */
+  const isRowDivider = (c: GraphChild): boolean => c.kind === 'node' && !!nodes.get(c.id)?.divider && free(c);
+  /**
+   * Dividers among connected siblings (#244): ELK would place a divider like any other node, beside them, and
+   * leave a short line fragment. Instead the siblings are cut at each divider in source order, every part is
+   * laid out on its own, and the parts stack top to bottom with the dividers between them. Edges that cross a
+   * divider get an elbow route here; routeEdges redraws them with the rest. Only free siblings: leafGrid.
+   */
+  const dividerRows = async (top: readonly GraphChild[]): Promise<Piece | undefined> => {
+    if (!top.some(isRowDivider) || top.every((c) => free(c))) return undefined;
+    const pieces: Piece[] = [];
+    let run: GraphChild[] = [];
+    const flush = async (): Promise<void> => {
+      if (run.length) pieces.push(await layoutScope(run));
+      run = [];
+    };
+    for (const c of top) {
+      if (!isRowDivider(c)) {
+        run.push(c);
+        continue;
+      }
+      await flush();
+      const g = nodes.get(c.id)!;
+      gridded.add(c.id);
+      pieces.push({ w: g.w, h: g.h, rects: new Map([[c.id, { x: 0, y: 0, w: g.w, h: g.h }]]), edges: new Map() });
+    }
+    await flush();
+    const out = packGrid(pieces, 1, 0, DIVIDER_ROW_GAP, true);
+    for (const e of edges) {
+      const a = out.rects.get(e.from);
+      const b = out.rects.get(e.to);
+      if (a && b && !out.edges.has(e.id)) out.edges.set(e.id, routeElbow(a, b, 0));
+    }
+    return out;
+  };
+
   /** Lay out `top` (the diagram's children, or one free group) with ELK; free siblings go in grids. */
   const layoutScope = async (top: readonly GraphChild[]): Promise<Piece> => {
+    const rows = await dividerRows(top);
+    if (rows) return rows;
     const present = new Set<string>();
     const grids = new Map<string, Piece>();
     /** Free block of the scope's top level when it also has linked children: placed after ELK, not by it. */

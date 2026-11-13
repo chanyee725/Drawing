@@ -146,3 +146,20 @@ test('divider: a badge on a divider is ignored', async () => {
   const s = await scene('Sep [shape: divider, badge: x]', 'flowchart');
   assert.equal(badges(s).length, 0);
 });
+
+test('divider: splits connected diagrams into rows too (#244)', async () => {
+  for (const dir of ['down', 'right']) {
+    const s = await scene([`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'B > C'].join('\n'), 'flowchart');
+    const h = new Map(s.handles!.map((x) => [x.id, x]));
+    const div = h.get('Phase 2')!;
+    for (const id of ['A', 'B']) assert.ok(h.get(id)!.y + h.get(id)!.h <= div.y, `${dir}: ${id} above`);
+    for (const id of ['C', 'D']) assert.ok(h.get(id)!.y >= div.y + div.h, `${dir}: ${id} below`);
+    // Nothing beside it: the line runs across everything above and below.
+    const x0 = Math.min(...['A', 'B', 'C', 'D'].map((id) => h.get(id)!.x));
+    const x1 = Math.max(...['A', 'B', 'C', 'D'].map((id) => h.get(id)!.x + h.get(id)!.w));
+    assert.ok(div.x <= x0 && div.x + div.w >= x1, `${dir}: spans ${div.x}..${div.x + div.w} over ${x0}..${x1}`);
+    // The edge across the divider is still drawn.
+    const edges = s.items.filter((i) => i.kind === 'edge');
+    assert.equal(edges.length, 3, `${dir}: three edges`);
+  }
+});
