@@ -69,7 +69,7 @@ export function TrashDialog({ onClose, onRestored }: Props) {
           지운 파일은 30일 동안 보관해요. 버전 기록도 함께 돌아와요.
         </DialogDescription>
         {message && (
-          <p role="alert" className="bg-brand-soft px-4 py-2 text-sm">
+          <p role="alert" className="bg-muted px-4 py-2 text-sm">
             {message}
           </p>
         )}

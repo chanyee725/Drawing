@@ -24,7 +24,7 @@ type Props = {
 };
 
 /** A pill that sets an option and keeps the menu open. */
-const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[pressed=true]:border-brand data-[pressed=true]:bg-brand-soft data-[pressed=true]:font-semibold data-[pressed=true]:text-brand';
+const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[pressed=true]:border-primary data-[pressed=true]:bg-muted data-[pressed=true]:font-semibold data-[pressed=true]:text-foreground';
 const keep = (fn: () => void) => (e: Event) => {
   e.preventDefault();
   fn();

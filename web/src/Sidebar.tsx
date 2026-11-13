@@ -42,12 +42,12 @@ function filterTree(nodes: TreeNode[], q: string): TreeNode[] {
 
 export const displayName = (n: { name: string; title?: string }) => n.title || n.name.replace(/\.dpx\.json$/, '');
 
-// Tree rows: 28px, inset and rounded, neutral hover; the open file gets the brand tint.
+// Tree rows: --h-row, inset and rounded, neutral hover; the open file gets the sidebar accent.
 const ROW =
-  'group flex h-(--h-row) cursor-pointer items-center gap-1.5 rounded-md pr-1 text-sm text-text-2 outline-none select-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
+  'group flex h-(--h-row) cursor-pointer items-center gap-1.5 rounded-md pr-1 text-sm text-sidebar-foreground/80 outline-none select-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ' + FOCUS_RING;
 const ROW_ACTION = 'flex size-5 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
 const FOOT_ROW =
-  'flex h-(--h-row) w-full items-center gap-2 rounded-md px-2 text-left text-sm text-text-2 outline-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
+  'flex h-(--h-row) w-full items-center gap-2 rounded-md px-2 text-left text-sm text-sidebar-foreground/80 outline-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ' + FOCUS_RING;
 
 // The node being dragged (dataTransfer cannot be read during dragover, so keep it here).
 let dragging: TreeNode | null = null;
@@ -75,7 +75,7 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (name: stri
         else if (e.key === 'Escape') finish(null);
       }}
       onBlur={() => finish(value)}
-      className="h-6 min-w-0 flex-1 rounded-sm border border-brand bg-background px-1 text-sm text-foreground outline-none"
+      className="h-6 min-w-0 flex-1 rounded-sm border border-ring bg-background px-1 text-sm text-foreground outline-none"
     />
   );
 }
@@ -168,7 +168,7 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
             e.preventDefault();
             p.onMove(d, node.path);
           }}
-          className={cn(ROW, over && 'bg-brand-soft hover:bg-brand-soft')}
+          className={cn(ROW, over && 'bg-sidebar-accent hover:bg-sidebar-accent')}
           style={pad}
         >
           <ChevronRight aria-hidden className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', open && 'rotate-90')} />
@@ -195,10 +195,10 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
         dragging = null;
       }}
       aria-current={active ? 'page' : undefined}
-      className={cn(ROW, active && 'bg-brand-soft font-medium text-foreground hover:bg-brand-soft')}
+      className={cn(ROW, active && 'bg-sidebar-accent font-medium text-sidebar-accent-foreground hover:bg-sidebar-accent')}
       style={pad}
     >
-      <FileText aria-hidden className={cn('size-3.5 shrink-0', active ? 'text-brand' : 'text-muted-foreground')} />
+      <FileText aria-hidden className={cn('size-3.5 shrink-0', active ? 'text-sidebar-accent-foreground' : 'text-muted-foreground')} />
       {nameEl}
       {!renaming && actions}
     </div>
@@ -209,9 +209,9 @@ export function Sidebar(p: Props) {
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterTree(p.tree, query.trim().toLowerCase()), [p.tree, query]);
   return (
-    <aside className="flex w-(--w-sidebar) shrink-0 flex-col border-r bg-panel">
+    <aside className="flex w-(--w-sidebar) shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="flex h-(--h-bar) items-center gap-2 px-3 text-sm font-semibold">
-        <span className="inline-block size-5 shrink-0 rounded-md bg-brand" aria-hidden />
+        <span className="inline-block size-5 shrink-0 rounded-md bg-sidebar-primary" aria-hidden />
         <span className="truncate">{p.workspace ?? 'Drawing'}</span>
       </div>
       <div className="px-2 pb-1">
