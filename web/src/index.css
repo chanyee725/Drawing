@@ -8,6 +8,11 @@
 /* The theme switch (web/src/theme.ts) sets data-theme on <html>; Tailwind's dark: follows it. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* Tailwind v4 borders default to currentColor; without this, `border` draws a white line in dark mode. */
+@layer base {
+  *, ::before, ::after { border-color: var(--border); }
+}
+
 /*
  * App chrome tokens (docs/design/dispatch-integration/5-design-system-linear.md §3). Names follow shadcn/ui so
  * web/src/components/ui/* works unchanged; --panel, --text-2, --text-4, --border-strong, --brand and the
