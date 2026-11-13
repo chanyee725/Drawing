@@ -1,6 +1,7 @@
 // The canvas `/` insert menu, without DOM or Excalidraw: what can be inserted and where it goes.
 import { DIAGRAM_TYPES, TEMPLATES, type DiagramType } from '../dsl/templates.ts';
 import { filterSlash } from '../doc/model.ts';
+import { CLEAN_FONT_SIZE, CLEAN_LINE_HEIGHT } from './cleanStyle.ts';
 
 export type ShapeKind = 'rectangle' | 'ellipse' | 'diamond' | 'arrow' | 'line' | 'text' | 'frame';
 export type InsertItem =
@@ -48,6 +49,19 @@ export const SHAPE_SIZE: Record<ShapeKind, { width: number; height: number }> = 
   frame: { width: 480, height: 320 },
 };
 
+/** The text the insert menu's 텍스트 starts with. */
+export const INSERT_TEXT = '텍스트';
+
+/**
+ * How far up and left of the point a new menu text starts, so it reads as centred on it. The height is exact
+ * (one line is CLEAN_LINE_HEIGHT em). The width is an estimate: Hangul is drawn by whichever font has it
+ * (about 0.75 to 1em a syllable), so take 1em.
+ */
+export const TEXT_OFFSET: Point = {
+  x: Math.round((INSERT_TEXT.length * CLEAN_FONT_SIZE) / 2),
+  y: Math.round((CLEAN_FONT_SIZE * CLEAN_LINE_HEIGHT) / 2),
+};
+
 /** Top-left corner that centres a w × h box on `c`, rounded so stored coordinates stay short. */
 export const centeredAt = (c: Point, w: number, h: number): Point => ({ x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2) });
 
@@ -63,8 +77,7 @@ export function shapeSkeleton(kind: ShapeKind, c: Point): Record<string, unknown
     case 'line':
       return { type: kind, ...at, width, height, points: [[0, 0], [width, 0]] };
     case 'text':
-      // Text measures itself; start it a little left of the point so it reads as centred (13px text, cleanStyle.ts).
-      return { type: 'text', x: Math.round(c.x - 20), y: Math.round(c.y - 7), text: '텍스트' };
+      return { type: 'text', x: Math.round(c.x - TEXT_OFFSET.x), y: Math.round(c.y - TEXT_OFFSET.y), text: INSERT_TEXT };
     case 'frame':
       return { type: 'frame', ...at, width, height, children: [], name: '프레임' };
     default:

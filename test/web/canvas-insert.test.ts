@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INSERT_ITEMS, centeredAt, diagramBlock, filterInsert, shapeSkeleton, SHAPE_SIZE } from '../../web/src/canvas/insert.ts';
+import { CLEAN_FONT_SIZE, CLEAN_LINE_HEIGHT } from '../../web/src/canvas/cleanStyle.ts';
+import { INSERT_ITEMS, INSERT_TEXT, TEXT_OFFSET, centeredAt, diagramBlock, filterInsert, shapeSkeleton, SHAPE_SIZE } from '../../web/src/canvas/insert.ts';
 import { DIAGRAM_TYPES, TEMPLATES } from '../../web/src/dsl/templates.ts';
 
 test('the menu offers every diagram type first, then shapes, text and frame', () => {
@@ -38,4 +39,14 @@ test('a diagram block starts from its example, centred on the point at its pictu
   assert.deepEqual(b, { id: 'b1', type: 'erd', code: TEMPLATES.erd, x: 400, y: 250, w: 200, h: 100 });
   // No picture size yet: unplaced, the canvas finds it a spot.
   assert.deepEqual(diagramBlock('b2', 'flowchart', { x: 1, y: 1 }, null), { id: 'b2', type: 'flowchart', code: TEMPLATES.flowchart, x: 0, y: 0, w: 0, h: 0 });
+});
+
+test('menu text starts so that one 13px line of it is centred on the point', () => {
+  const sk = shapeSkeleton('text', { x: 500, y: 300 });
+  assert.equal(sk.text, INSERT_TEXT);
+  const h = CLEAN_FONT_SIZE * CLEAN_LINE_HEIGHT;
+  assert.ok(Math.abs((sk.y as number) + h / 2 - 300) <= 0.5, `y ${sk.y}, line ${h}`);
+  const w = INSERT_TEXT.length * CLEAN_FONT_SIZE; // Hangul is about 1em per syllable
+  assert.ok(Math.abs((sk.x as number) + w / 2 - 500) <= 0.5, `x ${sk.x}, width ${w}`);
+  assert.deepEqual(TEXT_OFFSET, { x: 20, y: 7 });
 });
