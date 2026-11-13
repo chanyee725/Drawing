@@ -110,7 +110,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
     if (e.points.length < 2) continue;
     const id = newId();
     const [o] = e.points;
-    const color = e.color ? strokeOf(e.color, 'light') : t.edge;
+    const color = e.color ? strokeOf(e.color, 'light') : scene.type === 'flowchart' ? t.flowEdge : t.edge;
     const label = textOf(edgeLabel.get(e));
     skeletons.push({
       id,

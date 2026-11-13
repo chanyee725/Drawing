@@ -20,7 +20,7 @@ test('the filter is the one Excalidraw puts on its dark canvas', () => {
 
 test('every dark theme colour the filter can reach comes back through it', () => {
   const t = THEMES.dark;
-  for (const c of [t.background, t.text, t.muted, t.stroke, t.strongStroke, t.fill, t.groupStroke, t.groupText, t.edge, t.edgeSoft, t.shadow]) {
+  for (const c of [t.background, t.text, t.muted, t.stroke, t.strongStroke, t.fill, t.groupStroke, t.groupText, t.edge, t.flowEdge, t.edgeSoft, t.shadow]) {
     near(roundTrip(c), to255(rgbOf(c)), 1, c);
   }
 });

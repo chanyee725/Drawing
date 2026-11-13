@@ -21,6 +21,8 @@ export interface ThemeColors {
   groupText: string;
   /** Connector colour; labels take the line colour. */
   edge: string;
+  /** Flowchart connector colour: near-black in light, the text colour in dark (brighter than node borders). */
+  flowEdge: string;
   /** Lighter line (sequence lifelines, dividers). */
   edgeSoft: string;
   /** Solid offset shadow, no blur. */
@@ -39,6 +41,7 @@ export const THEMES: Record<Theme, ThemeColors> = {
     groupStroke: '#eaecf0',
     groupText: '#475467',
     edge: '#667085',
+    flowEdge: '#1c1c1c',
     edgeSoft: '#98a2b3',
     shadow: '#e8e8e8',
   },
@@ -53,6 +56,7 @@ export const THEMES: Record<Theme, ThemeColors> = {
     groupStroke: '#2e3239',
     groupText: '#a7afbb',
     edge: '#8d96a5',
+    flowEdge: '#e7e9ec',
     edgeSoft: '#5b6370',
     shadow: '#2b2f36',
   },

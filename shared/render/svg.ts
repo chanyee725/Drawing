@@ -29,6 +29,8 @@ interface Ctx {
   theme: Theme;
   t: ThemeColors;
   c: (color: string) => string;
+  /** Default connector colour for this diagram type (labels take it too). */
+  edge: string;
 }
 
 const esc = (s: string): string =>
@@ -140,7 +142,7 @@ function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number 
   return { x: x0 - 1, y: tx.y - 3, w: w + 2, h: h + 2 };
 }
 
-function textMarkup(tx: SceneText, { theme, t, c }: Ctx): string {
+function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
   if (tx.lines.length === 0) return '';
   let fill = tx.tone === 'muted' ? t.muted : t.text;
   if (tx.on) {
@@ -150,7 +152,7 @@ function textMarkup(tx: SceneText, { theme, t, c }: Ctx): string {
   }
   if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
   // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
-  if (tx.plate) fill = t.edge;
+  if (tx.plate) fill = edge;
   if (tx.color) fill = strokeOf(tx.color, theme);
   const spans = tx.lines
     .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
@@ -253,9 +255,9 @@ function markerMarkup(kind: SceneEdge['end'], from: Point, tip: Point, color: st
 /** Opacity of soft (straight-style) connectors: the same colour, lighter. */
 const SOFT_EDGE_OPACITY = 0.55;
 
-function edgeMarkup(e: SceneEdge, { theme, t, c }: Ctx, mask: string): string {
+function edgeMarkup(e: SceneEdge, { theme, c, edge }: Ctx, mask: string): string {
   if (e.points.length < 2) return '';
-  const color = c(e.color ? strokeOf(e.color, theme) : t.edge);
+  const color = c(e.color ? strokeOf(e.color, theme) : edge);
   let ps = e.points.map((p) => ({ ...p }));
   const first = ps[0]!;
   const last = ps[ps.length - 1]!;
@@ -340,7 +342,7 @@ const CLEAN_BOLD_TEXT = /<text (?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/;
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
-  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x) };
+  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge: scene.type === 'flowchart' ? t.flowEdge : t.edge };
   // Edge labels cut the lines under them (§2.1): one luminance mask, white everywhere, black under each label.
   const holes = scene.items.flatMap((it) => (it.kind === 'text' && it.plate && it.lines.length > 0 ? [labelHole(it)] : []));
   let defs = '';
