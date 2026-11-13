@@ -128,8 +128,13 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     const subs = page.getByRole('region', { name: '하위 문서' });
     await subs.getByRole('button', { name: /토큰 갱신/ }).waitFor();
     await page.locator('.excalidraw').first().waitFor();
-    // The doc/canvas seam is a 1px line.
-    assert.equal((await page.getByRole('separator', { name: '문서와 캔버스 사이 분할선' }).boundingBox()).width, 1);
+    // The doc/canvas seam is a 1px line; its hit area sits between the panes, off the canvas (#252).
+    const seam = page.getByRole('separator', { name: '문서와 캔버스 사이 분할선' });
+    assert.equal(await seam.evaluate((e) => getComputedStyle(e, '::before').width), '1px');
+    const seamBox = await seam.boundingBox();
+    const canvasLeft = await seam.evaluate((e) => e.nextElementSibling.getBoundingClientRect().left);
+    assert.ok(seamBox.x + seamBox.width <= canvasLeft + 0.5, `seam hit area ends at the canvas edge: ${seamBox.x + seamBox.width} vs ${canvasLeft}`);
+    assert.equal(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[role=separator]'), [canvasLeft + 1, seamBox.y + seamBox.height / 2]), false, 'pressing the canvas left edge does not grab the seam');
     await checkNarrowCanvas(page, `${theme} split 1440`);
     await shot(page, `${theme}-doc-1440`);
     if (theme === 'dark') {
