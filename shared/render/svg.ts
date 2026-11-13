@@ -7,8 +7,9 @@ import { round } from './common.ts';
 import { iconFor } from './icons.ts';
 import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
 import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
+import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -327,8 +328,14 @@ function hashOf(s: string): string {
   return (h >>> 0).toString(36);
 }
 
-const ROUGH_FONT_STYLE =
-  `<style>@font-face{font-family:'Shantell Sans';font-weight:400;src:url(data:font/woff2;base64,${SHANTELL_SANS_WOFF2_BASE64}) format('woff2')}</style>`;
+const fontFace = (family: string, weight: number, base64: string) =>
+  `@font-face{font-family:'${family}';font-weight:${weight};src:url(data:font/woff2;base64,${base64}) format('woff2')}`;
+const ROUGH_FONT_FACE = fontFace('Shantell Sans', 400, SHANTELL_SANS_WOFF2_BASE64);
+const CLEAN_FONT_FACE = fontFace(CLEAN_FONT_NAME, 400, DRAWING_SANS_400_WOFF2_BASE64);
+const CLEAN_BOLD_FONT_FACE = fontFace(CLEAN_FONT_NAME, 600, DRAWING_SANS_600_WOFF2_BASE64);
+// Text in the clean face inherits the root font-family; rough and mono text name their own.
+const CLEAN_TEXT = /<text (?![^>]*\sfont-family=)(?![^>]*\sfont-weight="600")/;
+const CLEAN_BOLD_TEXT = /<text (?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/;
 
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
@@ -347,9 +354,14 @@ export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   }
   const bg = options.background ? `<rect width="${scene.width}" height="${scene.height}" fill="${ctx.c(t.background)}"/>` : '';
   const body = scene.items.map((it) => itemMarkup(it, ctx, mask)).join('');
-  // An SVG shown as an <img> or exported cannot see page fonts, so the hand-drawn face travels inside it.
+  // An SVG shown as an <img> or exported cannot see page fonts, so the faces it uses travel inside it (Latin only).
   const usesRough = scene.items.some((it) => it.kind === 'text' && it.font === 'rough' && it.lines.length > 0);
-  const style = usesRough ? ROUGH_FONT_STYLE : '';
+  const faces = [
+    usesRough ? ROUGH_FONT_FACE : '',
+    CLEAN_TEXT.test(body) ? CLEAN_FONT_FACE : '',
+    CLEAN_BOLD_TEXT.test(body) ? CLEAN_BOLD_FONT_FACE : '',
+  ].join('');
+  const style = faces ? `<style>${faces}</style>` : '';
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.width}" height="${scene.height}" viewBox="0 0 ${scene.width} ${scene.height}" ` +
     `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`

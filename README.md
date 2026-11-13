@@ -303,6 +303,7 @@ DRAW_E2E=1 CHROME=/path/to/chrome-headless-shell PLAYWRIGHT_CORE=/path/to/node_m
   - Virgil: OFL-1.1
   - Xiaolai (LXGW 기반): OFL-1.1
 - 다이어그램의 손글씨 글꼴(`typeface rough`)로 Shantell Sans(OFL-1.1)를 써요. `@fontsource/shantell-sans` 5.3.0(원본 arrowtype/shantell-sans)에서 받아 영문·숫자·기본 문장부호의 보통 굵기만 골라 담았어요(약 25KB). 파일과 라이선스 전문은 `shared/render/fonts/`에 있고, 그림(SVG)에 글꼴이 같이 들어가서 밖으로 요청을 보내지 않아요. 한글은 시스템 글꼴로 보여요.
+- 다이어그램의 기본 글꼴로 Pretendard(OFL-1.1, npm `pretendard` 1.3.9)에서 영문·숫자·기본 문장부호의 보통(400)·조금 굵게(600)만 골라 담았어요(각 약 12KB). Pretendard는 예약된 글꼴 이름이라 고른 글꼴은 `Drawing Sans`라는 이름으로 들어가요. 파일과 라이선스 전문은 `shared/render/fonts/`에 있고, 그림(SVG)에 글꼴이 같이 들어가서 캔버스·문서 미리보기·내보내기가 같은 글꼴로 보여요. 한글은 시스템 글꼴로 보여요.
 - 다이어그램 아이콘은 npm 패키지에서 고른 것만 `shared/render/icon-data.ts`에 넣어요(`npm run icons`로 다시 만들어요). 전문은 `NOTICE.md`에 있어요.
 
   | 묶음 | 쓰는 곳 | 라이선스 |

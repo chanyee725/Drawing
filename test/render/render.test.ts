@@ -6,6 +6,7 @@ import { parse } from '../../shared/dsl/index.ts';
 import { renderDiagram, sceneToSvg } from '../../shared/render/index.ts';
 import type { SceneBox, SceneEdge } from '../../shared/render/index.ts';
 import { fixture } from '../dsl/helpers.ts';
+import { FONT_FAMILY } from '../../shared/render/text.ts';
 
 const FIXTURES = ['architecture-web-service', 'flowchart-ticket-workflow', 'sequence-login', 'erd-billing'];
 
@@ -199,7 +200,46 @@ test('typeface rough embeds the bundled Shantell Sans and nothing external', asy
   assert.match(rough.svg, /font-family:'Shantell Sans';font-weight:400;src:/);
 
   const clean = await renderDiagram('typeface clean\nA > B', { type: 'flowchart' });
-  assert.doesNotMatch(clean.svg, /@font-face|Shantell/);
+  assert.doesNotMatch(clean.svg, /Shantell/);
+});
+
+test('clean text embeds the bundled Drawing Sans, the 600 face only when used (E59)', async () => {
+  // A picture drawn as an <img> (canvas block, document preview, export) sees no page fonts: without the embedded
+  // face the label falls back to whatever the system has, wider than text.ts measures.
+  const face = (w: number) => new RegExp(`@font-face\\{font-family:'Drawing Sans';font-weight:${w};src:url\\(data:font/woff2;base64,[A-Za-z0-9+/=]+\\) format\\('woff2'\\)\\}`);
+  const plain = await renderDiagram('A > B: 확인 ok', { type: 'flowchart' });
+  assert.match(plain.svg, face(400));
+  assert.doesNotMatch(plain.svg, face(600));
+  assert.match(plain.svg, /<svg [^>]*font-family="&#39;Drawing Sans&#39;, /);
+  assert.doesNotMatch(plain.svg, /https?:\/\/(?!www\.w3\.org)/);
+  assert.ok(plain.svg.length < 30_000, `plain svg is ${plain.svg.length} bytes`);
+
+  const bold = await renderDiagram('title Orders\nA > B', { type: 'flowchart' });
+  assert.match(bold.svg, / font-weight="600"/);
+  assert.match(bold.svg, face(400));
+  assert.match(bold.svg, face(600));
+
+  // Mono and rough text name their own family, so they do not pull the clean face in.
+  const mono = await renderDiagram('typeface mono\nA > B', { type: 'flowchart' });
+  assert.doesNotMatch(mono.svg, /@font-face/);
+  const rough = await renderDiagram('typeface rough\nA > B', { type: 'flowchart' });
+  assert.doesNotMatch(rough.svg, /Drawing Sans';font-weight/);
+});
+
+test('the embedded clean font is the bundled OFL subset under its own name', async () => {
+  const fonts = await import('../../shared/render/font-clean.ts');
+  const dir = new URL('../../shared/render/fonts/', import.meta.url);
+  for (const [weight, base64] of [[400, fonts.DRAWING_SANS_400_WOFF2_BASE64], [600, fonts.DRAWING_SANS_600_WOFF2_BASE64]] as const) {
+    const bytes = readFileSync(fileURLToPath(new URL(`drawing-sans-latin-${weight}.woff2`, dir)));
+    assert.equal(base64, bytes.toString('base64'));
+    assert.equal(bytes.subarray(0, 4).toString('latin1'), 'wOF2');
+    assert.ok(bytes.length < 20_000, `${weight} is ${bytes.length} bytes`);
+  }
+  const license = readFileSync(fileURLToPath(new URL('drawing-sans-OFL.txt', dir)), 'utf8');
+  assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/);
+  // "Pretendard" is a reserved font name: the subset must not be offered under it.
+  assert.match(license, /Reserved Font Name Pretendard/);
+  assert.doesNotMatch(FONT_FAMILY.clean.split(',')[0], /Pretendard/);
 });
 
 test('the embedded rough font is the bundled OFL file', async () => {
