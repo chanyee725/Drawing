@@ -77,3 +77,19 @@
 .excalidraw.excalidraw .Switch.toggled:active::before {
   filter: brightness(0.92);
 }
+
+/* Narrow canvas (the split view is under Excalidraw's 730px breakpoint) gets Excalidraw's mobile layout: a
+   full-width bottom bar holding only ☰ and undo/redo. Shrink it to the compact bottom-left cluster the wide
+   canvas has (16px in from the corner: the bar itself sits 14px in, so 2px more; same 8px-radius island). The shape panel (.App-mobile-menu) opens in
+   the same island, so it keeps the full width while it is open. */
+.excalidraw.excalidraw .App-bottom-bar > .Island:not(:has(.App-mobile-menu)) {
+  width: fit-content;
+  min-width: 0;
+  margin: 0 0 2px 2px;
+  border-radius: var(--border-radius-lg);
+}
+.excalidraw.excalidraw .App-bottom-bar > .Island:not(:has(.App-mobile-menu)) .App-toolbar-content {
+  justify-content: flex-start;
+  gap: 0.25rem;
+  padding: 0.25rem;
+}
