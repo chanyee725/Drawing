@@ -1,11 +1,11 @@
 /* Canvas chrome in the app's own tokens (index.css), so it reads less like stock Excalidraw. */
 .excalidraw.excalidraw {
-  --island-bg-color: var(--surface);
+  --island-bg-color: var(--background);
   --default-border-color: var(--border);
   --sidebar-border-color: var(--border);
-  --color-primary: var(--accent);
-  --color-primary-light: var(--accent-soft);
-  --color-surface-lowest: var(--surface);
+  --color-primary: var(--primary);
+  --color-primary-light: var(--accent);
+  --color-surface-lowest: var(--background);
   --border-radius-lg: 8px;
   --border-radius-md: 6px;
   --shadow-island: 0 1px 2px rgba(0, 0, 0, 0.06), 0 4px 12px rgba(0, 0, 0, 0.05);

@@ -778,7 +778,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         }}
       />
       {broken.length > 0 && !block && (
-        <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+        <div role="status" aria-label="코드 오류 안내" className="absolute bottom-16 left-3 z-10 flex max-w-[min(26rem,calc(100%-1.5rem))] flex-col gap-1 rounded-lg border p-2 text-xs shadow" style={{ background: 'var(--background)', borderColor: 'var(--border)' }}>
           {broken.map((b) => (
             <button key={b.id} type="button" className="text-left underline-offset-2 hover:underline" onClick={() => setEditing(b.id)}>
               {brokenNotice(b, blockLabel(b, blocks, DIAGRAM_TYPES.find((t) => t.id === b.type)?.label ?? b.type))}
@@ -848,7 +848,7 @@ function LayoutBar({ editing, broken, moved, notice, convertible, onReset, onDon
       role="status"
       aria-label="레이아웃 안내"
       className="absolute bottom-16 left-1/2 z-10 flex max-w-[calc(100%-1.5rem)] -translate-x-1/2 items-center gap-2 rounded-lg border px-3 py-1.5 text-xs shadow"
-      style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+      style={{ background: 'var(--background)', borderColor: 'var(--border)' }}
     >
       {(editing || notice || moved) && <span>{editing ? (broken ? '코드 오류를 고치면 옮길 수 있어요' : '노드를 끌어 옮겨요 · Alt를 누르면 맞춤이 꺼져요') : (notice ?? '직접 옮긴 배치예요')}</span>}
       {(editing || (!notice && moved)) && (

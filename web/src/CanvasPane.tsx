@@ -29,7 +29,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, han
   if (fileKey === null)
     return (
       <main className="flex h-full min-h-64 flex-1 items-center justify-center p-6" aria-label="캔버스">
-        <p className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--surface)', color: 'var(--text-muted)' }}>
+        <p className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--background)', color: 'var(--muted-foreground)' }}>
           파일을 고르면 여기에 그려져요.
         </p>
       </main>
@@ -39,7 +39,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, han
       <LazyBoundary key={fileKey} onFail={onFail}>
       <Suspense
         fallback={
-          <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
             캔버스를 불러오는 중이에요…
           </p>
         }

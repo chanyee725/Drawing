@@ -35,9 +35,9 @@ export class LazyBoundary extends Component<Props, State> {
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="flex flex-wrap items-center gap-2 p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+      <div role="alert" className="flex flex-wrap items-center gap-2 p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
         <span>{noticeFor(this.state.error)}</span>
-        <button type="button" className="h-7 rounded-md px-3 font-medium text-brand-foreground" style={{ background: 'var(--brand)' }} onClick={() => void this.reload()}>
+        <button type="button" className="h-7 rounded-md px-3 font-medium text-primary-foreground" style={{ background: 'var(--primary)' }} onClick={() => void this.reload()}>
           새로고침
         </button>
       </div>

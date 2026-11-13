@@ -117,7 +117,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
           </Button>
         </DialogHeader>
         {message && (
-          <p role="alert" className="bg-brand-soft px-4 py-2 text-sm">
+          <p role="alert" className="bg-muted px-4 py-2 text-sm">
             {message}
           </p>
         )}
@@ -133,7 +133,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
                   onClick={() => setPicked(v.id)}
                   className={cn(
                     'h-(--h-row) w-full rounded-md px-2.5 text-left text-sm tabular-nums outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                    picked === v.id && 'bg-brand-soft font-semibold text-brand',
+                    picked === v.id && 'bg-muted font-semibold text-foreground',
                   )}
                 >
                   {when(v.time)}

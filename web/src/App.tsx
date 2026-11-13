@@ -120,7 +120,7 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
     <LazyBoundary key={key} onFail={onFail}>
       <Suspense
         fallback={
-          <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
             문서를 불러오는 중이에요…
           </p>
         }
@@ -683,7 +683,7 @@ export function App() {
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
           {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
               <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
                 다시 불러오기
@@ -691,8 +691,8 @@ export function App() {
               <button
                 type="button"
                 disabled={conflict.revision === undefined}
-                className="h-7 rounded-md px-3 font-medium text-brand-foreground disabled:opacity-50"
-                style={{ background: 'var(--brand)' }}
+                className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
+                style={{ background: 'var(--primary)' }}
                 onClick={overwrite}
               >
                 내 것으로 덮어쓰기
@@ -700,7 +700,7 @@ export function App() {
             </div>
           )}
           {error && (
-            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span>{error}</span>
               <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
                 닫기
@@ -708,7 +708,7 @@ export function App() {
             </div>
           )}
           {!hasFile ? (
-            <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+            <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--muted-foreground)' }}>
               <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
             </main>
           ) : view === 'both' ? (

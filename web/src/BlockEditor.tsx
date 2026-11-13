@@ -13,14 +13,14 @@ type Props = { code: string; type: string; dark: boolean; onChange: (code: strin
 
 const baseTheme = EditorView.theme({
   '&': { fontSize: '13.5px', background: 'var(--muted)', color: 'var(--foreground)' },
-  '.cm-content': { fontFamily: 'var(--font-mono)', caretColor: 'var(--brand)', padding: '6px 0' },
-  '.cm-gutters': { background: 'transparent', color: 'var(--text-4)', border: 'none' },
-  '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--brand-soft)' },
+  '.cm-content': { fontFamily: 'var(--font-mono)', caretColor: 'var(--foreground)', padding: '6px 0' },
+  '.cm-gutters': { background: 'transparent', color: 'var(--muted-foreground)', border: 'none' },
+  '.cm-activeLine, .cm-activeLineGutter': { background: 'color-mix(in oklab, var(--foreground) 5%, transparent)' },
   '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { minHeight: '8rem' },
   '.cm-tooltip.cm-tooltip-autocomplete': { background: 'var(--popover)', color: 'var(--popover-foreground)', border: 'none', borderRadius: '8px', boxShadow: 'var(--shadow-pop)', padding: '4px' },
   '.cm-tooltip-autocomplete ul li': { borderRadius: '4px', padding: '2px 6px' },
-  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--brand-soft)', color: 'var(--foreground)' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent)', color: 'var(--accent-foreground)' },
   '.cm-completionDetail': { color: 'var(--muted-foreground)', marginLeft: '0.75em', fontStyle: 'normal' },
 });
 

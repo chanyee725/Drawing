@@ -275,7 +275,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
         </div>
       )}
       {broken ? (
-        <p role="alert" className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+        <p role="alert" className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--muted)' }}>
           이 파일의 문서 내용을 읽지 못했어요. 내용을 지키려고 문서는 고칠 수 없게 막아 두었어요. 캔버스는 그대로 쓸 수 있어요.
         </p>
       ) : (

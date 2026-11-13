@@ -13,108 +13,88 @@
 }
 
 /*
- * App chrome tokens (docs/design/dispatch-integration/5-design-system-linear.md §3). Names follow shadcn/ui so
- * web/src/components/ui/* works unchanged; --panel, --text-2, --text-4, --border-strong, --brand and the
- * status/role colours are ours. Dark is designed first (Dispatch's old "monitor" theme folds into it); light is
- * derived from it. The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
- *
- * Naming: --brand is the one violet accent. shadcn's "accent" is a neutral hover colour, so Tailwind's
- * bg-accent reads --hover. The CSS variable --accent itself stays an alias of --brand (see "Legacy aliases").
+ * App chrome tokens: the shadcn/ui default theme, base colour neutral (doc 6 §4.1), so web/src/components/ui/*
+ * works unchanged. No hue anywhere except the status colours --ok, --warn and --destructive. Our only changes to
+ * the defaults: light --muted-foreground is oklch(0.5 0 0) for contrast (doc 6 §5), and dark --sidebar-primary
+ * is neutral instead of blue. Focus rings use --primary (lib/focus.ts). The canvas and diagram renderer keep their
+ * own theme (shared/render/), not these tokens.
  */
 :root, :root[data-theme="light"] {
   color-scheme: light;
-  --radius: 6px;
-  --background: oklch(0.99 0.002 280);
-  --panel: oklch(0.975 0.003 280);
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
-  --muted: oklch(0.955 0.004 280);
-  --secondary: var(--muted);
-  --hover: oklch(0 0 0 / 4%);
-  --border: oklch(0.91 0.004 280);
-  --border-strong: oklch(0.86 0.005 280);
-  --input: var(--border-strong);
-  --foreground: oklch(0.2 0.01 280);
-  --text-2: oklch(0.38 0.01 280);
-  --muted-foreground: oklch(0.5 0.012 280);
-  --text-4: oklch(0.68 0.01 280);
-  --brand: oklch(0.55 0.2 285);
-  --brand-soft: oklch(0.55 0.2 285 / 10%);
-  --brand-foreground: oklch(0.99 0 0);
-  --destructive: oklch(0.55 0.21 25);
-  --dot: oklch(0.86 0.004 280);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.5 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
   --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 10%);
 
-  /* Session status and agent role lanes (from Dispatch, light). */
+  /* Status colours (not in shadcn), from Dispatch light (doc 5 §3.1): only for state dots and bars. */
   --ok: oklch(0.62 0.15 155);
   --warn: oklch(0.72 0.15 70);
-  --bad: oklch(0.6 0.2 25);
-  --idle: oklch(0.62 0.08 250);
-  --role-lead: oklch(0.56 0.2 290);
-  --role-impl: oklch(0.56 0.18 255);
-  --role-review: oklch(0.68 0.15 65);
-  --role-test: oklch(0.6 0.14 160);
-  --role-design: oklch(0.62 0.19 0);
-  --role-docs: oklch(0.55 0.04 250);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --background: oklch(0.16 0.006 280);
-  --panel: oklch(0.185 0.007 280);
-  --card: oklch(0.21 0.008 280);
-  --popover: oklch(0.21 0.008 280);
-  --muted: oklch(0.24 0.008 280);
-  --hover: oklch(1 0 0 / 5%);
-  --border: oklch(1 0 0 / 8%);
-  --border-strong: oklch(1 0 0 / 14%);
-  --foreground: oklch(0.94 0.004 280);
-  --text-2: oklch(0.78 0.008 280);
-  --muted-foreground: oklch(0.66 0.01 280);
-  --text-4: oklch(0.48 0.01 280);
-  --brand: oklch(0.68 0.16 285);
-  --brand-soft: oklch(0.68 0.16 285 / 16%);
-  --brand-foreground: oklch(0.16 0.006 280);
-  --destructive: oklch(0.68 0.19 25);
-  --dot: oklch(1 0 0 / 7%);
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
   --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 40%);
 
-  /* Status from Dispatch's monitor theme (tuned for dark panels), roles from Dispatch dark. */
+  /* Status colours from Dispatch's monitor theme (tuned for dark panels). */
   --ok: oklch(0.76 0.17 150);
   --warn: oklch(0.82 0.15 80);
-  --bad: oklch(0.7 0.2 25);
-  --idle: oklch(0.68 0.04 250);
-  --role-lead: oklch(0.7 0.16 290);
-  --role-impl: oklch(0.7 0.14 255);
-  --role-review: oklch(0.78 0.13 70);
-  --role-test: oklch(0.74 0.13 160);
-  --role-design: oklch(0.72 0.16 0);
-  --role-docs: oklch(0.7 0.03 250);
 }
 :root {
-  /* Derived tokens (same in both themes). */
-  --card-foreground: var(--foreground);
-  --popover-foreground: var(--foreground);
-  --secondary-foreground: var(--foreground);
-  --accent-foreground: var(--foreground);
-  --primary: var(--brand);
-  --primary-foreground: var(--brand-foreground);
-  --ring: var(--brand);
-
   /* Sizes: doc 6 §4.2 (first draft x1.08): 30px rows and controls, 48px header, 264px sidebar, 691px doc column. */
   --h-row: 30px;
   --h-compact: 26px;
   --h-bar: 48px;
   --w-sidebar: 264px;
   --w-doc: 691px;
-
-  /* Legacy aliases, kept until every screen uses the names above (rollout step 5 removes them). */
-  --surface: var(--background);
-  --elevated: var(--panel);
-  --text: var(--foreground);
-  --text-muted: var(--muted-foreground);
-  --danger: var(--destructive);
-  --accent: var(--brand);
-  --accent-soft: var(--brand-soft);
 }
 
 @theme inline {
@@ -136,13 +116,13 @@
   --text-xl--line-height: 30px;
   --text-doc: 16px;
   --text-doc--line-height: 1.65;
-  --radius-sm: calc(var(--radius) - 2px);
-  --radius-md: var(--radius);
-  --radius-lg: calc(var(--radius) + 2px);
+  /* shadcn radius steps: sm 6px, md 8px, lg 10px, xl 14px. */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-panel: var(--panel);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -153,21 +133,22 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--hover);
+  --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-border: var(--border);
-  --color-border-strong: var(--border-strong);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-brand: var(--brand);
-  --color-brand-soft: var(--brand-soft);
-  --color-text-2: var(--text-2);
-  --color-text-4: var(--text-4);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
-  --color-bad: var(--bad);
-  --color-idle: var(--idle);
   --shadow-pop: var(--shadow-pop);
 }
 
@@ -218,23 +199,23 @@ body {
 .doc-editor ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
 .doc-editor ul[data-type="taskList"] li { display: flex; gap: 0.5em; align-items: flex-start; }
 .doc-editor ul[data-type="taskList"] li > label { margin-top: 0.3em; user-select: none; }
-.doc-editor ul[data-type="taskList"] li > label input { accent-color: var(--brand); width: 1em; height: 1em; }
+.doc-editor ul[data-type="taskList"] li > label input { accent-color: var(--primary); width: 1em; height: 1em; }
 .doc-editor ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
-.doc-editor ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--text-muted); text-decoration: line-through; }
-.doc-editor a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
-.doc-editor blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-muted); }
+.doc-editor ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--muted-foreground); text-decoration: line-through; }
+.doc-editor a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.doc-editor blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--muted-foreground); }
 .doc-editor hr { border: none; border-top: 1px solid var(--border); margin: 1.2em 0; }
-.doc-editor hr.ProseMirror-selectednode { border-top-color: var(--brand); }
+.doc-editor hr.ProseMirror-selectednode { border-top-color: var(--primary); }
 .doc-editor code {
   font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 0.88em;
-  background: var(--elevated);
+  background: var(--muted);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 0.1em 0.3em;
 }
 .doc-editor pre {
-  background: var(--elevated);
+  background: var(--muted);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.8em 1em;
@@ -244,17 +225,17 @@ body {
 .doc-editor pre code { background: none; border: none; padding: 0; font-size: 14px; }
 .doc-editor table { border-collapse: collapse; width: 100%; table-layout: fixed; overflow: hidden; }
 .doc-editor th, .doc-editor td { border: 1px solid var(--border); padding: 0.35em 0.6em; vertical-align: top; position: relative; }
-.doc-editor th { background: var(--elevated); font-weight: 600; text-align: left; }
-.doc-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--brand-soft); opacity: 0.6; pointer-events: none; }
+.doc-editor th { background: var(--muted); font-weight: 600; text-align: left; }
+.doc-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--accent); opacity: 0.6; pointer-events: none; }
 .doc-editor .tableWrapper { overflow-x: auto; }
 .doc-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
   height: 0;
   pointer-events: none;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
 }
-.doc-editor .suggestion { color: var(--brand); }
+.doc-editor .suggestion { color: var(--muted-foreground); }
 
 .doc-diagram { margin: 1em 0; display: flex; flex-direction: column; gap: 0.35em; }
 .doc-diagram-pic {
@@ -264,18 +245,20 @@ body {
   padding: 0.75em;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface);
+  background: var(--background);
   cursor: pointer;
 }
-.doc-diagram-pic:hover, .doc-diagram.is-selected .doc-diagram-pic { border-color: var(--brand); }
-.doc-diagram-pic:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.doc-diagram-pic:hover { border-color: var(--ring); }
+.doc-diagram.is-selected .doc-diagram-pic { border-color: var(--primary); }
+.doc-diagram-pic:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .doc-diagram-pic img { max-width: 100%; height: auto; }
-.doc-diagram-wait, .doc-diagram-gone { color: var(--text-muted); font-size: 14px; padding: 1.5em; }
+.doc-diagram-wait, .doc-diagram-gone { color: var(--muted-foreground); font-size: 14px; padding: 1.5em; }
 .doc-diagram-gone { border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
 .doc-diagram-actions { display: flex; justify-content: center; gap: 0.4em; }
-.doc-diagram-actions button { font-size: 13px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); }
-.doc-diagram-actions button:hover, .doc-diagram-actions button:focus-visible { color: var(--brand); border-color: var(--brand); }
-.doc-diagram figcaption { font-size: 13px; color: var(--text-muted); text-align: center; }
+.doc-diagram-actions button { font-size: 13px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted-foreground); }
+.doc-diagram-actions button:hover { color: var(--foreground); background: var(--accent); }
+.doc-diagram-actions button:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
+.doc-diagram figcaption { font-size: 13px; color: var(--muted-foreground); text-align: center; }
 
 /* The `/` and `+` menus (and the canvas insert list): a dense command list on the app-chrome tokens. */
 .doc-slash {
@@ -306,7 +289,7 @@ body {
   border-radius: 4px;
   text-align: left;
 }
-.doc-slash button[aria-selected="true"] { background: var(--brand-soft); }
+.doc-slash button[aria-selected="true"] { background: var(--accent); color: var(--accent-foreground); }
 .doc-slash-hint { color: var(--muted-foreground); font-size: 13px; white-space: nowrap; }
 .doc-slash-empty { padding: 6px 8px; color: var(--muted-foreground); }
 
@@ -321,29 +304,29 @@ body {
   padding: 0.25rem;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--surface);
+  background: var(--background);
   font-size: 14px;
 }
 .doc-table-bar button { height: 1.75rem; padding: 0 0.6rem; border-radius: 6px; }
-.doc-table-bar button:hover { background: var(--brand-soft); }
+.doc-table-bar button:hover { background: var(--accent); }
 
 /* Outline (목차) and heading links */
 .doc-outline-wrap { position: relative; align-self: flex-end; }
-.doc-outline-btn { font-size: 13px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--elevated); color: var(--text-muted); }
-.doc-outline-btn:hover, .doc-outline-btn[aria-expanded="true"] { color: var(--text); border-color: var(--brand); }
-.doc-outline { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 260px; max-height: 50vh; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--elevated); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
+.doc-outline-btn { font-size: 13px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--muted-foreground); }
+.doc-outline-btn:hover, .doc-outline-btn[aria-expanded="true"] { color: var(--foreground); background: var(--accent); }
+.doc-outline { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 260px; max-height: 50vh; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }
 .doc-outline ul { list-style: none; margin: 0; padding: 0; }
 .doc-outline li > button { display: block; width: 100%; text-align: left; font-size: 14px; padding: 3px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doc-outline li > button:hover { background: var(--brand-soft); }
-.doc-outline-empty { font-size: 14px; color: var(--text-muted); padding: 4px 6px; }
+.doc-outline li > button:hover { background: var(--accent); }
+.doc-outline-empty { font-size: 14px; color: var(--muted-foreground); padding: 4px 6px; }
 .doc-editor h1, .doc-editor h2, .doc-editor h3 { position: relative; }
-.doc-h-link { position: absolute; left: -1.3em; top: 0; width: 1.1em; font-size: 0.7em; line-height: 1.8; color: var(--text-muted); opacity: 0; user-select: none; }
+.doc-h-link { position: absolute; left: -1.3em; top: 0; width: 1.1em; font-size: 0.7em; line-height: 1.8; color: var(--muted-foreground); opacity: 0; user-select: none; }
 .doc-editor h1:hover .doc-h-link, .doc-editor h2:hover .doc-h-link, .doc-editor h3:hover .doc-h-link, .doc-h-link:focus-visible { opacity: 1; }
-.doc-h-link:hover { color: var(--brand); }
+.doc-h-link:hover { color: var(--foreground); }
 .doc-h-flash { animation: doc-h-flash 1.5s ease-out; }
-@keyframes doc-h-flash { from { background: var(--brand-soft); } to { background: transparent; } }
-.doc-wikilink { color: var(--brand); background: var(--brand-soft); border-radius: 4px; padding: 0 4px; cursor: pointer; text-decoration: none; }
-.doc-wikilink.ProseMirror-selectednode { outline: 2px solid var(--brand); }
+@keyframes doc-h-flash { from { background: var(--muted); } to { background: transparent; } }
+.doc-wikilink { color: var(--foreground); background: var(--muted); border-radius: 4px; padding: 0 4px; cursor: pointer; text-decoration: none; }
+.doc-wikilink.ProseMirror-selectednode { outline: 2px solid var(--primary); }
 
 /* The canvas `/` insert menu: the document's slash list with a search field on top. */
 .canvas-insert input {
@@ -369,8 +352,8 @@ body {
   html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions { display: none !important; }
   html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
   /* Light tokens on paper; [data-theme] repeats so this outranks :root[data-theme='dark']. */
-  html.print-doc, html.print-doc[data-theme] { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; --foreground: #1b1b1f; --background: #fff; }
-  html.print-doc body { background: #fff !important; color: #1b1b1f !important; }
+  html.print-doc, html.print-doc[data-theme] { color-scheme: light; --foreground: #0a0a0a; --background: #fff; --muted: #f5f5f5; --muted-foreground: #636363; --border: #e5e5e5; }
+  html.print-doc body { background: #fff !important; color: #0a0a0a !important; }
   /* Paper is light: dark-theme pictures are flipped back (the same filter the canvas uses), and the on-screen hint goes. */
   html.print-doc[data-theme='dark'] .doc-diagram-pic img { filter: invert(93%) hue-rotate(180deg); }
   html.print-doc .doc-diagram figcaption { display: none !important; }
