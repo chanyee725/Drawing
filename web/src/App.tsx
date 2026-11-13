@@ -181,7 +181,9 @@ export function App() {
   // What the main panel shows; opening a file switches to the document screen.
   const [section, setSection] = useState<Section>({ kind: 'all' });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [view, setView] = useState<View>('both');
+  const [wideView, setView] = useState<View>('both');
+  // Below md only one pane fits: the split view falls back to the document.
+  const view: View = narrow && wideView === 'both' ? 'doc' : wideView;
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
@@ -519,13 +521,13 @@ export function App() {
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
   const showBlock = useCallback((blockId: string) => {
-    setView((v) => (v === 'doc' ? 'both' : v));
+    setView((v) => (v === 'doc' ? (narrow ? 'canvas' : 'both') : v));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
-  }, []);
+  }, [narrow]);
   const showFrame = useCallback((frameId: string) => {
-    setView((v) => (v === 'doc' ? 'both' : v));
+    setView((v) => (v === 'doc' ? (narrow ? 'canvas' : 'both') : v));
     setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
-  }, []);
+  }, [narrow]);
   const report = useCallback(
     (job: Promise<string> | string) =>
       Promise.resolve(job).then(
@@ -835,9 +837,12 @@ export function App() {
             setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
+            narrow={narrow}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
             exportMenu={
               <ExportMenu
+                narrow={narrow}
+                onHistory={() => setHistoryOpen(true)}
                 open={exportOpen}
                 onOpen={openExport}
                 disabled={!hasFile}
