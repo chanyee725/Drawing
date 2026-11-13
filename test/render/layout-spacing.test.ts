@@ -79,7 +79,8 @@ test('layout: same-layer neighbours 40 apart in a vertical flow, list items 12 a
 });
 
 test('layout: siblings in a parent that holds groups are 48 apart, also in a horizontal flow', async () => {
-  const b = await base(['direction right', 'G1 {', '  A', '}', 'G2 {', '  B', '}', 'H {', '  I {', '    C', '  }', '  J {', '    D', '  }', '}'].join('\n'));
+  // Edges keep the groups out of the free grid (E38), so ELK spaces them.
+  const b = await base(['direction right', 'G1 {', '  A', '}', 'G2 {', '  B', '}', 'H {', '  I {', '    C', '  }', '  J {', '    D', '  }', '}', 'X > A', 'X > B', 'X > C', 'X > D'].join('\n'));
   const [g1, g2] = [rect(b, 'G1'), rect(b, 'G2')].sort((p, q) => p.y - q.y);
   assert.equal(g2!.y - (g1!.y + g1!.h), 48);
   const [i, j] = [rect(b, 'I'), rect(b, 'J')].sort((p, q) => p.y - q.y);
