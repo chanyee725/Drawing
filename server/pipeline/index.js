@@ -348,10 +348,18 @@ export async function setup(ctx) {
 
   // ---- 멈추기 · 이어서 하기 · 계획 다시 열기 (E27) ----
 
+  /**
+   * Board tasks this run closed: the lead's step tasks that went done after this run's 시작하기. A duplicated plan
+   * keeps the lead and step ids, so tasks an earlier run closed must not count for it.
+   */
+  function closedTasks(e) {
+    const since = e.approvedAt ?? 0;
+    return (dispatch()?.hub.tasks ?? []).filter((t) => t.lead === e.lead && t.step && t.stage === 'done' && (t.stageAt ?? 0) >= since);
+  }
+
   /** Steps of a running or paused plan the board has not closed yet, in plan order. */
   function openSteps(e) {
-    const d = dispatch();
-    const done = new Set((d?.hub.tasks ?? []).filter((t) => t.lead === e.lead && t.step && t.stage === 'done').map((t) => t.step));
+    const done = new Set(closedTasks(e).map((t) => t.step));
     return (e.steps ?? []).filter((id) => !done.has(id));
   }
 
@@ -533,8 +541,8 @@ export async function setup(ctx) {
   /** How the board closed each step: merged at a checked commit, else abandoned (closed without a commit). */
   function resultsOf(e) {
     const out = {};
-    for (const t of dispatch()?.hub.tasks ?? []) {
-      if (t.lead !== e.lead || t.stage !== 'done' || !t.step || !e.steps?.includes(t.step)) continue;
+    for (const t of closedTasks(e)) {
+      if (!e.steps?.includes(t.step)) continue;
       if (t.mergeCheck?.ok === true && t.mergeCheck.commit) out[t.step] = { commit: t.mergeCheck.commit, ...(t.mergeCheck.base && { base: t.mergeCheck.base }) };
       else if (!t.commit && !out[t.step]) out[t.step] = { abandoned: true };
     }

@@ -430,6 +430,20 @@ test('완료: closing every step ends the run done, writes the summary block onc
     const cst = await statusOf(call, dup.body.path);
     assert.equal(cst.state, 'plan');
     assert.deepEqual(cst.blockers, []);
+
+    // The copy runs on its own: the first run's closed tasks (same lead, same step ids) do not finish it.
+    const st2 = await call('POST', '/api/pipeline/start', { path: dup.body.path, revision: dup.body.revision });
+    assert.equal(st2.status, 200, JSON.stringify(st2.body));
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API 2', step: 'api', stage: 'impl' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal((await statusOf(call, dup.body.path)).state, 'running');
+    for (const [title, step] of [['서버 API 2', 'api'], ['로그인 화면 2', 'ui'], ['리뷰 2', 'review']]) {
+      await call('POST', '/api/tasks', { lead: lead.id, title, step, stage: 'done' });
+    }
+    await until(async () => (await statusOf(call, dup.body.path)).state === 'done', 10_000);
+    const rec2 = (await call('GET', `/api/runs/run?path=${encodeURIComponent(dup.body.path)}&id=${st2.body.runId}`)).body;
+    for (const id of ['api', 'ui', 'review']) assert.deepEqual(rec2.steps[id].result, { abandoned: true }, id);
+    assert.doesNotMatch(JSON.stringify(rec2), new RegExp(head));
     assert.equal((await call('POST', '/api/pipeline/duplicate', { path: 'nope.dpx.json' })).status, 404);
     assert.equal((await call('POST', '/api/pipeline/duplicate', {})).status, 400);
   } finally {
