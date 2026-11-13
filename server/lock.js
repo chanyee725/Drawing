@@ -4,8 +4,8 @@
 // A lock whose owner is gone (dead pid, or its port no longer answers as that server) is stale and
 // gets replaced, so a crash never blocks the next start.
 import { readFileSync, unlinkSync } from 'node:fs';
-import { link, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { link, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative, sep } from 'node:path';
 
 const HOST = '127.0.0.1';
 
@@ -41,20 +41,54 @@ async function readHolder(file) {
   }
 }
 
+export class LockPathError extends Error {
+  name = 'LockPathError';
+}
+
+/** Writes a fresh temp file; `wx` never follows a link planted at that name. */
+async function writeTemp(tmp, body) {
+  await rm(tmp, { force: true });
+  await writeFile(tmp, JSON.stringify(body), { flag: 'wx' });
+}
+
 /**
- * Takes the lock at `file`, or reports who holds it.
+ * Makes sure `dir` (created when missing) is a real folder inside `root`: no symlink at `dir` or on
+ * the way from `root`, so a committed link like `.drawing -> /elsewhere` cannot move our writes out.
+ */
+async function ensureDirInside(root, dir) {
+  const realRoot = await realpath(root);
+  const rel = relative(root, dir);
+  if (!rel || rel.startsWith('..') || rel.startsWith(sep)) throw new LockPathError('lock folder outside its root');
+  let cur = root;
+  for (const seg of rel.split(sep)) {
+    cur = join(cur, seg);
+    try {
+      if (!(await lstat(cur)).isDirectory()) throw new LockPathError('lock folder is a symlink or not a folder');
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      await mkdir(cur);
+    }
+  }
+  const real = await realpath(dir);
+  if (real !== join(realRoot, rel)) throw new LockPathError('lock folder outside its root');
+}
+
+/**
+ * Takes the lock at `file`, or reports who holds it. With `root`, the lock's folder must be a real
+ * folder inside root (LockPathError otherwise).
  * `isLive(holder)` decides whether an existing holder { pid, port } still runs; a holder that is not
  * live is removed and the lock taken. Returns { ok: true, lock } or { ok: false, holder }.
  * lock.setPort(port) records the port once the server listens; lock.release() / releaseSync()
  * remove the file only while it is still ours.
  */
-export async function claimLock(file, { isLive }) {
-  await mkdir(dirname(file), { recursive: true });
+export async function claimLock(file, { isLive, root }) {
+  if (root) await ensureDirInside(root, dirname(file));
+  else await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   for (let attempt = 0; attempt < 3; attempt++) {
     // Write a temp file, then hard-link it into place: link fails with EEXIST if someone holds the
     // lock, and readers never see a half-written file.
-    await writeFile(tmp, JSON.stringify({ pid: process.pid, port: null }));
+    await writeTemp(tmp, { pid: process.pid, port: null });
     try {
       await link(tmp, file);
       return { ok: true, lock: ownLock(file) };
@@ -83,7 +117,7 @@ function ownLock(file) {
     async setPort(port) {
       if (!ours()) return;
       const tmp = `${file}.${process.pid}.tmp`;
-      await writeFile(tmp, JSON.stringify({ pid: process.pid, port }));
+      await writeTemp(tmp, { pid: process.pid, port });
       await rename(tmp, file);
     },
     async release() {
@@ -104,6 +138,7 @@ function ownLock(file) {
 export function claimWorkspace(workspaceDir) {
   const name = basename(workspaceDir);
   return claimLock(join(workspaceDir, '.drawing', 'server.lock'), {
+    root: workspaceDir,
     isLive: async ({ pid, port }) => {
       if (!pidAlive(pid)) return false;
       if (port == null) return true; // still starting

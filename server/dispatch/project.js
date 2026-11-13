@@ -3,13 +3,14 @@
 // server (a standalone Dispatch, or another Drawing server) already uses the project's `.dispatch/`.
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { claimLock, pidAlive, probe } from '../lock.js';
+import { claimLock, LockPathError, pidAlive, probe } from '../lock.js';
 
 /** Korean UI copy for each reason Dispatch is off. */
 export const OFF_MESSAGES = {
   'no-workspace': '작업 공간이 없어서 실행 기능은 꺼져 있어요.',
   'not-git': '작업 공간이 git 저장소 밖이라 실행 기능은 꺼져 있어요. 그림 도구는 그대로 써요.',
   standalone: '이 프로젝트에서 다른 Dispatch 서버가 돌고 있어서 실행 기능을 껐어요. 그 서버를 멈추고 다시 시작해 주세요.',
+  unsafe: '프로젝트의 .dispatch 폴더가 심볼릭 링크라서 실행 기능을 껐어요.',
   'other-drawing': '이 프로젝트를 다른 Drawing 서버가 쓰고 있어서 실행 기능을 껐어요. 그 서버를 멈추고 다시 시작해 주세요.',
 };
 
@@ -55,9 +56,16 @@ export async function claimProject(root) {
   const dir = path.join(root, '.dispatch');
   const standalonePort = Number.parseInt(await readFile(path.join(dir, 'server.port'), 'utf8').catch(() => ''), 10);
   if (await servesProject(standalonePort, root)) return { ok: false, reason: 'standalone', port: standalonePort };
-  const res = await claimLock(path.join(dir, 'drawing.lock'), {
-    isLive: async ({ pid, port }) => pidAlive(pid) && (port == null || (await servesProject(port, root))),
-  });
+  let res;
+  try {
+    res = await claimLock(path.join(dir, 'drawing.lock'), {
+      root,
+      isLive: async ({ pid, port }) => pidAlive(pid) && (port == null || (await servesProject(port, root))),
+    });
+  } catch (err) {
+    if (err instanceof LockPathError) return { ok: false, reason: 'unsafe', port: null };
+    throw err;
+  }
   if (res.ok) return res;
   return { ok: false, reason: 'other-drawing', port: res.holder?.port ?? null };
 }

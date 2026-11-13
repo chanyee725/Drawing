@@ -85,9 +85,17 @@ test('findProject: a symlinked workspace resolves to the real project; GIT_DIR f
     symlinkSync(ws, link);
     assert.deepEqual(await findProject(link, { gitTop }), { root });
 
-    process.env.GIT_DIR = join(root, '.git');
-    process.env.GIT_WORK_TREE = root;
-    assert.deepEqual(await findProject(join(plain), { gitTop }), { reason: 'not-git' });
+    // GIT_DIR / GIT_WORK_TREE inherited from the caller point at another repo B. Without the env
+    // filter git would answer B, which does not hold the workspace, and Dispatch would be off.
+    const other = scratchRepo();
+    try {
+      process.env.GIT_DIR = join(other.root, '.git');
+      process.env.GIT_WORK_TREE = other.root;
+      assert.deepEqual(await findProject(ws, { gitTop }), { root });
+      assert.equal(await gitTop(plain), null, 'a plain folder stays plain whatever GIT_DIR says');
+    } finally {
+      rmSync(other.root, { recursive: true, force: true });
+    }
     // A gitTop that answers a folder not holding the workspace is not trusted either.
     assert.deepEqual(await findProject(plain, { gitTop: async () => root }), { reason: 'not-git' });
   } finally {
@@ -138,6 +146,36 @@ test('claimLock: takes a free lock, refuses a live holder, replaces a dead or im
   } finally {
     child.kill();
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('claimWorkspace / claimProject: a symlinked .drawing or .dispatch is refused and nothing is written through it', async () => {
+  const { root, ws } = scratchRepo();
+  const outside = realpathSync(mkdtempSync(join(tmpdir(), 'drawing-e13-out-')));
+  try {
+    symlinkSync(outside, join(ws, '.drawing'));
+    await assert.rejects(claimWorkspace(ws), { name: 'LockPathError' });
+    symlinkSync(outside, join(root, '.dispatch'));
+    assert.deepEqual(await claimProject(root), { ok: false, reason: 'unsafe', port: null });
+    assert.deepEqual(readdirSync(outside), [], 'no lock or temp file outside the workspace');
+
+    // A link to a folder inside the workspace is refused too: the lock folder must be the real one.
+    rmSync(join(ws, '.drawing'));
+    mkdirSync(join(ws, 'real'));
+    symlinkSync(join(ws, 'real'), join(ws, '.drawing'));
+    await assert.rejects(claimWorkspace(ws), { name: 'LockPathError' });
+
+    // A link planted at the temp file name is not followed.
+    rmSync(join(ws, '.drawing'));
+    mkdirSync(join(ws, '.drawing'));
+    symlinkSync(join(outside, 'planted'), join(ws, '.drawing', `server.lock.${process.pid}.tmp`));
+    const ok = await claimWorkspace(ws);
+    assert.equal(ok.ok, true);
+    assert.deepEqual(readdirSync(outside), []);
+    await ok.lock.release();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });
 
@@ -214,6 +252,21 @@ test('claimProject: another live Drawing server holding .dispatch/drawing.lock t
   }
 });
 
+/** The lock's content once its port is recorded; polls up to 5 s. */
+async function lockOnceSet(file, timeoutMs = 5000) {
+  const end = Date.now() + timeoutMs;
+  for (;;) {
+    let h = null;
+    try {
+      h = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      /* not there yet, or mid-rename */
+    }
+    if (h?.port != null || Date.now() > end) return h;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+}
+
 /** Starts the real server (node server/index.js) on a free port; resolves once it prints its URL or exits. */
 async function startServer(ws, home) {
   const port = await freePort();
@@ -249,10 +302,10 @@ test('real server: a second server on the same workspace refuses; a second works
     assert.equal(a.code, null, a.output());
     assert.deepEqual(await (await fetch(`${a.base}/api/dispatch`)).json(), { enabled: true });
     assert.equal((await fetch(`${a.base}/api/state`)).status, 200);
-    // Wait for listening() to record the port in both locks.
-    await new Promise((r) => setTimeout(r, 300));
-    assert.deepEqual(JSON.parse(readFileSync(join(ws, '.drawing', 'server.lock'), 'utf8')), { pid: a.child.pid, port: a.port });
-    assert.deepEqual(JSON.parse(readFileSync(join(root, '.dispatch', 'drawing.lock'), 'utf8')), { pid: a.child.pid, port: a.port });
+    // listening() records the port in both locks shortly after the URL line.
+    const want = { pid: a.child.pid, port: a.port };
+    assert.deepEqual(await lockOnceSet(join(ws, '.drawing', 'server.lock')), want);
+    assert.deepEqual(await lockOnceSet(join(root, '.dispatch', 'drawing.lock')), want);
 
     const b = await startServer(ws, home);
     servers.push(b);
