@@ -408,6 +408,32 @@ body {
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
 
+/* Live agent cursor (E56): pointer + name tag in the session's role colour. Placed with `translate` from JS (one
+   animation-frame loop, web/src/canvas/AgentCursors.tsx); fading is an opacity transition, kept under reduced motion. */
+.agent-cursor { --agent: var(--idle); position: absolute; left: -1px; top: -1px; color: var(--agent); transition: opacity 0.4s ease-out; }
+.agent-cursor[data-role='lead'] { --agent: var(--role-lead); }
+.agent-cursor[data-role='impl'] { --agent: var(--role-impl); }
+.agent-cursor[data-role='review'] { --agent: var(--role-review); }
+.agent-cursor[data-role='test'] { --agent: var(--role-test); }
+.agent-cursor[data-role='design'] { --agent: var(--role-design); }
+.agent-cursor[data-role='docs'] { --agent: var(--role-docs); }
+.agent-cursor[data-phase='fading'], .agent-cursor[data-phase='gone'] { opacity: 0; }
+.agent-cursor-pointer { display: block; fill: currentColor; stroke: var(--background); stroke-width: 1.25; stroke-linejoin: round; }
+.agent-cursor-tag {
+  position: absolute; left: 13px; top: 15px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  padding: 1px 7px; border-radius: 6px; background: var(--agent); color: var(--background);
+  font: 600 12px/16px var(--font-sans); box-shadow: var(--shadow-pop);
+}
+.agent-cursor-dots { display: none; gap: 2px; }
+.agent-cursor[data-phase='thinking'] .agent-cursor-dots { display: inline-flex; }
+.agent-cursor-dots span { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.7; }
+@media (prefers-reduced-motion: no-preference) {
+  .agent-cursor-dots span { animation: agent-think 1s ease-in-out infinite alternate; }
+  .agent-cursor-dots span:nth-child(2) { animation-delay: 0.2s; }
+  .agent-cursor-dots span:nth-child(3) { animation-delay: 0.4s; }
+}
+@keyframes agent-think { from { opacity: 0.3; } to { opacity: 1; } }
+
 /* PDF export (print dialog): only the document column is printed while <html> has .print-doc. */
 @media print {
   html.print-doc body * { visibility: hidden !important; }

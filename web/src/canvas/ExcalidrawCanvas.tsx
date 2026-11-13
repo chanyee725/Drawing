@@ -22,6 +22,7 @@ import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, liveFrames, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { RunOverlay } from './RunOverlay';
+import { AgentCursors } from './AgentCursors';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE } from './cleanStyle';
@@ -40,6 +41,8 @@ type Props = {
   onChange: (patch: { canvas?: CanvasData; blocks?: Block[] }) => void;
   /** Filled while this canvas is mounted, so export, the palette and shortcuts can reach it. */
   handle?: { current: CanvasHandle | null };
+  /** Workspace path of the open file: live agent cursors (E56) of this file are drawn. */
+  path?: string;
 };
 
 const theme = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
@@ -74,7 +77,7 @@ const withLayout = (cd: Record<string, unknown> | undefined, layout: BlockLayout
 };
 const isGraphType = (type: string | undefined) => type === 'architecture' || type === 'flowchart';
 
-export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle }: Props) {
+export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle, path }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   // Only diagram blocks are selected: hide Excalidraw's "double-click to crop" hint, since that opens the code.
@@ -789,6 +792,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         }}
       />
       {api && wrap.current && <RunOverlay api={api} wrap={wrap.current} pictureOf={pictureOf} hide={edit?.blockId ?? null} />}
+      {api && wrap.current && path && <AgentCursors api={api} wrap={wrap.current} file={path} />}
       {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
         <LayoutEditOverlay
           layout={editBlock.layout}
