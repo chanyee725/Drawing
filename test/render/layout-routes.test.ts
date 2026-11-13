@@ -95,3 +95,28 @@ test('routes: a label that would cover another moves in 24 px steps along its li
   assert.ok(moved >= 23 && Math.abs(moved / 24 - Math.round(moved / 24)) < 0.06, `moved ${moved} px`);
   assert.ok(Math.hypot(g.x - end.x, g.y - end.y) < Math.hypot(m.x - end.x, m.y - end.y), 'towards the end node');
 });
+
+test('routes: an edge that keeps its old route is not overlapped by the bus of its fan', async () => {
+  const { renderDiagram } = await import('../../shared/render/index.ts');
+  // H > D cannot Z around A, so it keeps ELK's route; the H > C bus used to run on top of it (PR #140 review).
+  const code = ['H', 'A', 'B', 'C', 'D', 'H > A: one', 'H > B: two', 'H > C: three', 'H > D: four', 'A > D: x'].join('\n');
+  const { scene } = await renderDiagram(code, { type: 'flowchart' });
+  type E = { kind: 'edge'; id: string; points: { x: number; y: number }[] };
+  const es = scene.items.filter((i) => i.kind === 'edge') as E[];
+  const segs = (e: E) => e.points.slice(1).map((q, k) => [e.points[k]!, q] as const);
+  // The kept route (H > D, the 4th edge) must not share a run with any other line.
+  const kept = es[3]!;
+  const along = (a0: number, a1: number, b0: number, b1: number) =>
+    Math.min(Math.max(a0, a1), Math.max(b0, b1)) - Math.max(Math.min(a0, a1), Math.min(b0, b1));
+  for (const other of es) {
+    if (other === kept) continue;
+    for (const [p, q] of segs(kept)) {
+      for (const [r, s] of segs(other)) {
+        const h = p.y === q.y && r.y === s.y && p.y === r.y && along(p.x, q.x, r.x, s.x) > 1;
+        // Lines from one side of H share its first few pixels only where they leave the same port.
+        const v = p.x === q.x && r.x === s.x && p.x === r.x && along(p.y, q.y, r.y, s.y) > 1;
+        assert.ok(!h && !v, `${kept.id} and ${other.id} run together from (${p.x},${p.y}) to (${q.x},${q.y})`);
+      }
+    }
+  }
+});

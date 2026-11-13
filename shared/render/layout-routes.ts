@@ -102,17 +102,54 @@ export function routeEdges(
   parent: ReadonlyMap<string, string | undefined>,
   edges: readonly RouteEdge[],
 ): void {
+  // An edge that finds no new route keeps its old one, which may run along a bus or jog planned for the
+  // others: plan again without it (its old route now an obstacle) until every planned edge finds a route.
+  const kept = new Set<RouteEdge>();
+  for (;;) {
+    const failed = planRoutes(rects, parent, edges, kept);
+    if (!failed.length) return;
+    for (const e of failed) kept.add(e);
+  }
+}
+
+/** Whether two axis-aligned segments run along the same line and share more than a pixel of it. */
+function collinear(p: Point, q: Point, r: Point, s: Point): boolean {
+  const horiz = (a: Point, b: Point): boolean => Math.abs(a.y - b.y) < 0.5;
+  const vert = (a: Point, b: Point): boolean => Math.abs(a.x - b.x) < 0.5;
+  const shared = (a0: number, a1: number, b0: number, b1: number): number =>
+    Math.min(Math.max(a0, a1), Math.max(b0, b1)) - Math.max(Math.min(a0, a1), Math.min(b0, b1));
+  if (horiz(p, q) && horiz(r, s) && !(vert(p, q) || vert(r, s))) return Math.abs(p.y - r.y) < 1 && shared(p.x, q.x, r.x, s.x) > 1;
+  if (vert(p, q) && vert(r, s) && !(horiz(p, q) || horiz(r, s))) return Math.abs(p.x - r.x) < 1 && shared(p.y, q.y, r.y, s.y) > 1;
+  return false;
+}
+
+/**
+ * One planning pass: routes every facing edge not in `kept`, writing the new routes only when all of them
+ * found one. Returns the edges that found none (nothing is written then).
+ */
+function planRoutes(
+  rects: ReadonlyMap<string, Rect>,
+  parent: ReadonlyMap<string, string | undefined>,
+  edges: readonly RouteEdge[],
+  kept: ReadonlySet<RouteEdge>,
+): RouteEdge[] {
   const plans: Plan[] = [];
+  const fixed: Point[][] = [];
   for (const e of edges) {
-    if (e.keep || e.from === e.to || e.points.length < 2) continue;
+    if (e.keep || kept.has(e) || e.from === e.to || e.points.length < 2) {
+      if (e.points.length >= 2) fixed.push(e.points);
+      continue;
+    }
     const a = rects.get(e.from);
     const b = rects.get(e.to);
     if (!a || !b) continue;
     const sa = nearestSide(a, e.points[0]!);
     const sb = nearestSide(b, e.points[e.points.length - 1]!);
-    if (sb !== OPPOSITE[sa]) continue;
     const gap = SIGN[sa] * (sideAt(b, sb) - sideAt(a, sa));
-    if (gap < 2 * MIN_STUB) continue;
+    if (sb !== OPPOSITE[sa] || gap < 2 * MIN_STUB) {
+      fixed.push(e.points);
+      continue;
+    }
     plans.push({ e, a, b, sa, sb, gap });
   }
 
@@ -182,6 +219,12 @@ export function routeEdges(
       if (skip.has(id)) continue;
       for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!)) return false;
     }
+    // Never run along a route that stays as it is.
+    for (const f of fixed) {
+      for (let j = 1; j < f.length; j++) {
+        for (let k = 1; k < pts.length; k++) if (collinear(pts[k - 1]!, pts[k]!, f[j - 1]!, f[j]!)) return false;
+      }
+    }
     return true;
   };
   const inside = (r: Rect, s: Side, u: number): boolean => {
@@ -191,6 +234,8 @@ export function routeEdges(
   };
 
   const routed: Plan[] = [];
+  const routes = new Map<Plan, Point[]>();
+  const failed: RouteEdge[] = [];
   plans.forEach((p, i) => {
     const skip = new Set([...ancestors(p.e.from), ...ancestors(p.e.to)]);
     const v0 = sideAt(p.a, p.sa);
@@ -214,11 +259,14 @@ export function routeEdges(
     if (straight !== undefined) {
       const pts = [at(p.sa, straight, v0), at(p.sa, straight, v1)];
       if (clear(pts, skip)) {
-        p.e.points.splice(0, p.e.points.length, ...pts);
+        routes.set(p, pts);
         return;
       }
     }
-    if (p0 === p1) return; // straight but blocked: keep the old route
+    if (p0 === p1) {
+      failed.push(p.e); // straight but blocked: keep the old route
+      return;
+    }
     // At most two bends: a Z whose jog sits on the bus, else half-way across the gap.
     const s = SIGN[p.sa];
     const mid = Math.round((v0 + v1) / 2);
@@ -231,15 +279,18 @@ export function routeEdges(
     for (const level of levels) {
       const pts = [at(p.sa, p0, v0), at(p.sa, p0, level), at(p.sa, p1, level), at(p.sa, p1, v1)];
       if (!clear(pts, skip)) continue;
-      p.e.points.splice(0, p.e.points.length, ...pts);
+      routes.set(p, pts);
       p.level = level;
       routed.push(p);
       return;
     }
-    // Every Z cuts through a box: keep the old route.
+    failed.push(p.e); // every Z cuts through a box: keep the old route
   });
+  if (failed.length) return failed;
 
+  for (const [p, pts] of routes) p.e.points.splice(0, p.e.points.length, ...pts);
   stagger(routed);
+  return [];
 }
 
 /**
