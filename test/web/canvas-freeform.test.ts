@@ -201,7 +201,7 @@ test('hand-drawn shapes from an old file open clean; block images and clean shap
   const clean = { id: 'k', type: 'arrow', roughness: 0, version: 1 };
   const out = cleanElements([rough, cartoon, hand, virgil, code, image, clean]);
   assert.equal(out.changed, true);
-  assert.equal(out.fonts, true);
+  assert.deepEqual(out.refit, ['t', 'v'], 'the texts that changed font are measured again');
   assert.deepEqual(out.elements.map((e) => e.roughness), [0, 0, 0, 0, 0, 1, 0]);
   assert.deepEqual(out.elements.map((e) => (e as { fontFamily?: number }).fontFamily), [undefined, undefined, CLEAN_FONT_FAMILY, CLEAN_FONT_FAMILY, 8, undefined, undefined]);
   // Versions stay as saved: opening a file alone must not look like an edit (nothing is written).
@@ -218,5 +218,5 @@ test('a clean scene comes back as the same array, and a live change goes through
   assert.equal(same.changed, false);
   const bumped = cleanElements([{ id: 'p', type: 'ellipse', roughness: 1, version: 1 }], (e, patch) => ({ ...e, ...patch, version: e.version + 1 }));
   assert.deepEqual(bumped.elements, [{ id: 'p', type: 'ellipse', roughness: 0, version: 2 }]);
-  assert.equal(bumped.fonts, false);
+  assert.deepEqual(bumped.refit, []);
 });
