@@ -14,6 +14,7 @@ import {
   LOGIN_ENDED_NOTE,
   LOGIN_POLL_LIMIT_MS,
   loginsEndedUnconnected,
+  loginUnlessClosed,
   oneAtATime,
   providerRows,
   SECTIONS,
@@ -42,15 +43,19 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
     if (d && !d.open) d.showModal();
   }, []);
   // Logins still running when the dialog goes away are cancelled, so no CLI login is left behind unseen.
+  // A login requested just before closing is only seen once its request returns; `closed` lets that cancel it.
   const logins = useRef<ProviderId[]>([]);
+  const closed = useRef(false);
   useEffect(
     () => () => {
+      closed.current = true;
       for (const id of logins.current) void api.providerCancel(id).catch(() => {});
       logins.current = [];
     },
     [],
   );
   const onLogins = useCallback((ids: ProviderId[]) => (logins.current = ids), []);
+  const isClosed = useCallback(() => closed.current, []);
   const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   return (
     <dialog
@@ -98,7 +103,7 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             {section === 'general' && <GeneralPanel pref={themePref} onPref={onThemePref} />}
-            {section === 'models' && <ModelsPanel onLogins={onLogins} />}
+            {section === 'models' && <ModelsPanel onLogins={onLogins} isClosed={isClosed} />}
             {section === 'run' && <RunPanel />}
           </div>
         </section>
@@ -128,7 +133,7 @@ function GeneralPanel({ pref, onPref }: { pref: ThemePref; onPref: (t: ThemePref
 
 type Load<T> = { kind: 'loading' } | { kind: 'off'; message: string } | { kind: 'ok'; value: T };
 
-function ModelsPanel({ onLogins }: { onLogins: (ids: ProviderId[]) => void }) {
+function ModelsPanel({ onLogins, isClosed }: { onLogins: (ids: ProviderId[]) => void; isClosed: () => boolean }) {
   const [state, setState] = useState<Load<{ providers: Record<string, ProviderInfo>; limits: LimitsView }>>({ kind: 'loading' });
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -175,8 +180,10 @@ function ModelsPanel({ onLogins }: { onLogins: (ids: ProviderId[]) => void }) {
         setPending(row.id);
         setError(null);
         try {
-          if (row.action === 'connect') await api.providerLogin(row.id);
-          else if (row.action === 'disconnect') await api.providerLogout(row.id);
+          if (row.action === 'connect') {
+            await loginUnlessClosed(row.id, api.providerLogin, api.providerCancel, isClosed);
+            if (isClosed()) return;
+          } else if (row.action === 'disconnect') await api.providerLogout(row.id);
           else if (row.action === 'cancel') await api.providerCancel(row.id);
           await load();
         } catch (e) {
@@ -185,7 +192,7 @@ function ModelsPanel({ onLogins }: { onLogins: (ids: ProviderId[]) => void }) {
           setPending(null);
         }
       }),
-    [load],
+    [load, isClosed],
   );
   const recheck = useMemo(
     () =>

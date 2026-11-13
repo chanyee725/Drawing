@@ -139,6 +139,24 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   for (let i = 0; i < 50 && !posts.includes('/api/providers/gemini/cancel'); i++) await page.waitForTimeout(50);
   assert.ok(posts.includes('/api/providers/gemini/cancel'), `cancel sent on close: ${posts}`);
   await page.unroute('**/api/state');
+  // (2b) Esc while the login request is still in flight (the server refreshes every CLI first): once it
+  // returns unconnected, the closed dialog cancels the login the server started meanwhile (#228 review).
+  await page.route('**/api/providers/openai/login', async (route) => {
+    await new Promise((r) => setTimeout(r, 600));
+    await route.fulfill({ json: { ok: true, connected: false } });
+  });
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: '명령 찾기' }).fill('모델 연결 열기');
+  await page.getByRole('option', { name: /^모델 연결 열기/ }).first().click();
+  await dialog.waitFor();
+  posts.length = 0;
+  await codex.getByRole('button', { name: 'Codex 연결', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  assert.ok(!posts.includes('/api/providers/openai/cancel'), `no cancel before the login returns: ${posts}`);
+  for (let i = 0; i < 50 && !posts.includes('/api/providers/openai/cancel'); i++) await page.waitForTimeout(50);
+  assert.deepEqual(posts, ['/api/providers/openai/login', '/api/providers/openai/cancel'], `cancel after a late login: ${posts}`);
+  await page.unroute('**/api/providers/openai/login');
   await page.keyboard.press('Control+k');
   await page.getByRole('combobox', { name: '명령 찾기' }).fill('설정 열기');
   await page.getByRole('option', { name: /^설정 열기/ }).first().click();

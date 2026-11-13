@@ -112,3 +112,19 @@ export function oneAtATime<A extends unknown[]>(fn: (...a: A) => Promise<unknown
     return true;
   };
 }
+
+/**
+ * Starts a provider login and, if the dialog closed while the request was in flight (the server first
+ * refreshes every CLI's status, which can take seconds), cancels the login the server started meanwhile so
+ * no CLI login is left running unseen (#228 review). Returns the login response.
+ */
+export async function loginUnlessClosed<R extends { connected: boolean }>(
+  id: ProviderId,
+  login: (id: ProviderId) => Promise<R>,
+  cancel: (id: ProviderId) => Promise<unknown>,
+  isClosed: () => boolean,
+): Promise<R> {
+  const res = await login(id);
+  if (!res.connected && isClosed()) await cancel(id).catch(() => {});
+  return res;
+}
