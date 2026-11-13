@@ -184,7 +184,7 @@ function monoRuns(line: string): string {
   for (const ch of line) {
     const code = ch.codePointAt(0) ?? 0;
     // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
-    const w = wide && isJoiner(code) ? true : isWideChar(code);
+    const w: boolean = wide && isJoiner(code) ? true : isWideChar(code);
     if (w !== wide) {
       flush();
       wide = w;
