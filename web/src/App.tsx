@@ -200,9 +200,11 @@ export function App() {
     }
   }, []);
 
+  // Path this tab is deleting right now (see the SSE handler below).
+  const removing = useRef<string | null>(null);
   // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
   // slices it shows, never blocks, canvas or document.
-  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); if (!removing.current) setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
@@ -350,8 +352,6 @@ export function App() {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
-  // Path this tab is deleting right now (see the SSE handler below).
-  const removing = useRef<string | null>(null);
   // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
     session.close();
