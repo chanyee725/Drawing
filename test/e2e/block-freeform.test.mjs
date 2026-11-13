@@ -128,5 +128,36 @@ test('a block inside a frame converts into shapes that stay in that frame', SKIP
   assert.ok(title && group, 'group box and its title');
   // The picture is scaled about 1.5x here: the padding alone is about 21, with the icon gap left in it would be about 58.
   assert.ok(title.x - group.x < 30, `the title takes the icon slot (title ${title.x}, box ${group.x})`);
+
+  // One undo brings the block back and takes the shapes away, the frame stays.
+  await page.keyboard.press('Control+z');
+  const undone = await saved();
+  assert.equal(undone.blocks.length, 1, 'one undo brings the block back');
+  assert.equal(undone.blocks[0].code, block.code);
+  assert.deepEqual(undone.canvas.elements.filter((e) => !e.isDeleted).map((e) => e.id), ['frame_1'], 'and takes the shapes away');
+  assert.deepEqual(errors, []);
+});
+
+test('a block saved in a frame is in it after a reload, even where it sticks out of the frame (#83)', SKIP, async (t) => {
+  const el = (o) => ({ angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, ...o });
+  const frame = el({ id: 'frame_1', type: 'frame', x: 0, y: 0, width: 1000, height: 1000, name: '구조도', frameId: null });
+  // Its right part sticks out of the frame, so only the stored frame can put it there (no frame holds it whole).
+  const block = { id: 'b1', type: 'architecture', code: 'Web [icon: user]\nAPI [icon: server]\nWeb > API', x: 500, y: 400, w: 600, h: 200, frameId: 'frame_1' };
+  const { page, saved, errors, ws } = await open(t, 'fr2', (f) => ({ ...f, canvas: { ...f.canvas, elements: [frame] }, blocks: [block] }));
+
+  // Opening the file is a reload: the block keeps its frame.
+  assert.equal((await saved()).blocks[0].frameId, 'frame_1', 'the stored frame survives the load and the autosave');
+  const box = await page.locator('[data-canvas]').boundingBox();
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+  await page.waitForTimeout(300);
+  await page.getByRole('button', { name: '자유 도형으로 바꾸기' }).click();
+  await page.waitForTimeout(500);
+
+  const after = await saved();
+  await page.screenshot({ path: join(process.env.E2E_SHOTS ?? ws, 'freeform-frame-reload.png') });
+  assert.equal(after.blocks.length, 0, 'the block is gone');
+  const made = after.canvas.elements.filter((e) => !e.isDeleted && e.id !== 'frame_1');
+  assert.ok(made.length >= 4, JSON.stringify(made.map((e) => e.type)));
+  assert.deepEqual([...new Set(made.map((e) => e.frameId))], ['frame_1'], 'the shapes stay in the frame');
   assert.deepEqual(errors, []);
 });

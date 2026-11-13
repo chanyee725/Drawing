@@ -7,7 +7,8 @@
 import { layoutProblem, type BlockLayout } from '../../../shared/render/block-layout.ts';
 
 export type BlockGeom = { x: number; y: number; w: number; h: number };
-export type BlockLike = BlockGeom & { id: string; type: string; code: string; layout?: BlockLayout };
+/** `frameId`: the frame the block's image sits in, kept on the block because the image is rebuilt on load (#83). */
+export type BlockLike = BlockGeom & { id: string; type: string; code: string; layout?: BlockLayout; frameId?: string };
 type DrawKey = Pick<BlockLike, 'id' | 'type' | 'code' | 'layout'>;
 
 /** The subset of an Excalidraw element this module reads. */
@@ -20,6 +21,7 @@ export type SceneEl = {
   height: number;
   isDeleted?: boolean;
   version?: number;
+  frameId?: string | null;
   customData?: Record<string, unknown> | null;
 };
 
@@ -89,6 +91,8 @@ export type SplitScene<E extends SceneEl> = {
   free: E[];
   /** Geometry of live block images, by block id. */
   geometry: Map<string, BlockGeom>;
+  /** The frame each live block image sits in, by block id (null: none). */
+  frames: Map<string, string | null>;
   /** Block ids whose image was deleted on the canvas. */
   deleted: Set<string>;
   /** `customData.layout` of live block images, by block id (undefined: the image carries none). */
@@ -98,6 +102,7 @@ export type SplitScene<E extends SceneEl> = {
 export function splitScene<E extends SceneEl>(elements: readonly E[]): SplitScene<E> {
   const free: E[] = [];
   const geometry = new Map<string, BlockGeom>();
+  const frames = new Map<string, string | null>();
   const deleted = new Set<string>();
   const layouts = new Map<string, BlockLayout | undefined>();
   for (const el of elements) {
@@ -108,11 +113,12 @@ export function splitScene<E extends SceneEl>(elements: readonly E[]): SplitScen
       if (!geometry.has(bid)) deleted.add(bid);
     } else {
       geometry.set(bid, { x: el.x, y: el.y, w: el.width, h: el.height });
+      frames.set(bid, el.frameId || null);
       layouts.set(bid, asLayout(el.customData?.layout));
       deleted.delete(bid);
     }
   }
-  return { free, geometry, deleted, layouts };
+  return { free, geometry, frames, deleted, layouts };
 }
 
 const round = (v: number) => Math.round(v * 100) / 100;
@@ -124,7 +130,7 @@ const same = (a: BlockGeom, b: BlockGeom) => round(a.x) === round(b.x) && round(
  */
 export function applyScene<B extends BlockLike>(
   blocks: readonly B[],
-  split: Pick<SplitScene<SceneEl>, 'geometry' | 'deleted'>,
+  split: Pick<SplitScene<SceneEl>, 'geometry' | 'deleted'> & Partial<Pick<SplitScene<SceneEl>, 'frames'>>,
   /** Layouts to take from images (see `layoutsFromImages`); a block id with `undefined` has its layout cleared. */
   layouts?: ReadonlyMap<string, BlockLayout | undefined>,
 ): readonly B[] {
@@ -138,6 +144,12 @@ export function applyScene<B extends BlockLike>(
     const g = split.geometry.get(b.id);
     let nb = b;
     if (g && !same(g, b)) nb = { ...nb, x: round(g.x), y: round(g.y), w: round(g.w), h: round(g.h) };
+    // The image's frame is kept on the block, since the image is rebuilt on load (#83).
+    const f = split.frames?.get(b.id);
+    if (f !== undefined && (f ?? undefined) !== b.frameId) {
+      const { frameId: _drop, ...rest } = nb;
+      nb = (f ? { ...rest, frameId: f } : rest) as B;
+    }
     if (layouts?.has(b.id)) {
       const l = layouts.get(b.id);
       if (layoutSig(l) !== layoutSig(b.layout)) {
@@ -216,7 +228,7 @@ export function blockImageSkeleton(b: BlockLike, fileId: string, id: string) {
     roughness: 0,
     opacity: 100,
     groupIds: [],
-    frameId: null,
+    frameId: b.frameId ?? null,
     roundness: null,
     seed: 1,
     version: 1,
@@ -232,6 +244,24 @@ export function blockImageSkeleton(b: BlockLike, fileId: string, id: string) {
     crop: null,
     customData: b.layout ? { blockId: b.id, layout: b.layout } : { blockId: b.id },
   };
+}
+
+const isFrame = (e: SceneEl) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe');
+
+/**
+ * Blocks whose stored frame is not a live frame in `elements` lose it, so a rebuilt image never points at a frame
+ * that is gone. Returns the same array when every stored frame is live.
+ */
+export function liveFrames<B extends BlockLike>(blocks: readonly B[], elements: readonly SceneEl[]): readonly B[] {
+  const live = new Set(elements.filter(isFrame).map((e) => e.id));
+  let changed = false;
+  const out = blocks.map((b) => {
+    if (!b.frameId || live.has(b.frameId)) return b;
+    changed = true;
+    const { frameId: _drop, ...rest } = b;
+    return rest as B;
+  });
+  return changed ? out : blocks;
 }
 
 /**

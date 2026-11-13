@@ -4,7 +4,8 @@ import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
 import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
-import { ShellHome } from './ShellHome';
+import { Home, type CreateKind } from './home/Home';
+import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
 import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
 import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
@@ -30,7 +31,7 @@ import { CommandPalette } from './CommandPalette';
 import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
 import { displayName } from './Sidebar';
 import {
-  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown,
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown, Layers, FolderClosed,
   Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
   SquareDashedMousePointer, Sun, Trash, Type, Undo2, ZoomIn, ZoomOut,
 } from 'lucide-react';
@@ -195,6 +196,7 @@ export function App() {
   exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteGroup, setPaletteGroup] = useState<Command['group']>(undefined);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
@@ -210,9 +212,11 @@ export function App() {
     }
   }, []);
 
+  // Path this tab is deleting right now (see the SSE handler below).
+  const removing = useRef<string | null>(null);
   // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
   // slices it shows, never blocks, canvas or document.
-  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); if (!removing.current) setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
@@ -339,18 +343,19 @@ export function App() {
     };
   }, [session]);
 
-  // New files go in the project shown (or the open file's project); a typed `a/b` path still works.
-  const newFile = async () => {
-    const dir = newFileDir(section, projects, path);
-    const name = window.prompt(dir ? `새 파일 이름을 입력해 주세요 (${dir} 안에 만들어요)` : '새 파일 이름을 입력해 주세요');
+  /** `folder` = project path the file goes into; undefined = the project shown (or the open file's), null = workspace root. */
+  const newFile = async (folder?: string | null, kind: CreateKind = 'doc') => {
+    const dir = folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
+    const label = kind === 'plan' ? '새 파이프라인 계획 이름을 입력해 주세요' : '새 파일 이름을 입력해 주세요';
+    const name = window.prompt(dir ? `${label} (${dir} 안에 만들어요)` : label);
     const stem = name ? fileStem(name) : '';
     if (!stem) return;
-    const p = dir ? `${dir}/${stem}` : stem;
+    const p = stem.includes('/') ? stem : folderPrefix(dir || null) + stem;
     await session.flush();
     try {
       await api.createFile(p, p.split('/').pop() ?? p);
       await refreshTree();
-      await open(p);
+      if (await open(p) && kind === 'canvas') setView('canvas');
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 파일이 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
@@ -379,8 +384,6 @@ export function App() {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 프로젝트가 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
-  // Path this tab is deleting right now (see the SSE handler below).
-  const removing = useRef<string | null>(null);
   // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
     session.close();
@@ -563,10 +566,22 @@ export function App() {
       // Inside a text field, the document editor or the code editor these keys belong to the editor
       // (Ctrl+E is "code" in the document), so the export shortcuts step aside; the menu and palette still work.
       const editing = e.target instanceof Element && !!e.target.closest('.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""]');
+      if (!mod && !e.shiftKey && !e.altKey && !editing && !e.isComposing && !e.repeat && !(e.target instanceof Element && e.target.closest('[role=dialog], [role=menu]'))) {
+        if (k === 'KeyG') chord.g = Date.now();
+        else if (k === 'KeyP' && Date.now() - chord.g < CHORD_MS) {
+          e.preventDefault();
+          setTimeout(() => (chord.g = 0));
+          setExportOpen(false);
+          setPaletteGroup('project');
+          setPaletteOpen(true);
+          return;
+        }
+      }
       if (mod && !e.shiftKey && !e.altKey && k === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
         setExportOpen(false);
+        setPaletteGroup(undefined);
         setPaletteOpen((o) => !o);
       } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen && !editing && window.matchMedia(EXPORT_MENU_QUERY).matches) {
         e.preventDefault();
@@ -657,6 +672,28 @@ export function App() {
       freeformCmd(),
     ];
   };
+  // Top-level folders are projects. Going to one closes the open file and shows the project home.
+  const goProject = (id: string | null) => showSection(id ? { kind: 'project', path: id } : { kind: 'all' });
+  const projectCommands = (): Command[] => [
+    {
+      id: 'project:all',
+      title: '모든 파일',
+      group: 'project',
+      icon: Layers,
+      keywords: ['dashboard', 'home', '대시보드', '프로젝트'],
+      run: () => goProject(null),
+    },
+    ...tree
+      .filter((n) => n.type === 'folder')
+      .map((n) => ({
+        id: `project:${n.path}`,
+        title: n.name,
+        group: 'project' as const,
+        icon: FolderClosed,
+        keywords: ['project', '프로젝트'],
+        run: () => goProject(n.path),
+      })),
+  ];
   const fileCommands = (): Command[] =>
     filesOf(tree).map((f) => ({
       id: `file:${f.path}`,
@@ -672,6 +709,7 @@ export function App() {
   const [registry] = useState(() => new CommandRegistry());
   useCommandSource(registry, 'app', commands);
   useCommandSource(registry, 'files', fileCommands);
+  useCommandSource(registry, 'projects', projectCommands);
 
   const dark = theme === 'dark';
   const doc = hasFile && path && (
@@ -682,6 +720,8 @@ export function App() {
   // The document screen sits flush against the sidebar (frame A); everything else is a floating panel (frame B).
   const docScreen = hasFile && section.kind === 'doc';
   const homeSection = section.kind === 'doc' ? ({ kind: 'all' } as const) : section;
+  // Dashboard / project home (shown outside the document screen): null = all files, else a project id (its folder path).
+  const homeProject = homeSection.kind === 'project' ? homeSection.path : null;
   const showSection = useCallback(
     (s: Section) => {
       setSection(s);
@@ -743,7 +783,7 @@ export function App() {
         <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} scope={homeProject ?? (path?.includes('/') ? path.split('/')[0] : null)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
             <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
@@ -770,7 +810,15 @@ export function App() {
             </div>
           )}
           {!docScreen ? (
-            <ShellHome section={homeSection} view={projects} narrow={narrow} onOpen={openFile} onNewFile={() => void newFile()} />
+            <Home
+              narrow={narrow}
+              project={homeProject}
+              version={tree}
+              onProject={goProject}
+              onOpen={openFile}
+              onCreate={(k, project) => void newFile(project, k)}
+              onDelete={(p, t) => void remove({ type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
+            />
           ) : (
             <>
           <TopBar
@@ -784,6 +832,7 @@ export function App() {
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
             setExportOpen(false);
+            setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
