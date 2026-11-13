@@ -22,7 +22,14 @@ import { ExportMenu } from './ExportMenu';
 import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
 import { HistoryDialog } from './HistoryDialog';
 import { TrashDialog } from './TrashDialog';
-import { CommandPalette, type Command } from './CommandPalette';
+import { CommandPalette } from './CommandPalette';
+import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
+import { displayName } from './Sidebar';
+import {
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown,
+  Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
+  SquareDashedMousePointer, Sun, Trash, Type, Undo2, ZoomIn, ZoomOut,
+} from 'lucide-react';
 import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
@@ -54,6 +61,10 @@ function useNarrow() {
 }
 
 const NO_BLOCKS: Block[] = [];
+
+type TreeFile = Extract<TreeNode, { type: 'file' }>;
+/** Every file in the tree, depth first (folders in tree order). */
+const filesOf = (nodes: TreeNode[]): TreeFile[] => nodes.flatMap((n) => (n.type === 'folder' ? filesOf(n.children) : [n]));
 
 // The panes read the file from the session themselves, so a canvas drag or a keystroke in the document
 // re-renders only the pane that changed, not the whole app.
@@ -521,6 +532,8 @@ export function App() {
     const lay = !needCanvas && h ? h.layout.state() : null;
     const layoutEditCmd = (): Command => ({
       id: 'layout-edit',
+      group: 'block',
+      icon: Move,
       title: lay?.editing ? '레이아웃 편집 끝내기' : '레이아웃 편집',
       disabled: !lay?.block,
       hint: lay?.block ? undefined : '블록을 하나 고를 때',
@@ -529,6 +542,8 @@ export function App() {
     });
     const layoutResetCmd = (): Command => ({
       id: 'layout-reset',
+      group: 'block',
+      icon: RotateCcw,
       title: '레이아웃 초기화',
       disabled: !lay?.moved,
       hint: lay?.moved ? undefined : lay?.block ? '옮긴 배치가 없어요' : '블록을 하나 고를 때',
@@ -537,48 +552,67 @@ export function App() {
     });
     const freeformCmd = (): Command => ({
       id: 'block-freeform',
+      group: 'block',
+      icon: Shapes,
       title: '자유 도형으로 바꾸기',
       disabled: !lay?.graph,
       hint: lay?.graph ? undefined : lay?.block ? '그래프 블록만 바꿀 수 있어요' : '블록을 하나 고를 때',
       keywords: ['freeform', 'convert', 'shapes', 'ungroup', '자유', '도형', '변환', '바꾸기'],
       run: () => canvasHandle.current?.layout.freeform(),
     });
-    const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[] = []): Command => ({ id, title, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
+    const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[], icon: Command['icon']): Command => ({ id, title, group: 'canvas', icon, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
     return [
-      { id: 'export-svg', title: '캔버스를 SVG로 내보내기', disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
-      { id: 'export-png', title: '캔버스를 PNG로 내보내기', disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
-      { id: 'export-copy', title: '이미지로 복사', keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
-      { id: 'export-md', title: '문서를 Markdown으로 내보내기', disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
-      { id: 'history', title: '버전 기록 열기', disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
-      { id: 'trash', title: '최근에 지운 파일 보기', keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
-      { id: 'view-doc', title: '보기: 문서', run: () => setView('doc'), keywords: ['view', '보기'] },
-      { id: 'view-both', title: '보기: 둘 다', run: () => setView('both'), keywords: ['view', '보기'] },
-      { id: 'view-canvas', title: '보기: 캔버스', run: () => setView('canvas'), keywords: ['view', '보기'] },
-      { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
-      canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구']),
-      canvasCmd('tool-rect', '도구: 사각형', 'R', { key: 'r' }, ['tool', 'rectangle', '도구']),
-      canvasCmd('tool-diamond', '도구: 마름모', 'D', { key: 'd' }, ['tool', 'diamond', '도구']),
-      canvasCmd('tool-ellipse', '도구: 원', 'O', { key: 'o' }, ['tool', 'ellipse', 'circle', '도구']),
-      canvasCmd('tool-arrow', '도구: 화살표', 'A', { key: 'a' }, ['tool', 'arrow', '도구']),
-      canvasCmd('tool-line', '도구: 선', 'L', { key: 'l' }, ['tool', 'line', '도구']),
-      canvasCmd('tool-draw', '도구: 그리기', 'P', { key: 'p' }, ['tool', 'draw', 'pencil', '도구']),
-      canvasCmd('tool-text', '도구: 글자', 'T', { key: 't' }, ['tool', 'text', '도구']),
-      canvasCmd('tool-eraser', '도구: 지우개', 'E', { key: 'e' }, ['tool', 'eraser', '도구']),
-      canvasCmd('tool-hand', '도구: 손(화면 이동)', 'H', { key: 'h' }, ['tool', 'hand', 'pan', '도구']),
-      canvasCmd('zoom-in', '확대', `${M}+`, { key: '=', code: 'Equal', ctrl: true }, ['zoom', '줌']),
-      canvasCmd('zoom-out', '축소', `${M}-`, { key: '-', code: 'Minus', ctrl: true }, ['zoom', '줌']),
-      canvasCmd('zoom-reset', '화면 크기 100%', `${M}0`, { key: '0', code: 'Digit0', ctrl: true }, ['zoom', '줌']),
-      canvasCmd('zoom-fit', '모두 보이게 맞추기', 'Shift+1', { key: '!', code: 'Digit1', shift: true }, ['zoom', 'fit', '줌']),
-      canvasCmd('undo', '실행 취소', `${M}Z`, { key: 'z', ctrl: true }, ['undo', '되돌리기']),
-      canvasCmd('redo', '다시 실행', `${M}Shift+Z`, { key: 'z', ctrl: true, shift: true }, ['redo']),
-      canvasCmd('duplicate', '복제', `${M}D`, { key: 'd', ctrl: true }, ['duplicate', 'copy']),
-      canvasCmd('delete', '삭제', 'Delete', { key: 'Delete' }, ['delete', 'remove']),
-      canvasCmd('select-all', '전체 선택', `${M}A`, { key: 'a', ctrl: true }, ['select', 'all']),
+      { id: 'new-file', title: '새 파일', icon: FilePlus, keywords: ['new', 'file', 'create', '만들기', '파일'], run: () => void newFile() },
+      { id: 'new-folder', title: '새 폴더', icon: FolderPlus, keywords: ['new', 'folder', 'create', '만들기', '폴더'], run: () => void newFolder() },
+      { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
+      { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
+      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
+      { id: 'export-md', title: '문서를 Markdown으로 내보내기', icon: FileText, disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
+      { id: 'history', title: '버전 기록 열기', icon: Clock, disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
+      { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
+      { id: 'view-doc', title: '보기: 문서', group: 'view', icon: PanelLeft, run: () => setView('doc'), keywords: ['view', '보기'] },
+      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, run: () => setView('both'), keywords: ['view', '보기'] },
+      { id: 'view-canvas', title: '보기: 캔버스', group: 'view', icon: PanelRight, run: () => setView('canvas'), keywords: ['view', '보기'] },
+      { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', group: 'view', icon: theme === 'dark' ? Sun : Moon, run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
+      canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구'], MousePointer2),
+      canvasCmd('tool-rect', '도구: 사각형', 'R', { key: 'r' }, ['tool', 'rectangle', '도구'], Square),
+      canvasCmd('tool-diamond', '도구: 마름모', 'D', { key: 'd' }, ['tool', 'diamond', '도구'], Diamond),
+      canvasCmd('tool-ellipse', '도구: 원', 'O', { key: 'o' }, ['tool', 'ellipse', 'circle', '도구'], Circle),
+      canvasCmd('tool-arrow', '도구: 화살표', 'A', { key: 'a' }, ['tool', 'arrow', '도구'], ArrowUpRight),
+      canvasCmd('tool-line', '도구: 선', 'L', { key: 'l' }, ['tool', 'line', '도구'], Minus),
+      canvasCmd('tool-draw', '도구: 그리기', 'P', { key: 'p' }, ['tool', 'draw', 'pencil', '도구'], Pencil),
+      canvasCmd('tool-text', '도구: 글자', 'T', { key: 't' }, ['tool', 'text', '도구'], Type),
+      canvasCmd('tool-eraser', '도구: 지우개', 'E', { key: 'e' }, ['tool', 'eraser', '도구'], Eraser),
+      canvasCmd('tool-hand', '도구: 손(화면 이동)', 'H', { key: 'h' }, ['tool', 'hand', 'pan', '도구'], Hand),
+      canvasCmd('zoom-in', '확대', `${M}+`, { key: '=', code: 'Equal', ctrl: true }, ['zoom', '줌'], ZoomIn),
+      canvasCmd('zoom-out', '축소', `${M}-`, { key: '-', code: 'Minus', ctrl: true }, ['zoom', '줌'], ZoomOut),
+      canvasCmd('zoom-reset', '화면 크기 100%', `${M}0`, { key: '0', code: 'Digit0', ctrl: true }, ['zoom', '줌'], Scan),
+      canvasCmd('zoom-fit', '모두 보이게 맞추기', 'Shift+1', { key: '!', code: 'Digit1', shift: true }, ['zoom', 'fit', '줌'], Maximize),
+      canvasCmd('undo', '실행 취소', `${M}Z`, { key: 'z', ctrl: true }, ['undo', '되돌리기'], Undo2),
+      canvasCmd('redo', '다시 실행', `${M}Shift+Z`, { key: 'z', ctrl: true, shift: true }, ['redo'], Redo2),
+      canvasCmd('duplicate', '복제', `${M}D`, { key: 'd', ctrl: true }, ['duplicate', 'copy'], CopyPlus),
+      canvasCmd('delete', '삭제', 'Delete', { key: 'Delete' }, ['delete', 'remove'], Delete),
+      canvasCmd('select-all', '전체 선택', `${M}A`, { key: 'a', ctrl: true }, ['select', 'all'], SquareDashedMousePointer),
       layoutEditCmd(),
       layoutResetCmd(),
       freeformCmd(),
     ];
   };
+  const fileCommands = (): Command[] =>
+    filesOf(tree).map((f) => ({
+      id: `file:${f.path}`,
+      title: displayName(f),
+      group: 'file',
+      icon: File,
+      hint: f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/') + 1) : undefined,
+      keywords: [f.name, f.path],
+      disabled: f.path === path,
+      searchOnly: true,
+      run: () => void open(f.path),
+    }));
+  const [registry] = useState(() => new CommandRegistry());
+  useCommandSource(registry, 'app', commands);
+  useCommandSource(registry, 'files', fileCommands);
 
   const dark = theme === 'dark';
   const doc = hasFile && path && (
@@ -604,83 +638,89 @@ export function App() {
   );
 
   return (
-    <div className="flex h-full">
-      {!narrow
-        ? sidebar
-        : navOpen && (
-            <div className="fixed inset-0 z-20 flex">
-              {sidebar}
-              <button type="button" aria-label="파일 목록 닫기" className="flex-1" style={{ background: 'rgb(0 0 0 / 0.3)' }} onClick={() => setNavOpen(false)} />
+    <CommandRegistryContext.Provider value={registry}>
+      <div className="flex h-full">
+        {!narrow
+          ? sidebar
+          : navOpen && (
+              <div className="fixed inset-0 z-20 flex">
+                {sidebar}
+                <button type="button" aria-label="파일 목록 닫기" className="flex-1" style={{ background: 'rgb(0 0 0 / 0.3)' }} onClick={() => setNavOpen(false)} />
+              </div>
+            )}
+        <div className="flex min-w-0 flex-1 flex-col">
+          <TopBar
+            title={title}
+            hasFile={hasFile}
+            status={status}
+            statusAlert={statusAlert}
+            view={view}
+            onView={setView}
+            onTitle={(title) => edit({ title })}
+            onHistory={() => setHistoryOpen(true)}
+          onCommands={() => {
+            setExportOpen(false);
+            setPaletteOpen(true);
+          }}
+            onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
+            exportMenu={
+              <ExportMenu
+                open={exportOpen}
+                onOpen={openExport}
+                disabled={!hasFile}
+                canvasReady={showCanvas}
+                selected={exportSelected}
+                options={exportOptions}
+                onOptions={setExportOptions}
+                onImage={imageExport}
+                onMarkdown={markdownExport}
+                pdfScope={pdfScope}
+                onPdf={pdfExport}
+              />
+            }
+          />
+          {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
+          {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
+          {conflict && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+              <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
+              <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
+                다시 불러오기
+              </button>
+              <button
+                type="button"
+                disabled={conflict.revision === undefined}
+                className="h-7 rounded-md px-3 font-medium text-brand-foreground disabled:opacity-50"
+                style={{ background: 'var(--brand)' }}
+                onClick={overwrite}
+              >
+                내 것으로 덮어쓰기
+              </button>
             </div>
           )}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <TopBar
-          title={title}
-          hasFile={hasFile}
-          status={status}
-          statusAlert={statusAlert}
-          view={view}
-          onView={setView}
-          onTitle={(title) => edit({ title })}
-          onHistory={() => setHistoryOpen(true)}
-          onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
-          exportMenu={
-            <ExportMenu
-              open={exportOpen}
-              onOpen={openExport}
-              disabled={!hasFile}
-              canvasReady={showCanvas}
-              selected={exportSelected}
-              options={exportOptions}
-              onOptions={setExportOptions}
-              onImage={imageExport}
-              onMarkdown={markdownExport}
-              pdfScope={pdfScope}
-              onPdf={pdfExport}
-            />
-          }
-        />
-        {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
-        {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-        {paletteOpen && <CommandPalette commands={commands()} onClose={() => setPaletteOpen(false)} />}
-        {conflict && (
-          <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
-            <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
-            <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
-              다시 불러오기
-            </button>
-            <button
-              type="button"
-              disabled={conflict.revision === undefined}
-              className="h-7 rounded-md px-3 font-medium text-white disabled:opacity-50"
-              style={{ background: 'var(--brand)' }}
-              onClick={overwrite}
-            >
-              내 것으로 덮어쓰기
-            </button>
-          </div>
-        )}
-        {error && (
-          <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
-            <span>{error}</span>
-            <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
-              닫기
-            </button>
-          </div>
-        )}
-        {!hasFile ? (
-          <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-            <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
-          </main>
-        ) : view === 'both' ? (
-          <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
-        ) : (
-          <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-            {showDoc && doc}
-            {showCanvas && canvas}
-          </div>
-        )}
+          {error && (
+            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+              <span>{error}</span>
+              <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
+                닫기
+              </button>
+            </div>
+          )}
+          {!hasFile ? (
+            <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-muted)' }}>
+              <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
+            </main>
+          ) : view === 'both' ? (
+            <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+              {showDoc && doc}
+              {showCanvas && canvas}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </CommandRegistryContext.Provider>
   );
 }

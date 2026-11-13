@@ -5,9 +5,8 @@
 // limits shared with other servers). Transcripts stay in memory. Off when the workspace is not in a
 // git project, or another server already uses the project's .dispatch/ (project.js, E13): the
 // drawing tool works on its own and GET /api/dispatch says why.
-import { execFile } from "node:child_process";
 import path from "node:path";
-import { promisify } from "node:util";
+import { runCli } from "./cli.js";
 import { cancelLogin, login, logout, providerStatus, publicStatus } from "./auth.js";
 import { Burn } from "./burn.js";
 import { Store } from "./dispatch-store.js";
@@ -20,8 +19,6 @@ import { PERMS, ROLES } from "./roles.js";
 import { adapt, routeTable } from "./routes.js";
 import { effectiveRoles, teamSettings } from "./settings.js";
 
-const run = promisify(execFile);
-
 /** Hub events forwarded to the shared SSE stream; none collides with Drawing's `workspace`. */
 export const HUB_EVENTS = ["session", "message", "limits", "removed", "tasks", "tickets"];
 const THEMES = ["system", "light", "dark", "monitor"];
@@ -32,7 +29,7 @@ const ownGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([
 
 /** The git top level that holds dir, or null when dir is not in a git work tree. */
 export async function gitTop(dir) {
-  try { return (await run("git", ["-C", dir, "rev-parse", "--show-toplevel"], { env: ownGitEnv() })).stdout.trim() || null; } catch { return null; }
+  try { return (await runCli("git", ["-C", dir, "rev-parse", "--show-toplevel"], { env: ownGitEnv() })).stdout.trim() || null; } catch { return null; }
 }
 
 /** Every provider "not checked yet": what the UI shows before a provider is connected. */
@@ -40,7 +37,8 @@ const UNCHECKED = Object.fromEntries(["gemini", "claude", "openai"].map(id => [i
 
 /**
  * Starts Dispatch for the project at `root`. `deps` replaces the parts that start CLIs or touch the
- * home folder, so tests run with fakes: { providerStatus, codexModels, limitsFile, login, logout, cancelLogin }.
+ * home folder, so tests run with fakes: { providerStatus, codexModels, limitsFile, login, logout, cancelLogin,
+ * spawnCli } (spawnCli as in ./cli.js: the session runners start every agent CLI through it).
  */
 export async function createDispatch({ root, broadcast, port, deps = {} }) {
   const dep = { providerStatus, codexModels, login, logout, cancelLogin, ...deps };
@@ -51,7 +49,7 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
   const limits = new SharedLimits(...(dep.limitsFile ? [dep.limitsFile] : []));
   await limits.load({ claude: store.data.limits, gemini: store.data.geminiQuota }).catch(e => console.error("dispatch limits:", e.code ?? e.name));
   if ("limits" in store.data || "geminiQuota" in store.data) { delete store.data.limits; delete store.data.geminiQuota; store.save(); }
-  const hub = new Hub({ root, store, models, roles: ROLES, port, limits });
+  const hub = new Hub({ root, store, models, roles: ROLES, port, limits, spawnCli: dep.spawnCli });
 
   // A provider counts as connected only after the user connects it here, even if its CLI is already
   // logged in on this machine (`cliLoggedIn` keeps the CLI's own state). Until one is connected no
@@ -151,8 +149,8 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
   };
 }
 
-/** Drawing module entry (server/modules.js). `deps` is for tests. */
-export async function setup(ctx, deps) {
+/** Drawing module entry (server/modules.js). `deps` is for tests; ctx.spawnCli replaces the CLI seam. */
+export async function setup(ctx, deps = {}) {
   let status = { enabled: false, reason: "no-workspace" };
   const statusRoute = { method: "GET", path: "/api/dispatch", handler: (req, res) => sendStatus(res, status) };
   const off = (reason, port = null) => {
@@ -167,7 +165,7 @@ export async function setup(ctx, deps) {
   if (!claim.ok) return off(claim.reason, claim.port);
   let d;
   try {
-    d = await createDispatch({ root: found.root, broadcast: ctx.hub.broadcast, port: () => ctx.port, deps });
+    d = await createDispatch({ root: found.root, broadcast: ctx.hub.broadcast, port: () => ctx.port, deps: { ...(ctx.spawnCli && { spawnCli: ctx.spawnCli }), ...deps } });
   } catch (e) {
     await claim.lock.release();
     throw e;

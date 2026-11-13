@@ -88,7 +88,8 @@ test('compose: a moved node is centred on its override and its group refits arou
   assert.equal(vpc.moved, true);
   for (const id of ['API', 'Worker', 'DB']) {
     const h = handle(scene, id);
-    assert.ok(h.x >= vpc.x + 19.9 && h.y > vpc.y && h.x + h.w <= vpc.x + vpc.w - 19.9 && h.y + h.h <= vpc.y + vpc.h - 19.9, `${id} inside VPC with padding`);
+    // Group padding: 16 left and right, 14 at the bottom.
+    assert.ok(h.x >= vpc.x + 15.9 && h.y > vpc.y && h.x + h.w <= vpc.x + vpc.w - 15.9 && h.y + h.h <= vpc.y + vpc.h - 13.9, `${id} inside VPC with padding`);
   }
   // Untouched elements keep their place relative to the layout origin.
   const api = handle(scene, 'API');

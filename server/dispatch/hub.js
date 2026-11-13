@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnCli } from "./cli.js";
+import { redact } from "./redact.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
 import { CHILD_PROMPT, NAMES, PERMS, SPAWN_PROMPT } from "./roles.js";
@@ -91,8 +92,10 @@ export function activityOf(name = "", text = "") {
 }
 
 export class Hub extends EventEmitter {
-  constructor({ root, store, models, roles, port, limits }) {
+  constructor({ root, store, models, roles, port, limits, spawnCli: spawner = spawnCli }) {
     super();
+    // Every agent CLI starts through this (server/dispatch/cli.js); tests pass a fake.
+    this.spawnCli = spawner;
     this.root = root;
     this.store = store;
     this.models = models;
@@ -172,6 +175,8 @@ export class Hub extends EventEmitter {
       patch.asksUser = patch.status === "idle" && asksUser(this.live.get(s.id)?.lastText);
     }
     const prev = s.status;
+    // Error and reply clips reach the UI and memory only after key- and email-shaped parts are masked.
+    for (const k of ["error", "last"]) if (typeof patch[k] === "string") patch[k] = redact(patch[k]);
     Object.assign(s, patch, { updatedAt: Date.now() });
     // A removed session's process exits a moment after remove(); its late "done" must not reach the
     // UI, which would add the session back until the page is reloaded.
@@ -189,6 +194,8 @@ export class Hub extends EventEmitter {
 
   push(s, entry) {
     const r = this.rt(s.id);
+    // Everything in the ring buffer (and so everything the UI and the lead get) is masked first.
+    if (typeof entry.text === "string") entry.text = redact(entry.text);
     entry.at = Date.now();
     r.lastEventAt = entry.at;
     if (s.stuck?.reason === "silent") this.refreshStuck(s, entry.at);
@@ -292,7 +299,8 @@ export class Hub extends EventEmitter {
       ] },
       // Shown on its own once a Fable turn has reported it; null until then.
       fable: c.fable == null ? null : { windows: [{ label: "Fable 주간", used: c.fable, reset: c.fableReset }] },
-      openai: await codexLimits(),
+      // ~/.codex/sessions is read only once the user has connected OpenAI in Dispatch.
+      openai: this.isConnected("openai") ? await codexLimits() : null,
       gemini: { reached: geminiReached, reset: geminiReached ? g.reset ?? null : null },
     };
   }
@@ -319,7 +327,7 @@ export class Hub extends EventEmitter {
   async setTask(lead, input) {
     const STAGES = ["plan", "impl", "review", "test", "merge", "done", "blocked"];
     const all = (this.store.data.tasks ||= {});
-    const title = String(input.title || "").trim().slice(0, 120);
+    const title = redact(String(input.title || "").trim()).slice(0, 120);
     let t = (input.id && all[input.id]) || Object.values(all).find(x => x.lead === lead && x.title === title && x.stage !== "done");
     if (!t) {
       if (!title) throw new Error("title이 필요해요");
@@ -351,7 +359,7 @@ export class Hub extends EventEmitter {
       t.etaSetAt = t.etaAt ? Date.now() : null;
     }
     if (t.stage === "done") t.etaAt = null;
-    if (input.note !== undefined) t.note = String(input.note || "").slice(0, 200);
+    if (input.note !== undefined) t.note = redact(String(input.note || "")).slice(0, 200);
     t.updatedAt = Date.now();
     t.stuck = this.taskStuckOf(t);
     this.store.save();
@@ -874,7 +882,9 @@ export class Hub extends EventEmitter {
     const where = s.canSpawn && s.worktree
       ? `\n\n[병합 위치] 너의 작업 폴더는 ${s.cwd} (브랜치 ${s.branch})이고 통합 브랜치가 아니다. 병합은 프로젝트 폴더 ${this.root}에서 한다: git -C ${this.root} merge --no-ff <브랜치> (또는 --ff-only). 병합 뒤 git -C ${this.root} log --oneline -1 로 통합 브랜치 HEAD를 확인하고 보고에 적는다.`
       : "";
-    return [s.prompt, (s.canSpawn ? SPAWN_PROMPT : CHILD_PROMPT) + where, this.team().replyStyle ? replyStyle() : ""].filter(Boolean).join("\n\n");
+    // The role prompt is not saved (state.json keeps metadata only): after a restart it comes from the role.
+    const prompt = s.prompt ?? effectiveRoles(this.roles, this.store).find(r => r.id === s.role)?.prompt;
+    return [prompt, (s.canSpawn ? SPAWN_PROMPT : CHILD_PROMPT) + where, this.team().replyStyle ? replyStyle() : ""].filter(Boolean).join("\n\n");
   }
 
   start(s, prompt) {
@@ -892,9 +902,15 @@ export class Hub extends EventEmitter {
       this.touch(s, { status: "error", error: e.message });
       return;
     }
-    if (s.provider === "claude") this.startClaude(s, prompt);
-    else if (s.provider === "gemini") this.startGemini(s, prompt);
-    else this.startCodex(s, prompt);
+    try {
+      if (s.provider === "claude") this.startClaude(s, prompt);
+      else if (s.provider === "gemini") this.startGemini(s, prompt);
+      else this.startCodex(s, prompt);
+    } catch (e) {
+      // spawnCli refused (not an allowed CLI, or a real CLI under npm test): nothing started.
+      this.push(s, { kind: "error", text: e.message });
+      this.touch(s, { status: "error", error: e.message });
+    }
   }
 
   attach(s, proc) {
@@ -932,7 +948,7 @@ export class Hub extends EventEmitter {
       command: process.execPath, args: [MCP_SCRIPT], env: this.mcpEnv(s) } } }),
       "--allowedTools", "mcp__dispatch");
     // DISPATCH_URL / DISPATCH_SESSION let the plugin's length hook (hooks/long-session.mjs) find this session.
-    const proc = spawn("claude", args, { cwd: s.cwd, env: { ...sessionEnv(), DISPATCH_URL: `http://127.0.0.1:${this.port}`, DISPATCH_SESSION: s.id }, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = this.spawnCli("claude", args, { cwd: s.cwd, env: { ...sessionEnv(), DISPATCH_URL: `http://127.0.0.1:${this.port}`, DISPATCH_SESSION: s.id }, stdio: ["pipe", "pipe", "pipe"] });
     s._costBase = s.cost;
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onClaude(s, m));
@@ -960,7 +976,7 @@ export class Hub extends EventEmitter {
           this.checkCtx(s); this.checkLong(s);
         }
         for (const c of msg.content || []) {
-          if (c.type === "text" && c.text.trim()) { this.push(s, { kind: "assistant", text: c.text }); s.last = clip(c.text, 400); r.lastText = c.text; }
+          if (c.type === "text" && c.text.trim()) { this.push(s, { kind: "assistant", text: c.text }); s.last = redact(clip(c.text, 400)); r.lastText = c.text; }
           else if (c.type === "tool_use") {
             this.push(s, { kind: "tool", name: c.name, text: clip(JSON.stringify(c.input), 600) });
             const key = c.name === "Bash" && checkKey(c.input?.command);
@@ -1036,7 +1052,7 @@ export class Hub extends EventEmitter {
     // Codex has no system-prompt flag in exec mode, so the role prompt leads the first turn.
     const system = this.systemPrompt(s);
     args.push(first && system ? `[역할]\n${system}\n\n[작업]\n${prompt}` : prompt);
-    const proc = spawn("codex", args, { cwd: s.cwd, env: sessionEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    const proc = this.spawnCli("codex", args, { cwd: s.cwd, env: sessionEnv(), stdio: ["ignore", "pipe", "pipe"] });
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onCodex(s, m));
     this.touch(s, { status: "running", error: null });
@@ -1049,7 +1065,7 @@ export class Hub extends EventEmitter {
         break;
       case "item.completed": {
         const it = m.item || {};
-        if (it.type === "agent_message") { this.push(s, { kind: "assistant", text: it.text }); s.last = clip(it.text, 400); this.rt(s.id).lastText = it.text; }
+        if (it.type === "agent_message") { this.push(s, { kind: "assistant", text: it.text }); s.last = redact(clip(it.text, 400)); this.rt(s.id).lastText = it.text; }
         else if (it.type === "command_execution") {
           this.push(s, { kind: "tool", name: "shell", text: clip(it.command, 600) });
           if (it.aggregated_output) this.push(s, { kind: "tool_result", text: clip(it.aggregated_output, 1500), error: it.exit_code !== 0 });
@@ -1100,8 +1116,9 @@ export class Hub extends EventEmitter {
     if (s.effort) args.push("--effort", s.effort);
     if (s.providerSessionId) args.push("--conversation", s.providerSessionId);
 
-    const env = { ...process.env, ...this.mcpEnv(s) };
-    const proc = spawn("agy", args, { cwd: s.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    // Same environment as Claude/Codex (headless Playwright), plus the MCP variables.
+    const env = { ...sessionEnv(), ...this.mcpEnv(s) };
+    const proc = this.spawnCli("agy", args, { cwd: s.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onGemini(s, m));
     this.touch(s, { status: "running", error: null });
@@ -1117,7 +1134,7 @@ export class Hub extends EventEmitter {
         if (su.step_type === "agent_response") {
           if (su.text_delta && su.text_delta.trim()) {
             this.push(s, { kind: "assistant", text: su.text_delta });
-            s.last = clip(su.text_delta, 400);
+            s.last = redact(clip(su.text_delta, 400));
             this.rt(s.id).lastText = su.text_delta;
           }
           if (su.usage) {
@@ -1142,7 +1159,7 @@ export class Hub extends EventEmitter {
       case "result": {
         const res = m.result || {};
         if (res.response && res.response.trim()) {
-          s.last = clip(res.response, 400);
+          s.last = redact(clip(res.response, 400));
           this.rt(s.id).lastText = res.response;
         }
         if (res.status === "ERROR") {

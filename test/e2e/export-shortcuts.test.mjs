@@ -42,7 +42,7 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
   const call = async (m, u, b) => {
-    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) });
+    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
     return r.json();
   };
   let f = await call('POST', '/api/file', { path: 'e7', title: 'E7 내보내기' });
@@ -177,6 +177,7 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     const menu = page.getByRole('menu', { name: '내보내기' });
     await menu.waitFor();
     assert.match(await menu.innerText(), /캔버스 전체/);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-export')), 'svg', 'Ctrl+E focuses the first export action, not an option pill');
     const svg = await downloadVia('svg');
     assert.equal(svg.name, 'E7 내보내기.svg');
     const text = svg.data.toString('utf8');

@@ -35,7 +35,11 @@ async function call<T>(method: string, url: string, body?: unknown, keepalive = 
   const res = await fetch(url, {
     method,
     keepalive,
-    headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+    // Every non-GET /api request needs x-drawing: 1 (server/app.js); a cross-site page can't send it.
+    headers: {
+      ...(method === 'GET' ? {} : { 'x-drawing': '1' }),
+      ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));

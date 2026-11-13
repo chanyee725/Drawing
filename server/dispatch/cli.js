@@ -1,0 +1,52 @@
+// The one place that starts child processes (CLAUDE.md): the user's agent CLIs (claude, codex,
+// agy), git and gh. Never through a shell. Everything else in the server imports spawnCli/runCli
+// from here; test/dispatch/safety.test.js fails when child_process shows up anywhere else.
+//
+// Under `node --test` an agent CLI only starts from a fake bin folder (one holding FAKE_MARKER, see
+// test/fixtures/fake-cli/), so npm test can never start a real claude, codex or agy even when one
+// is on PATH.
+import { execFile, spawn } from "node:child_process";
+import { accessSync, constants, existsSync } from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
+
+export const AGENT_CLIS = ["claude", "codex", "agy"];
+export const ALLOWED = [...AGENT_CLIS, "git", "gh"];
+export const FAKE_MARKER = ".drawing-fake-cli";
+
+const execFileP = promisify(execFile);
+
+/** Where `bin` resolves on `PATH` (first executable hit), or null. */
+export function which(bin, pathVar = process.env.PATH ?? "") {
+  for (const dir of pathVar.split(path.delimiter)) {
+    if (!dir) continue;
+    const p = path.join(dir, bin);
+    try { accessSync(p, constants.X_OK); return p; } catch { /* next */ }
+  }
+  return null;
+}
+
+const underTest = env => !!(env.NODE_TEST_CONTEXT || process.env.NODE_TEST_CONTEXT);
+
+function check(bin, opts = {}) {
+  if (!ALLOWED.includes(bin)) throw Object.assign(new Error(`not an allowed CLI: ${bin}`), { code: "ECLIDENIED" });
+  if (opts.shell) throw Object.assign(new Error("shell is not allowed"), { code: "ECLIDENIED" });
+  const env = opts.env ?? process.env;
+  if (AGENT_CLIS.includes(bin) && underTest(env)) {
+    const hit = which(bin, env.PATH ?? process.env.PATH ?? "");
+    if (!hit || !existsSync(path.join(path.dirname(hit), FAKE_MARKER))) {
+      throw Object.assign(new Error(`a real ${bin} must not start under npm test`), { code: "ECLIDENIED" });
+    }
+  }
+  return { ...opts, shell: false };
+}
+
+/** Starts an allowed CLI; same return value as child_process.spawn. Throws on a bin outside ALLOWED. */
+export function spawnCli(bin, args = [], opts = {}) {
+  return spawn(bin, args, check(bin, opts));
+}
+
+/** Runs an allowed CLI to the end: resolves { stdout, stderr }, rejects like execFile. */
+export function runCli(bin, args = [], opts = {}) {
+  try { return execFileP(bin, args, check(bin, opts)); } catch (e) { return Promise.reject(e); }
+}

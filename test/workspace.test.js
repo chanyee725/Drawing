@@ -18,7 +18,7 @@ async function withApp(fn) {
   const call = async (method, path, body) => {
     const res = await fetch(base + path, {
       method,
-      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      headers: { 'x-drawing': '1', ...(body === undefined ? {} : { 'content-type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     return { status: res.status, body: await res.json() };
@@ -172,11 +172,30 @@ test('path traversal, absolute paths, hidden names and symlink escapes are refus
   });
 });
 
+test('every non-GET /api request needs x-drawing: 1 (x-dispatch: 1 accepted)', async () => {
+  await withApp(async ({ base, ws }) => {
+    const json = { 'content-type': 'application/json' };
+    for (const [method, path, headers] of [
+      ['POST', '/api/folder', json],
+      ['POST', '/api/folder', { ...json, 'x-drawing': '0' }],
+      ['PUT', '/api/file?path=a.dpx.json', json],
+      ['DELETE', '/api/folder?path=x', {}],
+      ['POST', '/api/nope', json],
+    ]) {
+      const res = await fetch(base + path, { method, headers, body: method === 'DELETE' ? undefined : '{"path":"x"}' });
+      assert.equal(res.status, 403, `${method} ${path} ${JSON.stringify(headers)}`);
+    }
+    assert.deepEqual(await readdir(ws), []);
+    assert.equal((await fetch(`${base}/api/folder`, { method: 'POST', headers: { ...json, 'x-dispatch': '1' }, body: '{"path":"x"}' })).status, 201);
+    assert.equal((await fetch(`${base}/api/info`)).status, 200);
+  });
+});
+
 test('API hardening: JSON content-type required, bad JSON rejected, no path leak in errors', async () => {
   await withApp(async ({ base, ws }) => {
-    let res = await fetch(`${base}/api/folder`, { method: 'POST', body: '{"path":"x"}' });
+    let res = await fetch(`${base}/api/folder`, { method: 'POST', headers: { 'x-drawing': '1' }, body: '{"path":"x"}' });
     assert.equal(res.status, 415);
-    res = await fetch(`${base}/api/folder`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nope' });
+    res = await fetch(`${base}/api/folder`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: '{nope' });
     assert.equal(res.status, 400);
     assert.deepEqual(await readdir(ws), []);
     res = await fetch(`${base}/api/file?path=nope`);

@@ -2,6 +2,9 @@ import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
 import { IS_MAC } from './platform';
 import { SCALES, describeExport, type ExportOptions } from './export/options';
+import { Button } from './components/ui/button';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { Kbd } from './components/ui/kbd';
 
 type Props = {
   open: boolean;
@@ -20,26 +23,27 @@ type Props = {
   disabled?: boolean;
 };
 
+/** A pill that sets an option and keeps the menu open. */
+const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[pressed=true]:border-brand data-[pressed=true]:bg-brand-soft data-[pressed=true]:font-semibold data-[pressed=true]:text-brand';
+const keep = (fn: () => void) => (e: Event) => {
+  e.preventDefault();
+  fn();
+};
+
 export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled }: Props) {
-  const box = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // The option pills come first in the DOM, so Radix's keyboard entry focus lands on "1배" and
+  // Ctrl+E → Enter would change the PNG size. Move focus to the first export action once open.
   useEffect(() => {
     if (!open) return;
-    box.current?.querySelector<HTMLElement>('[role=menuitem]:not(:disabled)')?.focus();
-    const away = (e: MouseEvent) => !box.current?.contains(e.target as Node) && onOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === 'Escape' && onOpen(false);
-    document.addEventListener('mousedown', away);
-    document.addEventListener('keydown', esc);
-    return () => {
-      document.removeEventListener('mousedown', away);
-      document.removeEventListener('keydown', esc);
-    };
-  }, [open, onOpen]);
-
+    const id = requestAnimationFrame(() => contentRef.current?.querySelector<HTMLElement>('[data-export]:not([data-disabled])')?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [open]);
   const scope = selected ? '선택한 것' : '캔버스 전체';
-  const items: { label: string; hint: string; off: boolean; run: () => void; id: string }[] = [
+  const items: { label: string; hint: string; kbd?: string; off: boolean; run: () => void; id: string }[] = [
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
     { id: 'png', label: 'PNG로 내보내기', hint: `${scope} · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('png') },
-    { id: 'copy', label: '이미지로 복사', hint: `Shift+Alt+C · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('copy') },
+    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: 'Shift+Alt+C', off: !canvasReady, run: () => onImage('copy') },
     {
       id: 'pdf',
       label: 'PDF로 저장(인쇄)',
@@ -50,66 +54,48 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
     { id: 'md', label: '문서를 Markdown으로', hint: '다이어그램은 코드 블록', off: false, run: onMarkdown },
   ];
   return (
-    <div ref={box} className="relative hidden shrink-0 md:block">
-      <button
-        type="button"
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`}
-        onClick={() => onOpen(!open)}
-        className="h-8 whitespace-nowrap rounded-md border px-3 text-sm disabled:opacity-50"
-        style={{ borderColor: 'var(--border)' }}
-      >
-        내보내기
-      </button>
-      {open && (
-        <div role="menu" aria-label="내보내기" className="absolute right-0 top-9 z-30 w-64 rounded-lg border p-1 shadow-lg" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-          <fieldset data-export-options className="m-1 flex flex-col gap-1.5 border-b pb-2 text-sm" style={{ borderColor: 'var(--border)' }}>
+    <div className="hidden shrink-0 md:block">
+      <DropdownMenu open={open} onOpenChange={onOpen} modal={false}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" disabled={disabled} title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`} className="whitespace-nowrap">
+            내보내기
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
+          <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
             <legend className="sr-only">이미지 옵션</legend>
             <div className="flex items-center gap-1" role="group" aria-label="PNG 크기">
-              <span className="mr-auto px-1 text-xs" style={{ color: 'var(--text-muted)' }}>PNG 크기</span>
+              <span className="mr-auto px-1 text-xs text-muted-foreground">PNG 크기</span>
               {SCALES.map((s) => (
-                <button key={s} type="button" data-export-scale={s} aria-pressed={options.scale === s} onClick={() => onOptions({ ...options, scale: s })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.scale === s ? 'var(--brand)' : 'var(--border)' }}>
+                <DropdownMenuItem key={s} data-export-scale={s} data-pressed={options.scale === s} aria-pressed={options.scale === s} className={pill} onSelect={keep(() => onOptions({ ...options, scale: s }))}>
                   {s}배
-                </button>
+                </DropdownMenuItem>
               ))}
             </div>
             <div className="flex items-center gap-1" role="group" aria-label="색상">
-              <span className="mr-auto px-1 text-xs" style={{ color: 'var(--text-muted)' }}>색상</span>
+              <span className="mr-auto px-1 text-xs text-muted-foreground">색상</span>
               {([false, true] as const).map((d) => (
-                <button key={String(d)} type="button" data-export-dark={String(d)} aria-pressed={options.dark === d} onClick={() => onOptions({ ...options, dark: d })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.dark === d ? 'var(--brand)' : 'var(--border)' }}>
+                <DropdownMenuItem key={String(d)} data-export-dark={String(d)} data-pressed={options.dark === d} aria-pressed={options.dark === d} className={pill} onSelect={keep(() => onOptions({ ...options, dark: d }))}>
                   {d ? '다크' : '라이트'}
-                </button>
+                </DropdownMenuItem>
               ))}
             </div>
-            <label className="flex items-center gap-2 px-1 text-xs">
-              <input type="checkbox" data-export-transparent checked={options.transparent} onChange={(e) => onOptions({ ...options, transparent: e.target.checked })} />
+            <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-xs" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
               배경을 투명하게
-            </label>
+            </DropdownMenuCheckboxItem>
           </fieldset>
+          <DropdownMenuSeparator />
           {items.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              role="menuitem"
-              data-export={it.id}
-              disabled={it.off}
-              title={it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : undefined}
-              onClick={() => {
-                onOpen(false);
-                it.run();
-              }}
-              className="flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm disabled:opacity-50"
-            >
-              <span>{it.label}</span>
-              <span className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                {it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}
-              </span>
-            </button>
+            <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} title={it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : undefined} onSelect={() => it.run()} className="items-start">
+              <div className="flex min-w-0 flex-1 flex-col">
+                <span>{it.label}</span>
+                <span className="text-xs text-muted-foreground">{it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}</span>
+              </div>
+              {it.kbd && <Kbd className="mt-0.5 shrink-0">{it.kbd}</Kbd>}
+            </DropdownMenuItem>
           ))}
-        </div>
-      )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }
