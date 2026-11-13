@@ -1,7 +1,7 @@
 // Dispatch screen state: one external store fed by the /api/events stream, read with useDispatch(selector).
 // Transcripts stay in this tab's memory; nothing here writes to storage.
 import { useSyncExternalStore } from 'react';
-import { events } from '../lib/events';
+import { events } from '../lib/events.ts';
 import type { DispatchState, BoardTask, Ticket } from './types';
 import type { Entry, Limits, Provider, ProviderStatus, Session, Settings, Snapshot } from '../../../shared/dispatch/types.ts';
 
