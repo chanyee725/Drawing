@@ -790,6 +790,7 @@ export function App() {
           )}
           {!docScreen ? (
             <Home
+              narrow={narrow}
               project={homeProject}
               version={tree}
               onProject={goProject}

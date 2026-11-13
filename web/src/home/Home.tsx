@@ -1,10 +1,11 @@
 // Dashboard ("모든 파일") and project home: data loading, tabs, quick-create chips. Layout B of
 // docs/design/dispatch-integration/6-app-shell-projects.md §3.1. Built from shadcn Tabs / Button / DropdownMenu.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FilePlus2, FileText, Layers, PenTool, Plus, Search, Workflow } from 'lucide-react';
+import { ArrowLeft, Menu, FilePlus2, FileText, Layers, PenTool, Plus, Search, Workflow } from 'lucide-react';
 import { projectsApi, type ProjectInfo, type ProjectsResponse, type RecentFile } from '../api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
+import { SidebarTrigger } from '../components/ui/sidebar';
 import { Kbd } from '../components/ui/kbd';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { DocList } from './DocList';
@@ -20,6 +21,8 @@ export type HomeProps = {
   onOpen: (path: string) => void;
   onCreate: (kind: CreateKind, project: string | null) => void;
   onDelete: (path: string, title: string) => void;
+  /** Narrow screen: the sidebar is a drawer, so the header carries its button. */
+  narrow?: boolean;
 };
 
 
@@ -144,6 +147,11 @@ function Dashboard({ data, recent, query, onQuery, search, ...p }: Shared & { re
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as DashTab)} className="gap-0">
       <header className="flex min-h-[44px] flex-wrap items-center gap-3 border-b px-4 py-1.5">
+        {p.narrow && (
+          <SidebarTrigger aria-label="메뉴 열기">
+            <Menu className="size-[17px]" />
+          </SidebarTrigger>
+        )}
         <h1 className="m-0 text-[15px] font-semibold">모든 파일</h1>
         <TabsList aria-label="보기">
           <TabsTrigger value="all">전체</TabsTrigger>
@@ -253,6 +261,11 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as PTab)} className="gap-0">
       <header className="flex min-h-[44px] flex-wrap items-center gap-3 border-b px-4 py-1.5">
+        {p.narrow && (
+          <SidebarTrigger aria-label="메뉴 열기">
+            <Menu className="size-[17px]" />
+          </SidebarTrigger>
+        )}
         <Button variant="ghost" size="icon-sm" aria-label="모든 파일로 돌아가기" onClick={() => p.onProject(null)}>
           <ArrowLeft />
         </Button>
