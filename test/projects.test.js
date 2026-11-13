@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { createApp } from '../server/app.js';
 import { modules } from '../server/modules.js';
 import { newFile } from '../server/workspace/model.js';
-import { nestDocs } from '../server/workspace/projects.js';
+import { nestDocs, readProjectMeta } from '../server/workspace/projects.js';
+import { spawnSync } from 'node:child_process';
 
 // Scratch workspace only (never a real project); the dispatch module stays off outside a git repo.
 async function withApp(fn) {
@@ -103,6 +104,19 @@ test('projects: bad, oversized or symlinked .project.json is ignored; hidden and
     const { projects } = (await call('GET', '/api/workspace/projects')).body;
     assert.deepEqual(projects.map((p) => [p.path, p.name]), [['Arr', 'Arr'], ['Bad', 'Bad'], ['Big', 'Big'], ['Link', 'Link']]);
   });
+});
+
+test('readProjectMeta: a FIFO or a folder named .project.json is ignored without hanging', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'drawing-meta-'));
+  try {
+    await mkdir(join(dir, 'Dir', '.project.json'), { recursive: true });
+    assert.deepEqual(await readProjectMeta(join(dir, 'Dir')), {});
+    await mkdir(join(dir, 'Fifo'));
+    const made = spawnSync('mkfifo', [join(dir, 'Fifo', '.project.json')]);
+    if (made.status === 0) assert.deepEqual(await readProjectMeta(join(dir, 'Fifo')), {});
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('projects: long meta values are capped', async () => {
