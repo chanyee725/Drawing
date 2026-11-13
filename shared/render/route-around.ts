@@ -149,7 +149,7 @@ export function routeAround(
       const q = flat ? { x: xs[i + 1]!, y: p.y } : { x: p.x, y: ys[j + 1]! };
       const mx = (p.x + q.x) / 2;
       const my = (p.y + q.y) / 2;
-      memo[c] = free(mx, my) && !(flat && inBand(mx, p.y)) && !alongLine(lines, p, q) ? 1 : 2;
+      memo[c] = free(mx, my) && !(flat && inBand(mx, p.y)) && !(lines.length && alongLine(lines, p, q)) ? 1 : 2;
     }
     return memo[c] === 1;
   };
@@ -184,26 +184,28 @@ export function routeAround(
     }
     return top;
   };
-  // A*: the heap orders by cost so far plus a lower bound on the rest (Manhattan to the nearest goal,
-  // plus the cheapest way into b), so the search heads for b instead of filling the whole grid.
-  const toLeft = new Float64Array(W * ys.length).fill(-1);
-  let goalPoints: { x: number; y: number }[] = [];
-  let entry = 0;
-  const rest = (cell: number): number => {
-    if (toLeft[cell]! < 0) {
+  // A*: the heap orders by cost so far plus a lower bound on the rest, per state and goal: Manhattan
+  // distance, the port's cost, and one bend unless already heading the way the edge must arrive. The search
+  // heads for b instead of filling the grid, and the bend term stops it fanning out over equal detours.
+  const toLeft = new Float64Array(W * ys.length * 4).fill(-1);
+  let goalList: Port[] = [];
+  const rest = (s: number): number => {
+    if (toLeft[s]! < 0) {
+      const cell = s >> 2;
+      const d = s & 3;
       const x = xs[cell % W]!;
       const y = ys[Math.floor(cell / W)]!;
       let m = Infinity;
-      for (const g of goalPoints) m = Math.min(m, Math.abs(x - g.x) + Math.abs(y - g.y));
-      toLeft[cell] = m + entry;
+      for (const g of goalList) m = Math.min(m, Math.abs(x - g.out.x) + Math.abs(y - g.out.y) + g.cost + (d === (g.dir + 2) % 4 ? 0 : BEND));
+      toLeft[s] = m;
     }
-    return toLeft[cell]!;
+    return toLeft[s]!;
   };
   const relax = (s: number, c: number, p: number): void => {
     if (c < cost[s]!) {
       cost[s] = c;
       prev[s] = p;
-      push(c + rest(s >> 2), s);
+      push(c + rest(s), s);
     }
   };
   const goals = new Map<number, (typeof to)[number]>();
@@ -213,8 +215,7 @@ export function routeAround(
     if (i !== undefined && j !== undefined && free(p.out.x, p.out.y) && !alongLine(lines, p.at, p.out)) goals.set(j * W + i, p);
   }
   if (!goals.size) return undefined;
-  goalPoints = [...goals.values()].map((p) => p.out);
-  entry = Math.min(...[...goals.values()].map((p) => p.cost));
+  goalList = [...goals.values()];
   // A start state's predecessor is -1 - (index of its port in `from`).
   from.forEach((p, k) => {
     const i = xi.get(Math.round(p.out.x * 2) / 2);
@@ -226,7 +227,7 @@ export function routeAround(
   while (heap.length) {
     const [f, s] = pop();
     const c = cost[s]!;
-    if (f > c + rest(s >> 2)) continue;
+    if (f > c + rest(s)) continue;
     if (best && f >= best.cost) break;
     const cell = s >> 2;
     const d = (s & 3) as Dir;

@@ -1213,14 +1213,15 @@ const clamp = (v: number, lo: number, hi: number): number => Math.min(hi, Math.m
 /**
  * Orthogonal route for an edge whose ends moved (no obstacle avoidance). Leaves `a` from the side facing
  * `b`: east/west with H-V-H when the centres differ more horizontally, else north/south with V-H-V.
- * `offset` spreads parallel edges apart.
+ * `offset` spreads parallel edges apart. `flip` takes the other pair of sides (the caller checks there is
+ * room between the boxes on that axis).
  */
-function routeElbow(a: Rect, b: Rect, offset: number): Point[] {
+function routeElbow(a: Rect, b: Rect, offset: number, flip = false): Point[] {
   const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
   const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
   const dx = bc.x - ac.x;
   const dy = bc.y - ac.y;
-  if (Math.abs(dx) >= Math.abs(dy)) {
+  if ((Math.abs(dx) >= Math.abs(dy)) !== flip) {
     const s = dx >= 0 ? 1 : -1;
     const p0 = { x: ac.x + (s * a.w) / 2, y: ac.y + clamp(offset, -a.h / 2 + 4, a.h / 2 - 4) };
     const p1 = { x: bc.x - (s * b.w) / 2, y: bc.y + clamp(offset, -b.h / 2 + 4, b.h / 2 - 4) };
@@ -1433,11 +1434,17 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
       else if (isAncestor(e.to, e.from)) points = routeIntoGroup(b, groups.get(e.to)!.header, a, offset).reverse();
       else {
         points = routeElbow(a, b, offset);
-        const pair = [e.from, e.to].sort().join('\u0000');
-        const around = cutsOthers(points, e.from, e.to) ? detour(e.from, e.to, routedPairs.get(pair) ?? []) : undefined;
-        if (around) {
-          points = around;
-          routedPairs.set(pair, [...(routedPairs.get(pair) ?? []), around]);
+        if (cutsOthers(points, e.from, e.to)) {
+          // The other pair of sides first (cheap), when the boxes leave room between them on that axis.
+          const horizontal = Math.abs(b.x + b.w / 2 - a.x - a.w / 2) >= Math.abs(b.y + b.h / 2 - a.y - a.h / 2);
+          const room = horizontal ? b.y >= a.y + a.h + 2 * ROUTE_GAP || a.y >= b.y + b.h + 2 * ROUTE_GAP : b.x >= a.x + a.w + 2 * ROUTE_GAP || a.x >= b.x + b.w + 2 * ROUTE_GAP;
+          const flipped = room ? routeElbow(a, b, offset, true) : undefined;
+          const pair = [e.from, e.to].sort().join('\u0000');
+          const around = flipped && !cutsOthers(flipped, e.from, e.to) ? flipped : detour(e.from, e.to, routedPairs.get(pair) ?? []);
+          if (around) {
+            points = around;
+            routedPairs.set(pair, [...(routedPairs.get(pair) ?? []), around]);
+          }
         }
       }
       if (points.length >= 2 && e.from !== e.to) {

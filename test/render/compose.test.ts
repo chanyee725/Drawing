@@ -144,6 +144,30 @@ test('compose: an elbow edge with a moved end is rerouted orthogonally with at m
   }
 });
 
+test('compose: a dragged elbow edge goes around the nodes its elbow would cut (#255)', async () => {
+  const code = ['A > B > C', 'D', 'A > D'].join('\n');
+  const { d, base } = await setup(code, 'flowchart');
+  const cuts = (r: SceneHandle, p: Point, q: Point): boolean =>
+    Math.max(p.x, q.x) > r.x + 0.5 && Math.min(p.x, q.x) < r.x + r.w - 0.5 && Math.max(p.y, q.y) > r.y + 0.5 && Math.min(p.y, q.y) < r.y + r.h - 0.5;
+  const c = baseCentre(base, 'C');
+  const b = baseCentre(base, 'B');
+  // A dropped right of C on its row (its elbow to B runs through C), below B, and just off C's row.
+  for (const at of [{ x: c.x + 260, y: c.y }, { x: b.x, y: b.y + 220 }, { x: c.x + 260, y: c.y + 8 }]) {
+    const scene = composeGraph(d, base, layoutOf({ A: { cx: at.x, cy: at.y, parent: '' } }));
+    for (const e of edges(scene)) {
+      assert.ok(orthogonal(e.points), `${e.from}>${e.to} orthogonal`);
+      assert.ok(onBorder(e.points[0]!, handle(scene, e.from)), `${e.from}>${e.to} starts on ${e.from}`);
+      assert.ok(onBorder(e.points[e.points.length - 1]!, handle(scene, e.to)), `${e.from}>${e.to} ends on ${e.to}`);
+      for (const h of scene.handles!) {
+        if (h.id === e.from || h.id === e.to) continue;
+        for (let k = 1; k < e.points.length; k++) {
+          assert.ok(!cuts(h, e.points[k - 1]!, e.points[k]!), `A at ${JSON.stringify(at)}: ${e.from}>${e.to} runs through ${h.id}: ${JSON.stringify(e.points)}`);
+        }
+      }
+    }
+  }
+});
+
 test('compose: parallel edges stay apart and group-to-child edges stay inside the group', async () => {
   const code = ['A', 'B', 'A > B: one', 'A > B: two', 'G {', '  N', '}', 'G > N'].join('\n');
   const { d, base } = await setup(code, 'flowchart');
