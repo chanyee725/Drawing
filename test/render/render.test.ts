@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync } from 'node:zlib';
 import { parse } from '../../shared/dsl/index.ts';
 import { renderDiagram, sceneToSvg } from '../../shared/render/index.ts';
 import type { SceneBox, SceneEdge } from '../../shared/render/index.ts';
@@ -226,6 +227,52 @@ test('clean text embeds the bundled Drawing Sans, the 600 face only when used (E
   assert.doesNotMatch(rough.svg, /Drawing Sans';font-weight/);
 });
 
+/** The name records (English, Windows platform) inside a WOFF2 file, by name ID. */
+function woff2Names(bytes: Buffer): Map<number, string> {
+  const numTables = bytes.readUInt16BE(12);
+  let p = 48;
+  const base128 = () => {
+    let v = 0;
+    for (let i = 0; i < 5; i++) {
+      const b = bytes[p++];
+      v = v * 128 + (b & 0x7f);
+      if (!(b & 0x80)) return v;
+    }
+    throw new Error('bad UIntBase128');
+  };
+  const KNOWN = ['cmap', 'head', 'hhea', 'hmtx', 'maxp', 'name', 'OS/2', 'post', 'cvt ', 'fpgm', 'glyf', 'loca', 'prep', 'CFF ', 'VORG', 'EBDT', 'EBLC', 'gasp', 'hdmx', 'kern', 'LTSH', 'PCLT', 'VDMX', 'vhea', 'vmtx', 'BASE', 'GDEF', 'GPOS', 'GSUB', 'EBSC', 'JSTF', 'MATH', 'CBDT', 'CBLC', 'COLR', 'CPAL', 'SVG ', 'sbix', 'acnt', 'avar', 'bdat', 'bloc', 'bsln', 'cvar', 'fdsc', 'feat', 'fmtx', 'fvar', 'gvar', 'hsty', 'just', 'lcar', 'mort', 'morx', 'opbd', 'prop', 'trak', 'Zapf', 'Silf', 'Glat', 'Gloc', 'Feat', 'Sill'];
+  const tables: { tag: string; length: number }[] = [];
+  for (let i = 0; i < numTables; i++) {
+    const flags = bytes[p++];
+    let tag = KNOWN[flags & 0x3f];
+    if ((flags & 0x3f) === 0x3f) {
+      tag = bytes.subarray(p, p + 4).toString('latin1');
+      p += 4;
+    }
+    let length = base128();
+    const version = flags >> 6;
+    if ((tag === 'glyf' || tag === 'loca') ? version === 0 : version !== 0) length = base128();
+    tables.push({ tag, length });
+  }
+  const data = brotliDecompressSync(bytes.subarray(p, p + bytes.readUInt32BE(20)));
+  let at = 0;
+  for (const t of tables) {
+    if (t.tag === 'name') break;
+    at += t.length;
+  }
+  const count = data.readUInt16BE(at + 2);
+  const strings = at + data.readUInt16BE(at + 4);
+  const out = new Map<number, string>();
+  for (let i = 0; i < count; i++) {
+    const r = at + 6 + i * 12;
+    if (data.readUInt16BE(r) !== 3 || data.readUInt16BE(r + 4) !== 0x409) continue;
+    const len = data.readUInt16BE(r + 8);
+    const off = strings + data.readUInt16BE(r + 10);
+    out.set(data.readUInt16BE(r + 6), Buffer.from(data.subarray(off, off + len)).swap16().toString('utf16le'));
+  }
+  return out;
+}
+
 test('the embedded clean font is the bundled OFL subset under its own name', async () => {
   const fonts = await import('../../shared/render/font-clean.ts');
   const dir = new URL('../../shared/render/fonts/', import.meta.url);
@@ -234,12 +281,23 @@ test('the embedded clean font is the bundled OFL subset under its own name', asy
     assert.equal(base64, bytes.toString('base64'));
     assert.equal(bytes.subarray(0, 4).toString('latin1'), 'wOF2');
     assert.ok(bytes.length < 20_000, `${weight} is ${bytes.length} bytes`);
+    // The family the file itself declares, not only the CSS name, must avoid the reserved name; the copyright and
+    // license records stay so an exported SVG carries the notice.
+    const names = woff2Names(bytes);
+    assert.equal(names.get(1), 'Drawing Sans');
+    assert.equal(names.get(6), `DrawingSans-${weight === 400 ? 'Regular' : 'SemiBold'}`);
+    for (const id of [1, 4, 6]) assert.doesNotMatch(names.get(id) ?? '', /Pretendard/, `name ${id}`);
+    assert.match(names.get(0) ?? '', /^Copyright/);
+    assert.match(names.get(13) ?? '', /SIL Open Font License, Version 1\.1/);
+    assert.match(names.get(14) ?? '', /scripts\.sil\.org\/OFL/);
   }
   const license = readFileSync(fileURLToPath(new URL('drawing-sans-OFL.txt', dir)), 'utf8');
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/);
   // "Pretendard" is a reserved font name: the subset must not be offered under it.
   assert.match(license, /Reserved Font Name Pretendard/);
   assert.doesNotMatch(FONT_FAMILY.clean.split(',')[0], /Pretendard/);
+  // The page's Pretendard webfont must not reach an inline diagram SVG, or it differs from the canvas image.
+  for (const family of Object.values(FONT_FAMILY)) assert.doesNotMatch(family, /Pretendard/);
 });
 
 test('the embedded rough font is the bundled OFL file', async () => {
@@ -277,4 +335,86 @@ test('an icon name equal to any glyph name picks that glyph', async () => {
   const { glyphFor } = await import('../../shared/render/index.ts');
   for (const g of ['user', 'queue', 'balancer', 'bucket', 'placeholder', 'search'] as const) assert.equal(glyphFor(g), g);
   assert.equal(glyphFor('  Queue '), 'queue');
+});
+
+test('sequence: message labels sit on their line and cut it; no bold text (E60)', async () => {
+  const { scene } = await renderDiagram(fixture('sequence-login'));
+  const texts = scene.items.filter((it) => it.kind === 'text');
+  assert.ok(texts.every((tx) => tx.weight === 400 || tx.lines.join('') === 'Login'), 'only the diagram title may be bold');
+  const label = texts.find((tx) => tx.lines.join('') === '2. find user');
+  assert.ok(label?.plate, 'message label is a plate label');
+  const line = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'straight' && Math.abs(it.points[0]!.y - (label!.y + label!.lineHeight / 2)) < 0.5);
+  assert.ok(line, 'a message line runs through the label centre');
+  assert.ok(label!.x > Math.min(line!.points[0]!.x, line!.points[1]!.x) && label!.x < Math.max(line!.points[0]!.x, line!.points[1]!.x));
+});
+
+test('erd: table titles, key fields and badges are weight 400 (E60)', async () => {
+  const { scene } = await renderDiagram(fixture('erd-billing'));
+  const texts = scene.items.filter((it) => it.kind === 'text' && it.lines.join('') !== 'Billing');
+  assert.ok(texts.length > 0);
+  assert.ok(texts.every((tx) => tx.kind === 'text' && tx.weight === 400));
+});
+
+test('sequence: solid lifelines with a participant head at both ends (E60)', async () => {
+  const src = fixture('sequence-login');
+  const { scene } = await renderDiagram(src);
+  const { ast } = parse(src);
+  const columns = ast.type === 'sequence' ? ast.columns.length : 0;
+  assert.ok(columns > 0);
+  const heads = scene.items.filter((it): it is SceneBox => it.kind === 'box' && it.role === 'column');
+  assert.equal(heads.length, columns * 2);
+  assert.equal(heads.filter((h) => h.id !== undefined).length, columns, 'only the top head carries the participant id');
+  const lifelines = scene.items.filter((it) => it.kind === 'line' && it.points.length === 2 && it.points[0]!.x === it.points[1]!.x);
+  assert.equal(lifelines.length, columns);
+  for (const l of lifelines) {
+    if (l.kind !== 'line') continue;
+    assert.equal(l.dashed, false);
+    const [a, b] = l.points as [{ x: number; y: number }, { x: number; y: number }];
+    const mine = heads.filter((h) => Math.abs(h.x + h.w / 2 - a.x) < 0.01).sort((p, q) => p.y - q.y);
+    assert.equal(mine.length, 2);
+    assert.ok(Math.abs(mine[0]!.y + mine[0]!.h - a.y) < 0.01, 'the line starts under the top head');
+    assert.ok(Math.abs(mine[1]!.y - b.y) < 0.01, 'the line ends on the bottom head');
+    assert.deepEqual([mine[0]!.w, mine[0]!.h], [mine[1]!.w, mine[1]!.h]);
+  }
+});
+
+test('erd: row rules, mono types, lowercase keys on the right, icon right of the title (E60)', async () => {
+  const { scene, svg } = await renderDiagram(fixture('erd-billing'));
+  const box = (id: string) => scene.items.find((it): it is SceneBox => it.kind === 'box' && it.role === 'entity' && it.id === id)!;
+  const users = box('users');
+  const inside = <T extends { x: number; y: number }>(p: T) => p.x >= users.x && p.x <= users.x + users.w && p.y >= users.y && p.y <= users.y + users.h;
+  const rules = scene.items.filter((it) => it.kind === 'line' && !it.dashed && it.points[0]!.y === it.points[1]!.y && inside(it.points[0]!));
+  assert.equal(rules.length, 2, 'three rows, two rules between them');
+  const texts = scene.items.filter((it) => it.kind === 'text' && inside(it));
+  const find = (s: string) => texts.find((tx) => tx.kind === 'text' && tx.lines.join('') === s);
+  const [name, type, pk, title] = [find('id'), find('string'), find('pk'), find('users')];
+  assert.ok(name?.kind === 'text' && type?.kind === 'text' && pk?.kind === 'text' && title?.kind === 'text');
+  assert.equal(type.font, 'mono');
+  assert.equal(pk.font, 'mono');
+  assert.equal(name.font, 'clean');
+  assert.deepEqual([pk.anchor, pk.on?.color], ['end', 'orange']);
+  assert.ok(name.x < type.x && type.x < pk.x, 'name, then type, then the key at the right end');
+  assert.equal(scene.items.some((it) => it.kind === 'text' && /^(PK|FK)$/.test(it.lines.join(''))), false);
+  const icon = scene.items.find((it) => it.kind === 'icon' && inside(it));
+  assert.ok(icon?.kind === 'icon' && icon.x > title.x && icon.x + icon.size <= users.x + users.w);
+  // Mono text names its stack and is scaled to the measured 0.6em advance; no mono face is embedded.
+  assert.match(svg, /font-family="&#39;JetBrains Mono&#39;[^"]*" style="font-size-adjust:ch-width 0.6"/);
+  assert.doesNotMatch(svg, /@font-face\{font-family:'JetBrains Mono'/);
+});
+
+test('erd: Chen cardinality writes "many" as * (E60)', async () => {
+  const { scene } = await renderDiagram('notation chen\na { id int pk }\nb { id int pk\n aId int fk }\nc { id int }\na.id < b.aId\nb.id <> c.id', { type: 'erd' });
+  const marks = scene.items.flatMap((it) => (it.kind === 'text' && /^[1*MN]$/.test(it.lines.join('')) ? [it.lines.join('')] : []));
+  assert.deepEqual([...marks].sort(), ['*', '*', '*', '1']);
+  const fk = scene.items.find((it) => it.kind === 'text' && it.lines.join('') === 'fk');
+  assert.ok(fk?.kind === 'text' && fk.tone === 'muted' && fk.anchor === 'end');
+});
+
+test('arrows, dashes and math signs are measured near their real width in the clean face', async () => {
+  const { textWidth } = await import('../../shared/render/text.ts');
+  // Drawing Sans advance widths in em (hmtx of the bundled subset).
+  for (const [ch, em] of [['→', 0.913], ['—', 0.957], ['…', 0.762], ['+', 0.627], ['=', 0.627], ['&', 0.609]] as const) {
+    const w = textWidth(ch, 100, 'clean');
+    assert.ok(w >= em * 100 * 0.95 && w <= em * 100 * 1.05, `${ch} measured ${w}, real ${em * 100}`);
+  }
 });

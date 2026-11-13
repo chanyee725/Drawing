@@ -1,4 +1,5 @@
 // Sequence diagram: deterministic column/row layout (no ELK).
+// Text is weight 400 only, as in the reference diagrams (09-examples-style §2.1: no bold inside diagrams).
 
 import type { SequenceBlock, SequenceDiagram, SequenceItem, SequenceMessage } from '../dsl/index.ts';
 import { finishScene, fontSize, measureLabel, styleFor, textItem } from './common.ts';
@@ -50,7 +51,7 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
   const cols: Column[] = d.columns.map((c) => {
     const style = styleFor(d, c.attrs, c.span.line);
     const size = fontSize(style);
-    const label = measureLabel(c.label, size, style.typeface, style.wrap, 140, true);
+    const label = measureLabel(c.label, size, style.typeface, style.wrap, 140);
     const iconSize = c.attrs.icon ? Math.round(size * 1.5) : 0;
     const w = Math.ceil(Math.max(label.w + (iconSize ? iconSize + 8 : 0) + 32, 96));
     const h = Math.ceil(Math.max(label.h, iconSize) + 22);
@@ -125,21 +126,22 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       y += SELF_H + 20;
       return;
     }
+    // The label sits centred on the line and cuts it, like graph edge labels (09-examples-style §2.1).
     if (label.lines.length) {
-      front.push(textItem(label.lines, (x0 + x1) / 2, y, { size: MSG_SIZE, font: style.typeface, color: style.paint.color }));
-      y += label.h + 4;
+      y += label.h / 2 + 4;
+      front.push(textItem(label.lines, (x0 + x1) / 2, y - label.h / 2, { size: MSG_SIZE, font: style.typeface, color: style.paint.color, plate: true }));
     }
     const dir = Math.sign(x1 - x0);
     const off = (c: number): number => (actDepth(c) ? ACT_W / 2 + (actDepth(c) - 1) * 4 : 0);
     mid.push({ ...common, points: [{ x: x0 + dir * off(a), y }, { x: x1 - dir * off(b), y }], route: 'straight' });
-    y += 22;
+    y += label.lines.length ? label.h / 2 + 18 : 22;
   };
 
   const frameTab = (x0: number, top: number, b: SequenceBlock, paint: Paint, style: ElementStyle): void => {
     const kw = b.blockType;
-    const kwW = textWidth(kw, MSG_SIZE, style.typeface, true);
+    const kwW = textWidth(kw, MSG_SIZE, style.typeface);
     const tabW = kwW + 20;
-    front.push(textItem([kw], x0 + 10, top + 4, { size: MSG_SIZE, font: style.typeface, anchor: 'start', weight: 600, color: paint.color }));
+    front.push(textItem([kw], x0 + 10, top + 4, { size: MSG_SIZE, font: style.typeface, anchor: 'start', color: paint.color }));
     back.push({ kind: 'line', points: [{ x: x0 + tabW, y: top }, { x: x0 + tabW, y: top + 16 }, { x: x0 + tabW - 6, y: top + 22 }, { x: x0, y: top + 22 }], dashed: false, tone: 'muted' });
     if (b.label) front.push(textItem([`[${b.label}]`], x0 + tabW + 10, top + 4, { size: MSG_SIZE, font: style.typeface, anchor: 'start', tone: 'muted' }));
   };
@@ -211,12 +213,11 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
   });
   const bottom = y + 8;
 
+  // Lifelines are solid and end in a second copy of the participant head (09-examples-style §2.4).
   const lifelines: SceneItem[] = [];
   const heads: SceneItem[] = [];
-  for (const c of cols) {
-    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: true, tone: 'muted' });
-    const top = headerH - c.h;
-    heads.push({ kind: 'box', id: c.id, role: 'column', shape: 'rectangle', x: c.x - c.w / 2, y: top, w: c.w, h: c.h, paint: c.style.paint, shadow: c.style.styleMode !== 'plain' && c.style.paint.mode !== 'outline' });
+  const head = (c: Column, top: number, id: string | undefined): void => {
+    heads.push({ kind: 'box', id, role: 'column', shape: 'rectangle', x: c.x - c.w / 2, y: top, w: c.w, h: c.h, paint: c.style.paint, shadow: c.style.styleMode !== 'plain' && c.style.paint.mode !== 'outline' });
     const contentW = c.label.w + (c.iconSize ? c.iconSize + 8 : 0);
     let x = c.x - contentW / 2;
     const cy = top + c.h / 2;
@@ -224,7 +225,13 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       heads.push({ kind: 'icon', name: d.columns[idx.get(c.id)!]!.attrs.icon!, x, y: cy - c.iconSize / 2, size: c.iconSize, paint: c.style.paint, inside: true });
       x += c.iconSize + 8;
     }
-    heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', weight: 600, on: c.style.paint, lineHeight: lineHeightOf(c.label.size) }));
+    heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', on: c.style.paint, lineHeight: lineHeightOf(c.label.size) }));
+  };
+  for (const c of cols) {
+    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: false, tone: 'muted' });
+    head(c, headerH - c.h, c.id);
+    // The bottom copy carries no id: the top head stays the one element for this participant.
+    head(c, bottom, undefined);
   }
 
   return finishScene('sequence', d, [...lifelines, ...back, ...heads, ...mid, ...front]);

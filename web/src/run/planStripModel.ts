@@ -4,7 +4,9 @@
 export type PipelineStatus = {
   path: string;
   revision: number;
-  state: 'plan' | 'running' | null;
+  state: 'plan' | 'running' | 'paused' | null;
+  /** While paused (E27): why, when, and when the limit window clears. */
+  pause?: { by: 'limit' | 'stop'; at: number; resetAt?: number } | null;
   lead: string | null;
   draftRevision: number | null;
   approvedRevision: number | null;

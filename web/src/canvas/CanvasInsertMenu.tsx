@@ -5,6 +5,7 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElementSkeleton } from '@excalidraw/excalidraw/data/transform';
 import type { Block } from '../api';
 import { TEMPLATES } from '../dsl/templates';
+import { cleanSkeleton } from './cleanStyle';
 import { diagramBlock, filterInsert, shapeSkeleton, type InsertItem } from './insert';
 import { renderBlock } from './render';
 import { newBlockId } from './sync';
@@ -101,7 +102,7 @@ export function CanvasInsertMenu({ api, wrap, onBlock }: Props) {
         );
       return;
     }
-    const els = convertToExcalidrawElements([shapeSkeleton(item.kind, at) as unknown as ExcalidrawElementSkeleton]);
+    const els = convertToExcalidrawElements([cleanSkeleton(shapeSkeleton(item.kind, at)) as unknown as ExcalidrawElementSkeleton]);
     api.updateScene({
       elements: [...api.getSceneElementsIncludingDeleted(), ...els],
       appState: { selectedElementIds: Object.fromEntries(els.map((e) => [e.id, true])) },
