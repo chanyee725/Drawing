@@ -423,3 +423,14 @@ body {
   html.print-doc[data-theme='dark'] .doc-diagram-pic img { filter: invert(93%) hue-rotate(180deg); }
   html.print-doc .doc-diagram figcaption { display: none !important; }
 }
+
+/* Settings dialog (E57): a native modal <dialog>. Scrolling over the backdrop or inside the dialog must not
+   scroll the page behind it; the backdrop dims the page like the other dialogs. */
+dialog.settings-dialog:modal {
+  overscroll-behavior: contain;
+}
+dialog.settings-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: oklch(0 0 0 / 0.4);
+}
