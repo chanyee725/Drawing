@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnCli } from "./cli.js";
+import { ownGitEnv, spawnCli } from "./cli.js";
 import { redact } from "./redact.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
@@ -44,7 +44,7 @@ const RESUME_TEXT = "[Dispatch] 서버가 재시작되어 직전 턴이 중간�
 // Browser tools in team sessions run headless, each in its own throwaway profile, so checks never pop
 // windows on the user's screen or steer another session's tab. A session can still opt out via its own env.
 const SESSION_ENV = { PLAYWRIGHT_MCP_HEADLESS: "true", PLAYWRIGHT_MCP_ISOLATED: "true" };
-const sessionEnv = () => ({ ...SESSION_ENV, ...process.env });
+const sessionEnv = () => ({ ...SESSION_ENV, ...ownGitEnv() });
 const isOpenStatus = st => !["done", "error"].includes(st);
 const clip = (s, n = 2000) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + "…" : s; };
 
