@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +104,19 @@ test('projects: bad, oversized or symlinked .project.json is ignored; hidden and
     const { projects } = (await call('GET', '/api/workspace/projects')).body;
     assert.deepEqual(projects.map((p) => [p.path, p.name]), [['Arr', 'Arr'], ['Bad', 'Bad'], ['Big', 'Big'], ['Link', 'Link']]);
   });
+});
+
+test('readProjectMeta: a FIFO or a folder named .project.json is ignored without hanging', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'drawing-meta-'));
+  try {
+    await mkdir(join(dir, 'Dir', '.project.json'), { recursive: true });
+    assert.deepEqual(await readProjectMeta(join(dir, 'Dir')), {});
+    await mkdir(join(dir, 'Fifo'));
+    const made = spawnSync('mkfifo', [join(dir, 'Fifo', '.project.json')]);
+    if (made.status === 0) assert.deepEqual(await readProjectMeta(join(dir, 'Fifo')), {});
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('projects: long meta values are capped', async () => {

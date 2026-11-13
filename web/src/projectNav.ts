@@ -68,6 +68,15 @@ export function asTreeNode(n: DocNode | Project): TreeNode {
 /** Folder that holds a document's sub-documents (`a/X.dpx.json` → `a/X`). */
 export const subFolderOf = (filePath: string) => filePath.replace(/\.dpx\.json$/, '');
 
+/** Project the command menu is scoped to (its chip, its files first): the open file's project on the
+ * document screen, the shown project on a project home, none elsewhere. Never a stale earlier one. */
+export function paletteScope(section: Section, view: ProjectsView | null, openPath: string | null): { path: string; name: string } | null {
+  const project =
+    section.kind === 'doc' ? projectOf(view, openPath) : section.kind === 'project' ? (view?.projects.find((p) => p.path === section.path) ?? null) : null;
+  if (project) return { path: project.path, name: project.name };
+  return section.kind === 'project' ? { path: section.path, name: section.path } : null;
+}
+
 /** Folder new files go in: the project shown or the open file's project; '' = workspace root. */
 export function newFileDir(section: Section, view: ProjectsView | null, openPath: string | null): string {
   if (section.kind === 'project') return section.path;

@@ -14,8 +14,8 @@ export type { Command } from './commands';
 type Props = {
   commands: Cmd[];
   onClose: () => void;
-  /** Name of the project the user is in; shown as a chip, and its files are listed first. */
-  scope?: string | null;
+  /** Project the user is in: its name is shown as a chip, and its files (under its path) are listed first. */
+  scope?: { path: string; name: string } | null;
   /** Start with only this section (G P opens the menu on projects). */
   onlyGroup?: Cmd['group'];
 };
@@ -28,7 +28,7 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState(onlyGroup);
   const list = useMemo(() => {
-    const inScope = (c: Cmd) => !!scope && !!c.hint?.startsWith(`${scope}/`);
+    const inScope = (c: Cmd) => !!scope && !!c.hint?.startsWith(`${scope.path}/`);
     // With no search, the 문서 section lists the current project's documents (files are otherwise search-only).
     const scoped = !query.trim() ? commands.filter((c) => c.searchOnly && inScope(c)).slice(0, SCOPE_DOCS) : [];
     const found = [...scoped, ...filterCommands(commands, query)].filter((c) => !group || c.group === group);
@@ -99,18 +99,24 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
             <CommandInput
               ref={input}
               value={query}
-              onValueChange={(v) => {
-                setQuery(v);
-                if (v) setGroup(undefined);
+              // G P keeps the menu on projects while typing; Backspace in an empty box widens it to everything.
+              onValueChange={setQuery}
+              onKeyDown={(e) => {
+                if (e.key === 'Backspace' && !query && group && !e.nativeEvent.isComposing) setGroup(undefined);
               }}
               placeholder={group === 'project' ? '프로젝트 이름을 입력해요' : '명령이나 파일 이름을 입력해요'}
               className="h-11"
             />
+            {group === 'project' && (
+              <span data-slot="group-chip" title="지우기를 누르면 모든 명령을 찾아요" className="mr-1.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                프로젝트만
+              </span>
+            )}
             {scope && (
-              <span data-slot="scope-chip" title={`범위: ${scope} 프로젝트`} className="inline-flex max-w-40 shrink-0 items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+              <span data-slot="scope-chip" title={`범위: ${scope.name} 프로젝트`} className="inline-flex max-w-40 shrink-0 items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                 <FolderClosed aria-hidden className="size-3 shrink-0" />
                 <span className="sr-only">범위:</span>
-                <span className="truncate">{scope}</span>
+                <span className="truncate">{scope.name}</span>
               </span>
             )}
           </div>

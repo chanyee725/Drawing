@@ -8,7 +8,7 @@ import { Sidebar } from './Sidebar';
 import { Home, type CreateKind } from './home/Home';
 import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
-import { asTreeNode, docPlace, newFileDir, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
+import { asTreeNode, docPlace, newFileDir, paletteScope, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
 import { SubDocs } from './SubDocs';
 import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
 import { shownView, toCanvas } from './viewMode';
@@ -592,6 +592,7 @@ export function App() {
         if (k === 'KeyG') chord.g = Date.now();
         else if (k === 'KeyP' && Date.now() - chord.g < CHORD_MS) {
           e.preventDefault();
+          e.stopPropagation(); // the canvas must not also take P as its own tool key
           setTimeout(() => (chord.g = 0));
           setExportOpen(false);
           setPaletteGroup('project');
@@ -810,7 +811,7 @@ export function App() {
         <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} scope={homeProject ?? (path?.includes('/') ? path.split('/')[0] : null)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} scope={paletteScope(docScreen ? section : homeSection, projects, path)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
             <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
