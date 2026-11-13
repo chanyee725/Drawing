@@ -8,6 +8,7 @@ import type { ElkExtendedEdge, ElkNode } from './elk.ts';
 import { PLATE_PAD } from './text.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
+import { alignLayout } from './layout-align.ts';
 import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -45,6 +46,15 @@ const SPACING = {
    * of its own, so a labelled gap is already 56 + label + 56 and needs no bigger value.
    */
   layer: 56,
+} as const;
+/**
+ * Siblings in one layer keep their source order (spec §1.3), even at the cost of a crossing. ELK only
+ * honours this at the root (set on a group, elkjs 0.12 throws in its model-order comparator), so
+ * `alignLayout` puts siblings inside groups in source order afterwards.
+ */
+const MODEL_ORDER = {
+  'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+  'elk.layered.crossingMinimization.forceNodeModelOrder': 'true',
 } as const;
 /** Group padding around its children; `top` includes the title line. */
 const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
@@ -152,7 +162,7 @@ function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind,
 /**
  * Box nodes of the same shape in the same group get one size: the widest bucket among them, labels
  * re-wrapped to that width, then the tallest height. The root is not one group: there only nodes in the
- * same layer (`rootLayer`) share a size.
+ * same layer (`rootLayer`) share a size, and root-level nodes without edges keep theirs.
  */
 function unifySizes(
   nodes: Iterable<NodeGeom>,
@@ -163,7 +173,9 @@ function unifySizes(
   for (const g of nodes) {
     if (g.iconOnly || !BUCKETED.has(g.shape)) continue;
     const p = parent.get(g.node.id);
-    const key = `${p === undefined ? `layer:${rootLayer.get(g.node.id) ?? 0}` : `group:${p}`}\u0000${g.shape}`;
+    const at = p === undefined ? rootLayer.get(g.node.id) : undefined;
+    if (p === undefined && at === undefined) continue; // no edge: keeps its own size
+    const key = `${p === undefined ? `layer:${at}` : `group:${p}`}\u0000${g.shape}`;
     const list = sets.get(key) ?? [];
     list.push(g);
     sets.set(key, list);
@@ -176,53 +188,98 @@ function unifySizes(
   }
 }
 
+/** Definition order of every node and group (pre-order over the source tree). */
+function definitionOrder(d: GraphDiagram): Map<string, number> {
+  const order = new Map<string, number>();
+  const walk = (c: GraphChild): void => {
+    order.set(c.id, order.size);
+    if (c.kind === 'group') for (const k of c.children) walk(k);
+  };
+  for (const c of d.children) walk(c);
+  return order;
+}
+
 /**
- * Layer of every root-level node: longest path from the sources over the edges between root-level items
- * (an edge into a group counts for the group). Approximates the layers ELK will make, so root-level box
- * nodes can share a size per layer (spec §1.1). Edges that close a cycle are ignored.
+ * Whether ELK should lay `e` out from `to` to `from`. Undirected edges (`-`, `--`) do not set the flow
+ * (spec §1.3): they point from the end defined first, so `Access - Distribution` under a `Distribution`
+ * defined earlier keeps Distribution in the upper layer.
  */
-function rootLayers(d: GraphDiagram, parent: ReadonlyMap<string, string | undefined>): Map<string, number> {
+function flipped(e: GraphEdge, order: ReadonlyMap<string, number>): boolean {
+  if (e.startArrow || e.endArrow) return false;
+  return (order.get(e.to) ?? 0) < (order.get(e.from) ?? 0);
+}
+
+/**
+ * Layer of every root-level item that has an edge: longest path from the sources over the edges between
+ * root-level items (an edge into a group counts for the group), in ELK's direction. Approximates the
+ * layers ELK will make, so root-level box nodes can share a size per layer (spec §1.1):
+ * - a labelled edge spans two layers (ELK gives the label a layer of its own);
+ * - a source sits right before its nearest target, as ELK's network-simplex layering pulls it;
+ * - items with no edge get no layer (they keep their own size).
+ * Edges that close a cycle are ignored.
+ */
+function rootLayers(
+  d: GraphDiagram,
+  parent: ReadonlyMap<string, string | undefined>,
+  order: ReadonlyMap<string, number>,
+): Map<string, number> {
   const top = (id: string): string | undefined => {
     if (!parent.has(id)) return undefined;
     let cur = id;
     for (let p = parent.get(cur); p !== undefined; p = parent.get(cur)) cur = p;
     return cur;
   };
-  const out = new Map<string, string[]>();
+  const out = new Map<string, { to: string; span: number }[]>();
   const indeg = new Map<string, number>();
   for (const c of d.children) indeg.set(c.id, 0);
-  const seen = new Set<string>();
+  const linked = new Set<string>();
+  const seen = new Map<string, { to: string; span: number }>();
   for (const e of d.edges) {
-    const a = top(e.from);
-    const b = top(e.to);
-    if (a === undefined || b === undefined || a === b || seen.has(`${a}\u0000${b}`)) continue;
-    seen.add(`${a}\u0000${b}`);
-    out.set(a, [...(out.get(a) ?? []), b]);
+    const flip = flipped(e, order);
+    const a = top(flip ? e.to : e.from);
+    const b = top(flip ? e.from : e.to);
+    if (a === undefined || b === undefined || a === b) continue;
+    linked.add(a);
+    linked.add(b);
+    const span = e.label ? 2 : 1;
+    const prev = seen.get(`${a}\u0000${b}`);
+    if (prev) {
+      prev.span = Math.max(prev.span, span);
+      continue;
+    }
+    const link = { to: b, span };
+    seen.set(`${a}\u0000${b}`, link);
+    out.set(a, [...(out.get(a) ?? []), link]);
   }
   // Drop back edges (DFS in model order) so the rest is a DAG.
   const state = new Map<string, 1 | 2>();
-  const dag = new Map<string, string[]>();
+  const dag = new Map<string, { to: string; span: number }[]>();
   const visit = (id: string): void => {
     state.set(id, 1);
     for (const n of out.get(id) ?? []) {
-      if (state.get(n) === 1) continue;
+      if (state.get(n.to) === 1) continue;
       dag.set(id, [...(dag.get(id) ?? []), n]);
-      indeg.set(n, (indeg.get(n) ?? 0) + 1);
-      if (!state.has(n)) visit(n);
+      indeg.set(n.to, (indeg.get(n.to) ?? 0) + 1);
+      if (!state.has(n.to)) visit(n.to);
     }
     state.set(id, 2);
   };
   for (const c of d.children) if (!state.has(c.id)) visit(c.id);
   const layer = new Map<string, number>();
-  const queue = d.children.map((c) => c.id).filter((id) => indeg.get(id) === 0);
+  const queue = d.children.map((c) => c.id).filter((id) => indeg.get(id) === 0 && linked.has(id));
+  const sources = [...queue];
   for (const id of queue) layer.set(id, 0);
   for (let i = 0; i < queue.length; i++) {
     const id = queue[i]!;
     for (const n of dag.get(id) ?? []) {
-      layer.set(n, Math.max(layer.get(n) ?? 0, layer.get(id)! + 1));
-      indeg.set(n, indeg.get(n)! - 1);
-      if (indeg.get(n) === 0) queue.push(n);
+      layer.set(n.to, Math.max(layer.get(n.to) ?? 0, layer.get(id)! + n.span));
+      indeg.set(n.to, indeg.get(n.to)! - 1);
+      if (indeg.get(n.to) === 0) queue.push(n.to);
     }
+  }
+  for (const id of sources) {
+    const next = (dag.get(id) ?? []).map((n) => (layer.get(n.to) ?? 0) - n.span);
+    if (next.length > 0) layer.set(id, Math.max(0, Math.min(...next)));
   }
   return layer;
 }
@@ -369,7 +426,8 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     for (const c of child.children) measure(c, child.id);
   };
   for (const c of d.children) measure(c, undefined);
-  unifySizes(nodes.values(), parent, rootLayers(d, parent));
+  const order = definitionOrder(d);
+  unifySizes(nodes.values(), parent, rootLayers(d, parent, order));
 
   // ELK reads spacing per parent, so every group gets its own values (else ELK's 20 px default).
   const vertical = d.direction === 'down' || d.direction === 'up';
@@ -420,10 +478,11 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     const style = styleFor(d, e.attrs, e.span.line);
     const label = e.label ? measureLabel(e.label, EDGE_LABEL_SIZE, style.typeface, style.wrap, 140) : undefined;
     if (label) edgeLabels.set(e.id, label);
+    const flip = flipped(e, order);
     return {
       id: `e:${e.id}`,
-      sources: [elkId(e.from)],
-      targets: [elkId(e.to)],
+      sources: [elkId(flip ? e.to : e.from)],
+      targets: [elkId(flip ? e.from : e.to)],
       labels: label ? [{ id: `l:${e.id}`, text: e.label!, width: Math.ceil(label.w + PLATE_PAD * 2), height: label.h + 4 }] : [],
     };
   });
@@ -435,7 +494,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       'elk.direction': ELK_DIRECTION[d.direction],
       'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
       'elk.edgeRouting': 'ORTHOGONAL',
-      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
+      ...MODEL_ORDER,
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
       ...spacingFor(d.children),
       'elk.edgeLabels.inline': 'true',
@@ -470,6 +529,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     if (!le || !section) continue;
     const o = edgeOffset(le, abs);
     const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: round(p.x + o.x), y: round(p.y + o.y) }));
+    if (flipped(e, order)) points.reverse();
     const key = pairKey(e);
     const pairIndex = pairSeen.get(key) ?? 0;
     pairSeen.set(key, pairIndex + 1);
@@ -484,6 +544,22 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     });
   }
   for (const be of baseEdges) be.pairSize = pairSeen.get(pairKey(be.edge)) ?? 1;
+
+  // Spec §1.8 steps 4-5: snap layer centres, match sibling group bands, keep edges attached.
+  const kids = new Map<string | undefined, string[]>([[undefined, d.children.map((c) => c.id)]]);
+  for (const g of groups.values()) kids.set(g.group.id, g.group.children.map((c) => c.id));
+  alignLayout(
+    {
+      kids,
+      parent,
+      pad: (id) => ({ top: groups.get(id)!.header, side: GROUP_PAD.side, bottom: GROUP_PAD.bottom }),
+      order,
+    },
+    rects,
+    baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points })),
+    vertical,
+  );
+  for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
 
   return { nodes, groups, parent, rects, edges: baseEdges };
 }
