@@ -16,6 +16,7 @@ import { copyText } from './doc/clipboard';
 import { renderBlock } from './canvas/render';
 import type { ImageKind } from './export/actions';
 import { blockItems, blocksAfterHistory, frameItems, framesOf, frameNode, type CanvasEl, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
+import { Button } from './components/ui/button';
 
 type Props = {
   document: unknown;
@@ -239,9 +240,9 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
 
   const outlineMenu = (
     <div className="doc-outline-wrap">
-      <button type="button" className="doc-outline-btn" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
+      <Button variant="outline" size="sm" className="doc-outline-btn" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
         목차
-      </button>
+      </Button>
       {outlineOpen && (
         <nav id="doc-outline" className="doc-outline" aria-label="목차">
           {outline.length === 0 ? (
@@ -275,7 +276,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
         </div>
       )}
       {broken ? (
-        <p role="alert" className="rounded-md px-3 py-2 text-sm" style={{ background: 'var(--muted)' }}>
+        <p role="alert" className="rounded-md bg-muted px-3 py-2 text-sm">
           이 파일의 문서 내용을 읽지 못했어요. 내용을 지키려고 문서는 고칠 수 없게 막아 두었어요. 캔버스는 그대로 쓸 수 있어요.
         </p>
       ) : (

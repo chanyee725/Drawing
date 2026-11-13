@@ -1,5 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { noticeFor } from './chunkError';
+import { Button } from './components/ui/button';
 
 type Props = {
   /** Called when a child fails (and again before reloading): save the open file here. Resolve false when edits are still unsaved. */
@@ -35,11 +36,11 @@ export class LazyBoundary extends Component<Props, State> {
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="flex flex-wrap items-center gap-2 p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+      <div role="alert" className="flex flex-wrap items-center gap-2 p-6 text-sm text-muted-foreground">
         <span>{noticeFor(this.state.error)}</span>
-        <button type="button" className="h-7 rounded-md px-3 font-medium text-primary-foreground" style={{ background: 'var(--primary)' }} onClick={() => void this.reload()}>
+        <Button size="sm" onClick={() => void this.reload()}>
           새로고침
-        </button>
+        </Button>
       </div>
     );
   }

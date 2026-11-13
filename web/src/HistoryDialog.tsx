@@ -127,17 +127,14 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
             {versions?.length === 0 && <li className={hint}>아직 저장된 버전이 없어요</li>}
             {versions?.map((v) => (
               <li key={v.id}>
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   aria-pressed={picked === v.id}
                   onClick={() => setPicked(v.id)}
-                  className={cn(
-                    'h-(--h-row) w-full rounded-md px-2.5 text-left text-sm tabular-nums outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50',
-                    picked === v.id && 'bg-muted font-semibold text-foreground',
-                  )}
+                  className={cn('h-(--h-row) w-full justify-start px-2.5 tabular-nums', picked === v.id && 'bg-muted font-semibold text-foreground')}
                 >
                   {when(v.time)}
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
