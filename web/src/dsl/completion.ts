@@ -32,7 +32,7 @@ const VALUES: Record<string, readonly string[]> = {
 };
 
 const KEY_DETAIL: Record<string, string> = {
-  icon: '아이콘', color: '색', label: '라벨', link: '링크', shape: '모양', colorMode: '색 모드', styleMode: '스타일 모드',
+  icon: '아이콘', color: '색', label: '라벨', subtitle: '부제', link: '링크', shape: '모양', colorMode: '색 모드', styleMode: '스타일 모드',
   typeface: '글꼴', textSize: '글자 크기', wrap: '줄바꿈', connectorStyle: '연결선 모양', connection: '연결선', position: '위치',
 };
 

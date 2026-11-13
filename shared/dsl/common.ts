@@ -2,7 +2,8 @@ import type { Token } from './tokenizer.ts';
 import type { ArrowStyle, Attrs, Diagnostic, DiagramBase, Severity, Span } from './types.ts';
 
 const ELEMENT_KEYS = ['icon', 'color', 'label', 'link', 'colorMode', 'styleMode', 'typeface', 'textSize'];
-export const GRAPH_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'wrap', 'connectorStyle']);
+/** `subtitle` is our extension (a node's second line); Eraser has no such key and its code still parses. */
+export const GRAPH_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'wrap', 'connectorStyle', 'subtitle']);
 export const SEQUENCE_KEYS = new Set(ELEMENT_KEYS);
 export const ERD_KEYS = new Set(ELEMENT_KEYS);
 export const LEGEND_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'connection', 'position']);
@@ -19,9 +20,11 @@ export const ENUMS: Record<string, readonly string[]> = {
   textSize: ['small', 'medium', 'large'],
   wrap: ['on', 'off'],
   connectorStyle: ['elbow', 'straight', 'arc'],
+  nodeStyle: ['box', 'icon'],
   shape: SHAPES,
 };
-const STYLE_KEYWORDS = ['colorMode', 'styleMode', 'typeface', 'textSize', 'wrap', 'connectorStyle'];
+/** `nodeStyle` is our extension: architecture nodes with an icon draw as box cards (`box`) or the old big icon (`icon`). */
+const STYLE_KEYWORDS = ['colorMode', 'styleMode', 'typeface', 'textSize', 'wrap', 'connectorStyle', 'nodeStyle'];
 const HEX_RE = /^#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
 
 export function spanOf(t: Span): Span {
