@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FileSession } from '../fileSession';
 import { useSession } from '../useSession';
-import { PLAN_CHANGED_NOTICE, confirmSnapshot, isPlanChanged, limitLine, startBody, startError, unansweredAsks, type PipelineStatus, type PlanSnapshot } from './planStripModel';
+import { PLAN_CHANGED_NOTICE, confirmSnapshot, isPlanChanged, limitLine, startError, unansweredAsks, type PipelineStatus, type PlanSnapshot } from './planStripModel';
+import { openPlanConfirm, requestStart } from './planOpen';
 
 async function readStatus(path: string): Promise<PipelineStatus | null> {
   const res = await fetch(`/api/pipeline?path=${encodeURIComponent(path)}`);
@@ -72,9 +73,10 @@ export function PlanStrip({ session }: { session: FileSession }) {
     setBusy(true);
     setError(null);
     try {
-      await session.flush();
-      const st = await readStatus(path);
-      if (!st || st.state !== 'plan') return void refresh();
+      const r = await openPlanConfirm(session, path, readStatus);
+      if (r.kind === 'refuse') return setError(r.message);
+      if (r.kind === 'gone') return void refresh();
+      const st = r.status;
       setStatus(st);
       setShown(confirmSnapshot(st));
       setNotice(null);
@@ -91,12 +93,7 @@ export function PlanStrip({ session }: { session: FileSession }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/api/pipeline/start', {
-        method: 'POST',
-        headers: { 'x-drawing': '1', 'content-type': 'application/json' },
-        body: JSON.stringify(startBody(path, shown)),
-      });
-      const body = await res.json().catch(() => ({}));
+      const { res, body } = await requestStart(path, shown);
       if (!res.ok) {
         if (isPlanChanged(res.status, body)) {
           // Stay in the dialog with the new plan, so the person confirms what will really run.
