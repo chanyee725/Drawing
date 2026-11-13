@@ -95,5 +95,7 @@ export const api = {
   historySnapshot: (path: string) => call<{ id: string | null }>('POST', `/api/history${q(path)}`, {}),
   trash: () => call<{ items: TrashItem[] }>('GET', '/api/trash').then((r) => r.items),
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
-  move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
+  /** `withSubdocs`: a document's sub-documents folder (`X/` next to `X.dpx.json`) moves along (type 'file' only). */
+  move: (from: string, to: string, type: 'file' | 'folder', withSubdocs = false) =>
+    call<unknown>('POST', '/api/move', withSubdocs ? { from, to, type, withSubdocs } : { from, to, type }),
 };
