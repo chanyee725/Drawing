@@ -471,11 +471,10 @@ export function App() {
     if (problem) return setError(problem);
     const to = renameTarget(n, name);
     if (!to) return;
-    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined);
-    if (ok && n.type === 'file' && 'children' in entry && entry.children.length) {
-      const sub = subFolderOf(n.path);
-      await move({ type: 'folder', name: sub.split('/').pop() ?? sub, path: sub, children: [] }, subFolderOf(to));
-    }
+    // One request for a document: the server checks both targets first, so a taken sub-documents name refuses
+    // the whole rename instead of leaving the sub-documents behind. An empty `X/` moves along too.
+    const sub = n.type === 'file' ? { from: subFolderOf(n.path), to: subFolderOf(to) } : undefined;
+    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined, sub);
     if (ok && section.kind === 'project' && section.path === n.path) setSection({ kind: 'project', path: to });
   };
 
@@ -490,13 +489,21 @@ export function App() {
   const remove = async (entry: DocNode | Project) => {
     const n = asTreeNode(entry);
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
+    const subdocs = n.type === 'file' && 'children' in entry && entry.children.length > 0;
+    const keep =
+      n.type === 'folder'
+        ? "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요."
+        : subdocs
+          ? "하위 문서도 함께 지워져요. 30일 동안은 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요."
+          : "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.";
     if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
     removing.current = n.path;
     try {
-      if (n.type === 'file') await api.removeFile(n.path);
+      // A document's sub-documents folder (`X/`, even an empty one) goes with it, so it never lingers as a group.
+      if (n.type === 'file') await api.removeFile(n.path, true);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
+      const gone = n.type === 'file' ? subFolderOf(n.path) : n.path;
+      if (path && (path === n.path || path.startsWith(`${gone}/`))) closeOpenFile();
       if (section.kind === 'project' && section.path === n.path) setSection({ kind: 'all' });
       await refreshTree();
     } catch (e) {

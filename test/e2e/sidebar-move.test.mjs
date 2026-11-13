@@ -125,5 +125,44 @@ test('refused sidebar drops do not move to the root', { skip: !ON && 'set DRAW_E
   assert.match(await page.locator('[aria-live="polite"].sr-only').textContent(), /남길 문서을\(를\) A\(으\)로 옮겼어요/);
 
   assert.deepEqual(rootNow(), rootBefore);
+
+  // Rename and delete keep a document and its sub-documents folder together.
+  for (const [p, title] of [
+    ['D/login', '로그인 D'],
+    ['D/login/token', '토큰 D'],
+    ['D/solo', '혼자'],
+    ['E/plan', '계획'],
+    ['E/plan/step', '단계'],
+  ]) assert.equal((await call('POST', '/api/file', { path: p, title })).status, 201);
+  for (const p of ['D/new', 'D/solo']) assert.equal((await call('POST', '/api/folder', { path: p })).status, 201);
+  await page.reload();
+  for (const p of ['D', 'E']) await page.getByRole('button', { name: `${p} 펼치기` }).click();
+  const dialogs = [];
+  const menuAction = async (label, action, answer) => {
+    page.once('dialog', (d) => {
+      dialogs.push(d.message());
+      void (answer === undefined ? d.accept() : d.accept(answer));
+    });
+    await page.getByRole('button', { name: `${label} 메뉴` }).click();
+    await page.getByRole('menuitem', { name: action }).click();
+    await settle();
+  };
+  // Renaming onto a name whose sub-documents folder is taken (group D/new) refuses the whole rename: nothing is orphaned.
+  await menuAction('로그인 D', '이름 바꾸기', 'new');
+  assert.ok(existsSync(join(ws, 'D', 'login.dpx.json')), 'login keeps its name');
+  assert.ok(existsSync(join(ws, 'D', 'login', 'token.dpx.json')), 'its sub-documents stay with it');
+  assert.ok(!existsSync(join(ws, 'D', 'new.dpx.json')), 'no half-renamed document');
+  await page.getByRole('alert').filter({ hasText: /./ }).first().waitFor();
+  // An empty sub-documents folder takes the new name too.
+  await menuAction('혼자', '이름 바꾸기', 'alone');
+  assert.ok(existsSync(join(ws, 'D', 'alone.dpx.json')) && existsSync(join(ws, 'D', 'alone')), 'document and its empty folder renamed');
+  assert.ok(!existsSync(join(ws, 'D', 'solo')), 'the old empty folder is gone');
+  // Deleting a document with sub-documents trashes both; the confirmation says so.
+  await menuAction('계획', '지우기');
+  assert.match(dialogs.at(-1), /하위 문서/);
+  assert.ok(!existsSync(join(ws, 'E', 'plan.dpx.json')) && !existsSync(join(ws, 'E', 'plan')), 'document and its sub-documents folder are gone');
+  const trashed = (await (await call('GET', '/api/trash')).json()).items.map((i) => i.path).sort();
+  assert.deepEqual(trashed.filter((p) => p.startsWith('E/')), ['E/plan.dpx.json', 'E/plan/step.dpx.json']);
+
   assert.deepEqual(errors, []);
 });

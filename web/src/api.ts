@@ -86,7 +86,8 @@ export const api = {
   createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
   saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>
     call<DpxFile>('PUT', `/api/file${q(path)}`, f, keepalive),
-  removeFile: (path: string) => call<unknown>('DELETE', `/api/file${q(path)}`),
+  /** `withSubdocs`: the document's sub-documents folder (`X/` next to `X.dpx.json`) goes to the trash with it. */
+  removeFile: (path: string, withSubdocs = false) => call<unknown>('DELETE', `/api/file${q(path)}${withSubdocs ? '&withSubdocs=1' : ''}`),
   createFolder: (path: string) => call<unknown>('POST', '/api/folder', { path }),
   removeFolder: (path: string) => call<unknown>('DELETE', `/api/folder${q(path)}`),
   history: (path: string) => call<{ versions: HistoryEntry[] }>('GET', `/api/history${q(path)}`).then((r) => r.versions),
