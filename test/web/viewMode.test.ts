@@ -21,3 +21,9 @@ test('toCanvas: narrow screens switch to the canvas, even from a stored both', (
   assert.equal(toCanvas('both', true), 'canvas');
   assert.equal(shownView(toCanvas('both', true), true), 'canvas');
 });
+
+test('toCanvas: from the 실행 view, wide screens open both panes and narrow screens the canvas', () => {
+  assert.equal(toCanvas('run', false), 'both');
+  assert.equal(toCanvas('run', true), 'canvas');
+  assert.equal(shownView('run', true), 'run');
+});

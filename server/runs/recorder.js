@@ -263,6 +263,9 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
   }
 
   // ---- reading (web API) ----
+
+  /** A run counts as running while it is in memory, not in the trash, and its record still says `running`. */
+  const isRunning = (run) => !run.loc.trashId && run.record.state === 'running';
   async function readRecord(abs) {
     const st = await lstat(abs).catch(() => null);
     if (!st?.isFile()) return null;
@@ -298,6 +301,25 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return r;
   }
 
+  /**
+   * The tree mark of a pipeline file from its runs: running while a run is in memory, else from the newest record
+   * (done -> done; failed, stopped or a run left `running` by a server stop -> paused). Null when it has no runs.
+   */
+  async function markOf(rel) {
+    // Same rule as runningFiles(), so the tree mark and /api/runs/active never disagree.
+    for (const run of active.values()) if (isRunning(run) && run.loc.path === rel) return { state: 'running' };
+    const dir = await runs.dirOf(rel);
+    const ids = (await readdir(dir).catch(() => []))
+      .filter((n) => n.endsWith('.json') && RUN_ID.test(n.slice(0, -5)))
+      .sort()
+      .reverse();
+    for (const n of ids) {
+      const r = await readRecord(join(dir, n));
+      if (r) return { state: r.state === 'done' ? 'done' : 'paused' };
+    }
+    return null;
+  }
+
   /** Write every dirty run now (server shutdown). Running runs stay `running` on disk. */
   async function close() {
     unsubscribe();
@@ -309,9 +331,9 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
   /** Workspace-relative paths of files with a run going now (not in the trash), sorted, no repeats. */
   function runningFiles() {
     const out = new Set();
-    for (const run of active.values()) if (!run.loc.trashId && run.record.state === 'running') out.add(run.loc.path);
+    for (const run of active.values()) if (isRunning(run)) out.add(run.loc.path);
     return [...out].sort();
   }
 
-  return { startRun, updateSession, setStepState, endRun, list, read, runningFiles, close, get active() { return [...active.keys()]; } };
+  return { startRun, updateSession, setStepState, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
 }

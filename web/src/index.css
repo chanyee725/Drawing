@@ -372,7 +372,8 @@ body {
 
 /* Progress board overlay (design 2 §5.1): rings, glyph badges, labels and active edges over a block picture.
    Colour always comes with a glyph and a text label. Motion is opt-in (no-preference) and can be paused. */
-.run-layer { position: absolute; pointer-events: none; z-index: 4; }
+.run-layer { position: absolute; pointer-events: none; }
+.doc-diagram-stage .run-layer { z-index: 1; }
 .run-layer svg { display: block; overflow: visible; }
 .run-ring { fill: none; stroke: currentColor; stroke-width: 2; }
 .run-ring[data-view='pending'] { stroke-dasharray: 4 3; }
@@ -402,6 +403,8 @@ body {
 }
 /* In the document there is text right above the picture, so the switch sits in the frame's top-right corner. */
 .doc-diagram-stage .run-motion { bottom: auto; top: -8px; right: -8px; margin: 0; }
+/* On the canvas a picture at the top edge would clip the switch above it: it moves into the picture's corner. */
+.run-layer[data-motion-inside] .run-motion { bottom: auto; top: 4px; right: 4px; margin: 0; }
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
 

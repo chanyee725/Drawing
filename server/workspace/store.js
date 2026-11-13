@@ -318,7 +318,12 @@ export function createStore(
   };
 
   // ---- run record sidecars: server/runs/ owns their content; the store owns where they live ----
+  let treeMark = null; // (rel) => Promise<{ state } | null>, set by the runs module
   const runsApi = {
+    // The runs module tells the tree a pipeline file's run state (running / paused / done).
+    setTreeMark: (fn) => {
+      treeMark = typeof fn === 'function' ? fn : null;
+    },
     // Run `fn` in the store's mutation queue, so a run write never interleaves with a move, delete or restore.
     serial,
     fileRel: checkedFileRel,
@@ -567,8 +572,8 @@ export function createStore(
           const f = parseStored(await readFile(join(absDir, e.name), 'utf8'));
           title = f.title;
           revision = f.revision;
-          // Run states (실행 중 / 멈춤 / 완료) come from run records later (E21); a file with a plan is a draft until then.
-          if (f.plan) pipeline = { state: 'plan' };
+          // A file with a plan is a draft (plan) until the runs module says it is running, paused or done.
+          if (f.plan) pipeline = (treeMark && (await treeMark(rel).catch(() => null))) || { state: 'plan' };
         } catch {
           // unreadable file still shows up so it can be renamed or deleted
         }

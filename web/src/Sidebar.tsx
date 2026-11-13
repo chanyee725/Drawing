@@ -3,7 +3,7 @@
 // and settings. Built from the shadcn Sidebar (components/ui/sidebar.tsx).
 import { useEffect, useRef, useState } from 'react';
 import { Archive, ChevronRight, Clock, File, Files, FolderClosed, FolderInput, Moon, MoreHorizontal, Pencil, Plus, Search, Settings, SquarePen, Sun, Trash2 } from 'lucide-react';
-import { api, type DispatchStatus, type DocNode, type Project, type ProjectsView, type ProviderLimits, type ProviderState } from './api';
+import { api, type DispatchStatus, type DocNode, type PipelineMark, type Project, type ProjectsView, type ProviderLimits, type ProviderState } from './api';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Kbd } from './components/ui/kbd';
 import {
@@ -198,13 +198,7 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
       >
         {n.type === 'doc' ? <File className="size-[15px]! text-muted-foreground" aria-hidden /> : <FolderClosed className="size-[15px]! text-muted-foreground" aria-hidden />}
         <span className="truncate">{label}</span>
-        {n.type === 'doc' && n.pipeline?.state === 'plan' && (
-          // Pipeline file still in planning (runs come with E21). The row's pr-14 keeps it clear of the row actions.
-          <span role="img" aria-label="파이프라인: 계획" title="파이프라인 계획" className="ml-auto flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[11px] leading-4 text-muted-foreground">
-            <span aria-hidden>◐</span>
-            <span aria-hidden>계획</span>
-          </span>
-        )}
+        {n.type === 'doc' && n.pipeline && <PipelineBadge state={n.pipeline.state} />}
         {has && !expanded && <SidebarMenuBadge aria-label={`하위 ${n.count}개`}>{n.count}</SidebarMenuBadge>}
       </SidebarMenuButton>
       {has && n.type === 'doc' && (
@@ -219,6 +213,27 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
         </SidebarMenuSub>
       )}
     </SidebarMenuItem>
+  );
+}
+
+// Pipeline file marks. Text stays in the foreground colour; only the running dot is green (state is never colour alone).
+const PIPELINE_MARKS: Record<PipelineMark['state'], { glyph: string; text: string; dot?: string }> = {
+  plan: { glyph: '◐', text: '계획' },
+  running: { glyph: '●', text: '실행 중', dot: 'var(--ok)' },
+  paused: { glyph: '⏸', text: '멈춤' },
+  done: { glyph: '✓', text: '완료' },
+};
+
+function PipelineBadge({ state }: { state: PipelineMark['state'] }) {
+  const m = PIPELINE_MARKS[state] ?? PIPELINE_MARKS.plan;
+  // The row's pr-14 keeps it clear of the row actions.
+  return (
+    <span role="img" aria-label={`파이프라인: ${m.text}`} title={`파이프라인 ${m.text}`} className="ml-auto flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[11px] leading-4 text-foreground">
+      <span aria-hidden style={m.dot ? { color: m.dot } : undefined} className={m.dot ? undefined : 'text-muted-foreground'}>
+        {m.glyph}
+      </span>
+      <span aria-hidden>{m.text}</span>
+    </span>
   );
 }
 

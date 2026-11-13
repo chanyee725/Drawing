@@ -18,6 +18,7 @@ const VIEWS: { id: View; label: string }[] = [
   { id: 'doc', label: '문서' },
   { id: 'both', label: '둘 다' },
   { id: 'canvas', label: '캔버스' },
+  { id: 'run', label: '실행' },
 ];
 // 390px: one pane at a time (design doc 6 §6).
 const NARROW_VIEWS = VIEWS.filter((v) => v.id !== 'both');
@@ -41,6 +42,8 @@ type Props = {
   statusAlert?: boolean;
   /** The view shown (on narrow screens never 'both'). */
   view: View;
+  /** A pipeline file is open: offer the 실행 view. */
+  canRun?: boolean;
   onView: (v: View) => void;
   onTitle: (t: string) => void;
   /** Narrow screen: the sidebar is a drawer behind the menu button and the view switch has two choices. */
@@ -60,7 +63,7 @@ type Props = {
 };
 
 /** The document screen's 52px header (design doc 6 §2.4, frame A). */
-export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, narrow, onToggleNav, trail = [], onCrumb, exportMenu, onHistory, onSubDoc, onCommands }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, canRun, onView, onTitle, narrow, onToggleNav, trail = [], onCrumb, exportMenu, onHistory, onSubDoc, onCommands }: Props) {
   const save = saveState(status, statusAlert);
   return (
     <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-sidebar px-2 md:gap-3 md:px-3">
@@ -128,7 +131,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
         role="toolbar"
         className={cn('shrink-0', narrow && 'h-12')}
       >
-        {(narrow ? NARROW_VIEWS : VIEWS).map((v) => (
+        {(narrow ? NARROW_VIEWS : VIEWS).filter((v) => canRun || v.id !== 'run').map((v) => (
           <ToggleGroupItem key={v.id} value={v.id} className={cn('px-2 md:px-3', narrow && 'h-11 min-w-11', FOCUS_RING)}>
             {v.label}
           </ToggleGroupItem>

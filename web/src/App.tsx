@@ -17,6 +17,11 @@ import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
+import { RunStrip } from './run/RunStrip';
+import { onRunEvent, reloadRun, watchRun } from './run/runData';
+import type { RunEvent } from './run/runModel';
+// The run view (E22) loads when it is first shown.
+const RunView = lazy(() => import('./run/RunView'));
 // TipTap and the diagram renderer are big; they load when a file is first opened.
 const DocPane = lazy(() => import('./DocPane').then((m) => ({ default: m.DocPane })));
 import { CanvasPane } from './CanvasPane';
@@ -186,7 +191,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wideView, setView] = useState<View>('both');
   // Below md only one pane fits: the split view falls back to the document (design doc 6 §6).
-  const view = shownView(wideView, narrow);
+  const baseView = shownView(wideView, narrow);
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
@@ -225,6 +230,11 @@ export function App() {
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
+  // A pipeline file (it has a plan): its runs show in the strip, the 실행 view and the canvas overlay.
+  const hasPlan = useSession(session, (s) => !!s.file?.plan);
+  const planCode = useSession(session, (s) => s.file?.blocks.find((b) => b.id === s.file?.plan?.block)?.code);
+  const view: View = !hasPlan && baseView === 'run' ? 'doc' : baseView;
+  useEffect(() => watchRun(hasPlan ? path : null), [hasPlan, path]);
   const status = useSession(session, (s) => s.status);
   const statusAlert = useSession(session, (s) => s.statusAlert);
   const conflict = useSession(session, (s) => s.conflict);
@@ -410,6 +420,19 @@ export function App() {
       }
       void refreshTree();
     });
+    // Runs of the open file; a run starting or ending also changes its tree badge.
+    es.addEventListener('run', (m) => {
+      let e: RunEvent;
+      try {
+        e = JSON.parse((m as MessageEvent<string>).data) as RunEvent;
+      } catch {
+        return;
+      }
+      onRunEvent(e);
+      if (e.run) void refreshTree();
+    });
+    // Events missed while the stream was down: read the run again.
+    es.onopen = () => void reloadRun();
     return () => es.close();
   }, [session, load, refreshTree]);
 
@@ -513,8 +536,8 @@ export function App() {
     }
   };
 
-  const showDoc = view !== 'canvas';
-  const showCanvas = view !== 'doc';
+  const showDoc = view === 'doc' || view === 'both';
+  const showCanvas = view === 'canvas' || view === 'both';
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
   const showBlock = useCallback((blockId: string) => {
@@ -831,6 +854,7 @@ export function App() {
             status={status}
             statusAlert={statusAlert}
             view={view}
+            canRun={hasPlan}
             onView={setView}
             narrow={narrow}
             trail={place.trail}
@@ -861,7 +885,14 @@ export function App() {
               />
             }
           />
-              {view === 'both' ? (
+          {hasPlan && <RunStrip code={planCode} inRunView={view === 'run'} onRunView={() => setView('run')} />}
+              {view === 'run' ? (
+            <LazyBoundary onFail={flushForReload}>
+              <Suspense fallback={null}>
+                <RunView code={planCode} />
+              </Suspense>
+            </LazyBoundary>
+          ) : view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
