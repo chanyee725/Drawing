@@ -94,11 +94,14 @@ export const EVENTS = ['snapshot', 'session', 'removed', 'message', 'tasks', 'ti
 
 /** Opens the event stream; returns a close function. A server without Dispatch marks the screen unavailable. */
 export function connect(): () => void {
-  const offs = EVENTS.map(ev => events.subscribeJson<unknown>(ev, d => apply(ev, d)));
+  // The shared stream may already be open (another listener holds it), and the server only sends a snapshot to a
+  // new connection, so every subscribe fetches /api/state and applies it unless a stream snapshot arrived meanwhile.
+  // If Dispatch is off the state route 404s and nothing ever arrives.
+  let streamed = false;
+  const offs = EVENTS.map(ev => events.subscribeJson<unknown>(ev, d => { if (ev === 'snapshot') streamed = true; apply(ev, d); }));
   offs.push(events.onConnection(online => setState({ online })));
-  // The snapshot comes over the stream; if Dispatch is off the state route 404s and nothing ever arrives.
   api<Snapshot>('GET', '/api/state').then(
-    snap => { if (!state.ready) apply('snapshot', snap); },
+    snap => { if (!streamed) apply('snapshot', snap); },
     () => { if (!state.ready) setState({ unavailable: true }); },
   );
   return () => offs.forEach(off => off());
