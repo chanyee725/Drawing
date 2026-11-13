@@ -5,7 +5,7 @@
 
 import type { Point, Scene } from '../../../shared/render/scene.ts';
 import { edgePaths, nodeRects, type Rect } from '../../../shared/render/overlay.ts';
-import { STEP_VIEWS, edgeView, linkSteps, stepNode, type StepView } from '../../../shared/dispatch/step-view.ts';
+import { STEP_VIEWS, edgeView, linkSteps, progress, stepNode, type Progress, type StepView } from '../../../shared/dispatch/step-view.ts';
 
 /** Dispatch role ids (server/dispatch/roles.js). Unknown roles draw in the neutral `--idle` colour. */
 export const ROLES = { lead: '관리자', impl: '구현자', review: '리뷰어', test: '테스터', design: '디자이너', docs: '문서화' } as const;
@@ -15,6 +15,8 @@ export type RoleId = keyof typeof ROLES;
 export interface RunAgent {
   name: string;
   role: string;
+  /** Model label for the legend (metadata only). */
+  model?: string;
 }
 
 /** What the overlay needs per step: the step ↔ node link and its computed `step.view` (E24). */
@@ -29,6 +31,10 @@ export interface RunStep {
   title?: string;
   /** Sessions on the step; the first one owns the step's colour. */
   agents?: readonly RunAgent[];
+  /** Blocked step: the view it had before blocking, so its progress weight holds (§5.1 "Progress"). */
+  before?: StepView;
+  /** Closed as abandoned (건너뜀/그만둠): left out of the progress. */
+  skipped?: boolean;
 }
 
 export interface OverlayNode {
@@ -59,6 +65,22 @@ export interface OverlayModel {
   edges: OverlayEdge[];
   /** Steps whose node is not in the diagram ("다이어그램에 없는 단계"). */
   missing: string[];
+  /** Weighted progress over every step of the run, drawn or not. */
+  progress: Progress;
+  legend: Legend;
+}
+
+export interface LegendAgent {
+  name: string;
+  roleName: string;
+  model: string;
+  color: string;
+}
+
+/** Only the agents and states present in the run (§5.1 "Colour rules"). */
+export interface Legend {
+  agents: LegendAgent[];
+  states: { view: StepView; glyph: string; label: string; color: string }[];
 }
 
 const STATE_COLOR: Record<StepView, string> = {
@@ -98,6 +120,22 @@ export function agentColors(steps: readonly RunStep[]): Map<string, string> {
   return out;
 }
 
+export function legendOf(steps: readonly RunStep[], colors: ReadonlyMap<string, string> = agentColors(steps)): Legend {
+  const agents: LegendAgent[] = [];
+  const seen = new Set<string>();
+  for (const s of steps)
+    for (const a of s.agents ?? []) {
+      if (seen.has(a.name)) continue;
+      seen.add(a.name);
+      agents.push({ name: a.name, roleName: roleLabel(a.role), model: a.model ?? '', color: colors.get(a.name)! });
+    }
+  const present = new Set(steps.filter((s) => !s.skipped).map((s) => s.view));
+  const states = (Object.keys(STEP_VIEWS) as StepView[]).filter((v) => present.has(v)).map((v) => ({ view: v, ...STEP_VIEWS[v], color: STATE_COLOR[v] }));
+  return { agents, states };
+}
+
+export const runProgress = (steps: readonly RunStep[]): Progress => progress(steps.map((s) => ({ view: s.view, before: s.before, abandoned: s.skipped })));
+
 export function overlayModel(scene: Scene, steps: readonly RunStep[]): OverlayModel {
   const rects = nodeRects(scene);
   const { linked, missing } = linkSteps(steps, rects.keys());
@@ -128,7 +166,7 @@ export function overlayModel(scene: Scene, steps: readonly RunStep[]): OverlayMo
     if (kind === 'none') continue;
     list.forEach((p, i) => edges.push({ key: i ? `${key}#${i}` : key, points: p.points, kind, color: kind === 'done' ? 'var(--ok)' : b.color }));
   }
-  return { nodes, edges, missing };
+  return { nodes, edges, missing, progress: runProgress(steps), legend: legendOf(steps, colors) };
 }
 
 /** SVG path data through the edge's points (straight segments; the overlay traces, it does not redraw the connector). */

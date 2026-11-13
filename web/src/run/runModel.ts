@@ -4,8 +4,8 @@
 
 import type { Plan } from '../../../shared/dispatch/plan.ts';
 import type { SessionState } from '../../../shared/dispatch/types.ts';
-import { STEP_VIEWS, progress, stepView, type StepView } from '../../../shared/dispatch/step-view.ts';
-import { roleLabel, type RunAgent, type RunStep } from './overlayModel.ts';
+import { STEP_VIEWS, progressLabel, stepView, type Progress, type StepView } from '../../../shared/dispatch/step-view.ts';
+import { roleLabel, runProgress, type RunAgent, type RunStep } from './overlayModel.ts';
 
 export type RunState = 'running' | 'done' | 'failed' | 'stopped';
 
@@ -144,9 +144,24 @@ export interface StepRow {
   waiting: boolean;
   skipped: boolean;
   node: string;
+  /** Blocked step: its view before blocking, from the timeline (keeps its progress weight). */
+  before?: StepView;
 }
 
 type Live = ReadonlyMap<string, LiveSession>;
+
+/** Timeline step state → the view it stands for; blocking states are left out. */
+const VIEW_OF_STATE: Partial<Record<string, StepView>> = { working: 'active', waiting: 'active', resting: 'active', done: 'review', pending: 'pending' };
+
+/** The view a step had before it became blocked: its newest non-blocking timeline entry. */
+export function beforeBlocked(timeline: RunRecord['timeline'], stepId: string): StepView | undefined {
+  for (let i = timeline.length - 1; i >= 0; i--) {
+    const [, step, state] = timeline[i]!;
+    const v = step === stepId ? VIEW_OF_STATE[state] : undefined;
+    if (v) return v;
+  }
+  return undefined;
+}
 
 const stateNow = (s: RecSession, live: Live, running: boolean): SessionState | undefined => (running ? live.get(s.sid)?.state : undefined) ?? s.state;
 
@@ -180,14 +195,23 @@ export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.n
     else if (step.startedAt === null) time = '기다려요';
     else if (view === 'done' || !running || step.endedAt !== null) time = fmtDur((step.endedAt ?? record.endedAt ?? now) - step.startedAt);
     else time = `${fmtDur(now - step.startedAt)}째`;
-    const agents = step.sessions.map((s) => ({ name: live.get(s.sid)?.name ?? s.name ?? s.sid, role: roleOf(plan, ps.id, s, live) }));
-    return { id: ps.id, n: i + 1, title: labels.get(node) ?? node, view, glyph: v.glyph, label: skipped ? '건너뜀' : v.label, time, agents, waiting, skipped, node };
+    const agents = step.sessions.map((s) => {
+      const l = live.get(s.sid);
+      const model = l?.modelLabel ?? s.model ?? l?.model;
+      return { name: l?.name ?? s.name ?? s.sid, role: roleOf(plan, ps.id, s, live), ...(model ? { model } : {}) };
+    });
+    const row: StepRow = { id: ps.id, n: i + 1, title: labels.get(node) ?? node, view, glyph: v.glyph, label: skipped ? '건너뜀' : v.label, time, agents, waiting, skipped, node };
+    if (view === 'blocked') {
+      const before = beforeBlocked(record.timeline, ps.id);
+      if (before) row.before = before;
+    }
+    return row;
   });
 }
 
 /** What the canvas overlay draws (runStore.setRunSteps). */
 export const overlaySteps = (rows: readonly StepRow[]): RunStep[] =>
-  rows.map((r) => ({ id: r.id, node: r.node, view: r.view, waiting: r.waiting, title: r.title, agents: r.agents }));
+  rows.map((r) => ({ id: r.id, node: r.node, view: r.view, waiting: r.waiting, title: r.title, agents: r.agents, ...(r.before ? { before: r.before } : {}), ...(r.skipped ? { skipped: true } : {}) }));
 
 // ---- sessions ----
 
@@ -252,8 +276,10 @@ export interface Attention {
 export interface StripModel {
   state: RunState;
   glyph: string;
-  /** `● 실행 중 · 3/5 단계 · 24분째 · $1.82 · 5시간 68%` as parts, joined with " · ". */
+  /** `실행 중 · 5단계 중 2 완료 · 48% · 남은 3 · 24분째 · $1.82 · 5시간 68%` as parts, joined with " · ". */
   parts: string[];
+  /** Weighted progress (the strip's bar). */
+  progress: Progress;
   /** Sessions a person should look at (running runs only), worst first. */
   attention: Attention[];
 }
@@ -271,9 +297,9 @@ const ORDER: SessionState[] = ['failed', 'stuck', 'waiting'];
 /** `five`: the 5-hour usage share 0–1 from Dispatch limits, shown while running. */
 export function stripModel(record: RunRecord, rows: readonly StepRow[], sessions: readonly SessionRow[], five: number | null = null, now = Date.now()): StripModel {
   const running = record.state === 'running';
-  const p = progress(rows.map((r) => ({ view: r.view, abandoned: r.skipped })));
+  const p = runProgress(overlaySteps(rows));
   const r = RUN_LABEL[record.state] ?? RUN_LABEL.stopped;
-  const parts = [r.label, `${p.done}/${p.total} 단계`, running ? `${fmtDur(now - record.startedAt)}째` : fmtDur((record.endedAt ?? now) - record.startedAt), fmtCost(record.totals.cost)];
+  const parts = [r.label, progressLabel(p), running ? `${fmtDur(now - record.startedAt)}째` : fmtDur((record.endedAt ?? now) - record.startedAt), fmtCost(record.totals.cost)];
   if (running && five !== null && Number.isFinite(five)) parts.push(`5시간 ${Math.round(five * 100)}%`);
   const attention: Attention[] = [];
   if (running) {
@@ -281,7 +307,7 @@ export function stripModel(record: RunRecord, rows: readonly StepRow[], sessions
       for (const s of sessions)
         if (s.state === st) attention.push({ sid: s.sid, text: `${s.name}(${s.roleName})가 ${NEEDS[st]}`, since: null });
   }
-  return { state: record.state, glyph: r.glyph, parts, attention };
+  return { state: record.state, glyph: r.glyph, parts, progress: p, attention };
 }
 
 // ---- history ----
