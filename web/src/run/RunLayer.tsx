@@ -122,7 +122,7 @@ export function RunLegend({ steps, canvas, style, ref }: { steps: readonly RunSt
   const p = useMemo(() => runProgress(steps), [steps]);
   const legend = useMemo(() => legendOf(steps), [steps]);
   return (
-    <div ref={ref} className="run-legend" data-run-legend="" data-canvas={canvas ? '' : undefined} style={style}>
+    <div ref={ref} className="run-legend" data-run-legend="" data-on-canvas={canvas ? '' : undefined} style={style}>
       <p id={id} className="run-legend-progress">
         {progressLabel(p)}
       </p>

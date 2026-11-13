@@ -417,8 +417,8 @@ body {
   padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
   color: var(--foreground); font: 400 12px/16px var(--font-sans);
 }
-.run-legend[data-canvas] { position: absolute; pointer-events: none; }
-.run-legend[data-canvas] summary { pointer-events: auto; }
+.run-legend[data-on-canvas] { position: absolute; pointer-events: none; }
+.run-legend[data-on-canvas] summary { pointer-events: auto; }
 .doc-diagram > .run-legend { align-self: center; }
 .run-legend-progress { margin: 0 0 4px; font-weight: 500; }
 .run-legend-dim { color: var(--muted-foreground); }
@@ -433,9 +433,11 @@ body {
 .run-legend-glyph { inline-size: 10px; text-align: center; font-weight: 600; }
 /* Native <progress>, fully custom (appearance: none): track on the element, fill on each engine's pseudo-element. */
 .run-progress {
-  appearance: none; border: 0 solid; overflow: clip; display: block; inline-size: 100%; block-size: 4px;
+  appearance: none; border: 0 solid; overflow: clip; display: block; block-size: 4px;
   border-radius: 1e5px; background: var(--border);
 }
+/* Full width only in the legend: this sheet is unlayered, so a width here would beat the strip's `w-16` utility. */
+.run-legend .run-progress { inline-size: 100%; }
 .run-progress::-webkit-progress-bar { background: transparent; }
 .run-progress::-webkit-progress-value { background: var(--ok); border-radius: 1e5px; }
 .run-progress::-moz-progress-bar { background: var(--ok); border-radius: 1e5px; }
