@@ -31,10 +31,11 @@ export function Splitter({ ratio, onRatio, left, right }: Props) {
           if (e.key === 'ArrowLeft') onRatio(clamp(ratio - 0.02));
           if (e.key === 'ArrowRight') onRatio(clamp(ratio + 0.02));
         }}
-        // A 1px line with a 6px hit area: the ::before strip starts at the line and reaches right, so it stays off
-        // the left pane's scrollbar.
-        // Forced colors drop box-shadow, so the focus ring falls back to a system-colour outline there.
-        className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none before:absolute before:inset-y-0 before:left-0 before:w-1.5 before:content-[''] hover:bg-ring focus-visible:bg-ring focus-visible:shadow-[0_0_0_1px_var(--ring)] forced-colors:bg-[CanvasText] forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-offset-1 forced-colors:focus-visible:outline-[Highlight]"
+        // A deliberate 1px line at the doc/canvas seam (the dark canvas, ~#121212, can't match the page
+        // background, #0a0a0a, through Excalidraw's dark filter). The ::before strip is a 6px hit area that starts
+        // at the line and reaches right, so it stays off the left pane's scrollbar. Forced colors drops the
+        // background and box-shadow, so there the line is a CanvasText border and keyboard focus is a Highlight outline.
+        className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none transition-colors before:absolute before:inset-y-0 before:left-0 before:w-1.5 before:content-[''] hover:bg-ring focus-visible:bg-ring focus-visible:shadow-[0_0_0_1px_var(--ring)] forced-colors:border-l forced-colors:border-[CanvasText] forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-offset-1 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight]"
       />
       <div className="min-w-0 flex-1 overflow-auto">{right}</div>
     </div>
