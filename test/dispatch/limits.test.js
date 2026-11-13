@@ -155,3 +155,24 @@ test("Hub: Fable's weekly window shows on its own and keeps its value across oth
   assert.equal(l.claude.windows[0].used, 0.2);
   assert.equal(l.fable.windows[0].used, 0.04);
 });
+
+test("SharedLimits: two updates in the same millisecond both land, the later one wins", async t => {
+  const file = await tmpFile(t);
+  const shared = new SharedLimits(file);
+  await shared.load();
+  const realNow = Date.now;
+  Date.now = () => 5_000_000; // freeze the clock so both calls get the same Date.now()
+  try {
+    const a = shared.setClaude({ five: 0.14, seven: 0.06 });
+    const b = shared.setClaude({ five: 0.2, seven: 0.07 });
+    await Promise.all([a, b]);
+    const g1 = shared.setGemini({ reached: false });
+    const g2 = shared.setGemini({ reached: true });
+    await Promise.all([g1, g2]);
+  } finally { Date.now = realNow; }
+  assert.equal(shared.claude.five, 0.2);
+  assert.equal(shared.gemini.reached, true);
+  const disk = JSON.parse(await readFile(file, "utf8"));
+  assert.equal(disk.claude.five, 0.2);
+  assert.equal(disk.gemini.reached, true);
+});
