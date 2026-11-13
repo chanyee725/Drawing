@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { apply, forgetTranscript, getState, resetState, setState } from '../../web/src/dispatch/store.ts';
+import { apply, connect, forgetTranscript, getState, resetState, setState } from '../../web/src/dispatch/store.ts';
 import type { Entry, Session } from '../../shared/dispatch/types.ts';
 
 const sess = (id: string, extra: Partial<Session> = {}) => ({ id, name: id, status: 'running', pending: [], ...extra }) as unknown as Session;
@@ -55,4 +55,25 @@ test('forgetTranscript drops one transcript from memory', () => {
   setState({ transcripts: { a: [entry('x')], b: [] } });
   forgetTranscript('a');
   assert.deepEqual(Object.keys(getState().transcripts), ['b']);
+});
+
+test('connecting again applies the current /api/state even after the first visit', async () => {
+  const real = globalThis.fetch;
+  let snap: unknown = { sessions: [sess('old')] };
+  globalThis.fetch = (async () => new Response(JSON.stringify(snap), { status: 200 })) as typeof fetch;
+  try {
+    const settle = () => new Promise(r => setTimeout(r, 0));
+    const close = connect();
+    await settle();
+    assert.deepEqual(getState().sessions.map(x => x.id), ['old']);
+    close();
+    // The shared stream stays open elsewhere, so no new stream snapshot comes; the fetch must refresh the state.
+    snap = { sessions: [sess('new')] };
+    const close2 = connect();
+    await settle();
+    assert.deepEqual(getState().sessions.map(x => x.id), ['new']);
+    close2();
+  } finally {
+    globalThis.fetch = real;
+  }
 });

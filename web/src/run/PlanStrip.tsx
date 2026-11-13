@@ -6,6 +6,7 @@ import type { FileSession } from '../fileSession';
 import { useSession } from '../useSession';
 import { PLAN_CHANGED_NOTICE, confirmSnapshot, isPlanChanged, limitLine, startError, unansweredAsks, type PipelineStatus, type PlanSnapshot } from './planStripModel';
 import { openPlanConfirm, requestStart } from './planOpen';
+import { events } from '../lib/events';
 
 async function readStatus(path: string): Promise<PipelineStatus | null> {
   const res = await fetch(`/api/pipeline?path=${encodeURIComponent(path)}`);
@@ -42,17 +43,10 @@ export function PlanStrip({ session }: { session: FileSession }) {
     void refresh();
   }, [refresh, revision]);
   useEffect(() => {
-    if (!path || !hasPlan || typeof EventSource === 'undefined') return;
-    const es = new EventSource('/api/events');
-    es.addEventListener('pipeline', (m) => {
-      try {
-        const e = JSON.parse((m as MessageEvent<string>).data) as { path?: string };
-        if (e.path === path) void refresh();
-      } catch {
-        /* not ours */
-      }
+    if (!path || !hasPlan) return;
+    return events.subscribeJson<{ path?: string }>('pipeline', (e) => {
+      if (e.path === path) void refresh();
     });
-    return () => es.close();
   }, [path, hasPlan, refresh]);
 
   useEffect(() => {
