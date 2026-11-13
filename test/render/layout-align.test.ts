@@ -1,0 +1,96 @@
+// E37: alignment, order and band post-processing (docs/research/eraser/09-examples-style.md §1.2, §1.3).
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { parse } from '../../shared/dsl/index.ts';
+import { graphBase } from '../../shared/render/index.ts';
+import type { GraphBase } from '../../shared/render/index.ts';
+import { moveEnd, orthogonalize } from '../../shared/render/layout-align.ts';
+
+async function base(code: string): Promise<GraphBase> {
+  const { ast } = parse(code, 'flowchart');
+  assert.ok(ast.type === 'flowchart');
+  return graphBase(ast);
+}
+const rect = (b: GraphBase, id: string) => b.rects.get(id)!;
+const cx = (b: GraphBase, id: string) => rect(b, id).x + rect(b, id).w / 2;
+const cy = (b: GraphBase, id: string) => rect(b, id).y + rect(b, id).h / 2;
+
+function assertOrthogonal(b: GraphBase): void {
+  for (const be of b.edges) {
+    const p = be.points;
+    for (let i = 1; i < p.length; i++) {
+      assert.ok(p[i]!.x === p[i - 1]!.x || p[i]!.y === p[i - 1]!.y, `${be.edge.from} -> ${be.edge.to}: ${JSON.stringify(p)}`);
+    }
+  }
+}
+
+test('align: an undirected edge points from the end defined first', async () => {
+  const b = await base(['Distribution', 'Access', 'Access - Distribution'].join('\n'));
+  assert.ok(rect(b, 'Distribution').y < rect(b, 'Access').y, 'defined first sits in the upper layer');
+  const e = b.edges[0]!;
+  assert.equal(e.edge.from, 'Access');
+  const first = e.points[0]!;
+  assert.ok(Math.abs(first.y - rect(b, 'Access').y) < 1, 'route still starts at the `from` end');
+  const directed = await base(['Distribution', 'Access', 'Access > Distribution'].join('\n'));
+  assert.ok(rect(directed, 'Access').y < rect(directed, 'Distribution').y, 'an arrow still sets the flow');
+});
+
+test('align: siblings in one layer stand in source order, inside groups too', async () => {
+  const b = await base(['G {', '  D', '  A1', '  A2', '  A3', '  A4', '}', 'A1 - D', 'A2 - D', 'A3 - D', 'A4 - D'].join('\n'));
+  const xs = ['A1', 'A2', 'A3', 'A4'].map((id) => rect(b, id).x);
+  assert.deepEqual([...xs].sort((a, c) => a - c), xs);
+  assertOrthogonal(b);
+  const root = await base(['D', 'S3', 'S1', 'S2', 'D > S1', 'D > S2', 'D > S3'].join('\n'));
+  const order = ['S3', 'S1', 'S2'].map((id) => rect(root, id).x);
+  assert.deepEqual([...order].sort((a, c) => a - c), order, 'root follows definition order, not edge order');
+});
+
+test('align: nodes in one layer share a centre along the flow', async () => {
+  const b = await base(['A', 'B', 'C [shape: diamond]', 'E [shape: circle]', 'A > B', 'A > C', 'A > E'].join('\n'));
+  assert.notEqual(rect(b, 'B').h, rect(b, 'C').h);
+  assert.equal(cy(b, 'B'), cy(b, 'C'));
+  assert.equal(cy(b, 'B'), cy(b, 'E'));
+  assertOrthogonal(b);
+});
+
+test('align: sibling groups in one row take one top and height', async () => {
+  const b = await base(['R', 'G1 {', '  P', '  Q', '}', 'G2 {', '  Y', '  Z', '  Z2', '}', 'P > Q', 'Y > Z', 'Z > Z2', 'R > P', 'R > Y'].join('\n'));
+  assert.equal(rect(b, 'G1').y, rect(b, 'G2').y);
+  assert.equal(rect(b, 'G1').h, rect(b, 'G2').h);
+  assertOrthogonal(b);
+});
+
+test('align: a group under half its row height keeps its own size', async () => {
+  const b = await base(['R', 'G1 {', '  P', '}', 'G2 {', '  Y', '  Z', '  Z2', '}', 'Y > Z', 'Z > Z2', 'R > P', 'R > Y'].join('\n'));
+  assert.ok(rect(b, 'G1').h < rect(b, 'G2').h / 2);
+});
+
+test('align: stacked bands take one width and share their columns', async () => {
+  const b = await base(['G1 {', '  A', '  B', '  C', '}', 'G2 {', '  D', '  E', '}', 'A > D'].join('\n'));
+  assert.ok(rect(b, 'G1').y + rect(b, 'G1').h <= rect(b, 'G2').y, 'stacked');
+  assert.equal(rect(b, 'G1').x, rect(b, 'G2').x);
+  assert.equal(rect(b, 'G1').w, rect(b, 'G2').w);
+  assert.equal(cx(b, 'A'), cx(b, 'D'));
+  assert.equal(cx(b, 'B'), cx(b, 'E'));
+  for (const id of ['A', 'B', 'C']) {
+    const r = rect(b, id);
+    const g = rect(b, 'G1');
+    assert.ok(r.x >= g.x + 16 && r.x + r.w <= g.x + g.w - 16, `${id} keeps the side padding`);
+  }
+  assertOrthogonal(b);
+});
+
+test('align: root nodes without edges keep their own size', async () => {
+  const long = 'A rather long label that keeps going and going';
+  const b = await base(['A', 'B', long, 'A > B'].join('\n'));
+  assert.deepEqual([rect(b, 'A').w, rect(b, 'A').h], [160, 52]);
+  assert.deepEqual([rect(b, 'B').w, rect(b, 'B').h], [160, 52], 'not matched to the free-standing long note');
+});
+
+test('align: moveEnd keeps a route orthogonal; orthogonalize removes sub-pixel jogs', () => {
+  const z = moveEnd([{ x: 0, y: 0 }, { x: 0, y: 100 }], false, 30, 0);
+  assert.deepEqual(z, [{ x: 30, y: 0 }, { x: 30, y: 50 }, { x: 0, y: 50 }, { x: 0, y: 100 }]);
+  const l = moveEnd([{ x: 0, y: 0 }, { x: 0, y: 50 }, { x: 80, y: 50 }], true, 0, 10);
+  assert.deepEqual(l, [{ x: 0, y: 0 }, { x: 0, y: 60 }, { x: 80, y: 60 }]);
+  assert.deepEqual(orthogonalize([{ x: 10, y: 0 }, { x: 10.3, y: 40 }, { x: 60, y: 40.4 }]), [{ x: 10, y: 0 }, { x: 10, y: 40 }, { x: 60, y: 40 }]);
+});
