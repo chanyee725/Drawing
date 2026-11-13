@@ -333,9 +333,10 @@ const fontFace = (family: string, weight: number, base64: string) =>
 const ROUGH_FONT_FACE = fontFace('Shantell Sans', 400, SHANTELL_SANS_WOFF2_BASE64);
 const CLEAN_FONT_FACE = fontFace(CLEAN_FONT_NAME, 400, DRAWING_SANS_400_WOFF2_BASE64);
 const CLEAN_BOLD_FONT_FACE = fontFace(CLEAN_FONT_NAME, 600, DRAWING_SANS_600_WOFF2_BASE64);
-// Text in the clean face inherits the root font-family; rough and mono text name their own.
-const CLEAN_TEXT = /<text (?![^>]*\sfont-family=)(?![^>]*\sfont-weight="600")/;
-const CLEAN_BOLD_TEXT = /<text (?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/;
+// Text in the clean face inherits the root font-family; rough and mono text name their own. `\b` leaves the space after
+// `<text` for `\s`, so an attribute is found wherever it sits in the tag, first included.
+const CLEAN_TEXT = /<text\b(?![^>]*\sfont-family=)(?![^>]*\sfont-weight="600")/;
+const CLEAN_BOLD_TEXT = /<text\b(?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/;
 
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
