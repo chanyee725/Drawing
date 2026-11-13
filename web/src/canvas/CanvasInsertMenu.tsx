@@ -8,6 +8,7 @@ import { TEMPLATES } from '../dsl/templates';
 import { diagramBlock, filterInsert, shapeSkeleton, type InsertItem } from './insert';
 import { renderBlock } from './render';
 import { newBlockId } from './sync';
+import { Input } from '../components/ui/input';
 
 type Props = {
   api: ExcalidrawImperativeAPI | null;
@@ -130,7 +131,7 @@ export function CanvasInsertMenu({ api, wrap, onBlock }: Props) {
         e.stopPropagation();
       }}
     >
-      <input
+      <Input
         autoFocus
         role="combobox"
         aria-expanded="true"
