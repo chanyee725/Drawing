@@ -251,8 +251,13 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     run.record.state = state;
     run.record.endedAt = now();
     run.record.totals = totalsOf(run.record);
-    active.delete(runId);
-    await writeNow(run);
+    // Stay in `active` until the last write is done (or failed), so a move meanwhile still updates run.loc.
+    try {
+      await writeNow(run);
+      while (run.dirty) await writeNow(run); // a move landed after the write: record the new location too
+    } finally {
+      active.delete(runId);
+    }
     hub?.broadcast('run', { file: run.record.file, runId, run: summaryOf(run.record) });
     return structuredClone(run.record);
   }

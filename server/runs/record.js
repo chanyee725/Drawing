@@ -17,7 +17,9 @@ const SHORT = /^[A-Za-z0-9._:/@+-]{1,120}$/;
 const TOKEN_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite'];
 
 const num = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
-const short = (v) => (typeof v === 'string' && SHORT.test(v) ? v : undefined);
+const EMAIL = /[^\s@]+@[^\s@]+\.[^\s@]+/;
+// Strings are kept only when they look like a short token and not like an email address (never stored, even in a branch name).
+const short = (v) => (typeof v === 'string' && SHORT.test(v) && !EMAIL.test(v) ? v : undefined);
 
 /**
  * Keep only whitelisted metadata from a session object (Dispatch session or a patch of one).

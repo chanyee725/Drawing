@@ -4,6 +4,7 @@ import { watch } from 'node:fs';
 import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, lstat, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join, sep } from 'node:path';
+import { ensureDirInside, LockPathError } from '../lock.js';
 import { createResolver, parseRelPath, PathError } from './paths.js';
 import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
 
@@ -300,7 +301,17 @@ export function createStore(
     serial,
     fileRel: checkedFileRel,
     dirOf: runsDirOf,
-    trashDirOf: async (trashId) => join(await entryDir(trashId), 'runs'),
+    // The `runs` folder inside a trash entry must be a real folder inside the workspace (not a link out of it).
+    trashDirOf: async (trashId) => {
+      const dir = join(await entryDir(trashId), 'runs');
+      try {
+        await ensureDirInside(fsr.root, dir);
+      } catch (err) {
+        if (err instanceof LockPathError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      return dir;
+    },
     onChange(fn) {
       sidecarListeners.add(fn);
       return () => sidecarListeners.delete(fn);

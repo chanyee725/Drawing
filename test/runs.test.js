@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readdir, readFile, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile, mkdir, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -257,5 +257,53 @@ test('runs API: list, read, POST stub', async () => {
   } finally {
     await app.close();
     await rm(ws, { recursive: true, force: true });
+  }
+});
+
+test('runs: endRun overlapping a move leaves one record, done, at the new path', async () => {
+  await withRecorder({}, async ({ ws, store, recorder }) => {
+    await store.createFile('f/a');
+    const live = await recorder.startRun({ file: 'f/a', plan: PLAN });
+    await Promise.all([store.move('f/a.dpx.json', 'f/b.dpx.json'), recorder.endRun(live.id)]);
+    await sleep(80);
+    assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).state, 'done');
+    assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).file, 'f/b.dpx.json');
+    await assert.rejects(readFile(runFile(ws, 'f/a.dpx.json', live.id)));
+    assert.deepEqual(recorder.active, []);
+  });
+});
+
+test('runs: an email-shaped name or branch never reaches disk', async () => {
+  await withRecorder({}, async ({ ws, store, recorder }) => {
+    await store.createFile('a');
+    const { id } = await recorder.startRun({ file: 'a', plan: PLAN });
+    recorder.updateSession(id, 'impl', { sid: 's1', name: 'someone@example.com', branch: 'feat/someone@example.com', model: 'm1' });
+    await recorder.endRun(id);
+    const text = await readFile(runFile(ws, 'a.dpx.json', id), 'utf8');
+    assert.ok(!text.includes('someone@example.com'));
+    assert.ok(!text.includes('someone@'));
+    assert.ok(text.includes('"m1"'));
+  });
+});
+
+test('runs: a trash runs folder that links outside the workspace is refused and nothing is written outside', async () => {
+  const outside = await mkdtemp(join(tmpdir(), 'draw-runs-out-'));
+  try {
+    await withRecorder({}, async ({ ws, store, recorder }) => {
+      await store.createFile('a');
+      const live = await recorder.startRun({ file: 'a', plan: PLAN });
+      await store.removeFile('a');
+      const { items } = await store.trash();
+      const entry = join(ws, '.drawing', 'trash', items[0].id);
+      await rm(join(entry, 'runs'), { recursive: true, force: true });
+      await symlink(outside, join(entry, 'runs'));
+      await assert.rejects(store.runs.trashDirOf(items[0].id), { status: 400 });
+      recorder.updateSession(live.id, 'impl', { sid: 's1', cost: 1 });
+      await sleep(60);
+      await recorder.endRun(live.id).catch(() => {});
+      assert.deepEqual(await readdir(outside), []);
+    });
+  } finally {
+    await rm(outside, { recursive: true, force: true });
   }
 });
