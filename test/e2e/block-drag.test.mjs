@@ -65,6 +65,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
 
   const overlay = page.locator('[data-layout-edit]');
   const bar = page.getByRole('status', { name: '레이아웃 안내' });
+  const errorBar = page.getByRole('status', { name: '레이아웃 안내' }).filter({ hasText: /코드 오류를 고치면 옮길 수 있어요/ });
   const shot = (name) => page.screenshot({ path: join(process.env.E2E_SHOTS ?? ws, name) });
   const box = await page.locator('[data-canvas]').boundingBox();
   const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -263,8 +264,16 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await page.keyboard.press('End');
   await page.keyboard.type('\nWeb > ');
   // While the code panel is open the broken code does not end edit mode: the last picture stays, not editable.
-  await page.waitForTimeout(1200);
+  // Wait for the bar to name the error (the code was parsed and refused), not for a fixed time.
+  await errorBar.waitFor({ timeout: 10000 });
   assert.equal(await overlay.count(), 1, 'overlay stays through a syntax error while the panel is open');
+  // Dragging and nudging a node while the code is broken changes nothing.
+  const layoutBefore = (await saved()).layout;
+  const frozen = await nodes();
+  await drag(frozen.DB, { x: frozen.DB.x + 80, y: frozen.DB.y + 40 });
+  for (const k of ['ArrowRight', 'Shift+ArrowDown']) await page.keyboard.press(k);
+  assert.deepEqual((await saved()).layout, layoutBefore, 'a drag or nudge during a code error is not saved');
+  near(await nodes().then((x) => x.DB), frozen.DB, 'the picture does not move during a code error');
   await page.waitForTimeout(500);
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
@@ -307,7 +316,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await panel.locator('.cm-line').last().click();
   await page.keyboard.press('End');
   await page.keyboard.type('\nWeb > ');
-  await page.waitForTimeout(1200);
+  await errorBar.waitFor({ timeout: 10000 });
   assert.equal(await overlay.count(), 1, 'overlay waits for the panel to close');
   assert.match(await bar.innerText(), /코드 오류를 고치면 옮길 수 있어요/, 'the bar says why nothing moves while the code is broken');
   await panel.getByRole('button', { name: '닫기' }).click();
