@@ -149,8 +149,9 @@ export function progress(items: readonly ProgressItem[]): Progress {
   return { total, done, blocked, remaining: total - done, percent };
 }
 
-/** `5단계 중 2 완료 · 48% · 남은 3 (막힘 1)` */
+/** `5단계 중 2 완료 · 48% · 남은 3 (막힘 1)`; a run whose every step was skipped has nothing to count. */
 export function progressLabel(p: Progress): string {
+  if (p.total === 0) return '건너뛴 단계뿐이에요';
   const tail = p.blocked > 0 ? ` (막힘 ${p.blocked})` : '';
   return `${p.total}단계 중 ${p.done} 완료 · ${p.percent}% · 남은 ${p.remaining}${tail}`;
 }

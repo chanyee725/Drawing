@@ -225,8 +225,11 @@ progress state. The run record still keeps the raw per-session states (§4); `vi
 - `active` and `review` use the owning agent's colour; with no owner yet, `--ok` green. `done` uses `--ok` green,
   `blocked` uses `--bad`, `pending` uses `--idle` grey. Status colours come from Dispatch's tokens, the same ones
   the sessions board uses.
-- A **legend** sits in the block's top-right corner (collapsible): one row per agent (role colour swatch, short
-  name, role, model) and one row per state glyph. Only agents and states present in the run are listed.
+- A **legend** (collapsible) sits beside the picture on the canvas, on the side with room (under it, else left,
+  else right, else above), clamped inside the canvas pane and letting clicks through except on its fold toggle;
+  in the document it sits under the picture. It never covers a node, and it shows only when the board does (at
+  least one step links to a node). One row per agent (role colour swatch, short name, role, model) and one row per
+  state glyph. Only agents and states present in the run are listed.
 
 **Effects.**
 
@@ -249,6 +252,8 @@ option asks for it (open question).
 of the state it was in before blocking (so blocking never makes the bar go backwards) and is counted separately in
 the text. Steps closed as abandoned (그만둠) leave the denominator. Percent = sum of weights ÷ counted steps,
 rounded down so 100% means every counted step is `done`. Steps with `n > 1` sessions count once.
+A blocked step whose history fell off the capped timeline counts as `active` if it had started. A run whose every
+step was skipped shows `건너뛴 단계뿐이에요` and no bar.
 
 **Accessibility.**
 

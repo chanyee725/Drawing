@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parse } from '../../shared/dsl/index.ts';
 import { edgeKey, layoutDiagram, nodeRects } from '../../shared/render/index.ts';
 import type { Scene } from '../../shared/render/index.ts';
-import { agentColors, legendOf, overlayModel, pathData, roleColor, runProgress } from '../../web/src/run/overlayModel.ts';
+import { agentColors, boardShown, legendOf, legendSpot, overlayModel, pathData, roleColor, runProgress } from '../../web/src/run/overlayModel.ts';
 import { FIXTURE_BLOCKED, FIXTURE_CODE, FIXTURE_STEPS } from '../../web/src/run/fixture.ts';
 
 async function scene(code: string): Promise<Scene> {
@@ -136,4 +136,27 @@ test('progress: a blocked step keeps its weight, a skipped step leaves the count
   const skipped = FIXTURE_STEPS.map((s) => (s.id === 'merge' ? { ...s, skipped: true } : s));
   assert.deepEqual(runProgress(skipped), { total: 4, done: 2, blocked: 0, remaining: 2, percent: 82 });
   assert.equal(legendOf(skipped).states.some((s) => s.view === 'pending'), false);
+});
+
+test('boardShown: the legend shows only when a step links to a node', async () => {
+  const s = await scene(FIXTURE_CODE);
+  assert.equal(boardShown(s, FIXTURE_STEPS), true);
+  assert.equal(boardShown(s, [{ id: 'nowhere', view: 'active' }]), false);
+  assert.equal(boardShown(s, []), false);
+});
+
+test('legendSpot: under the picture, else left, right, above; always inside the overlay', () => {
+  const size = { width: 200, height: 120 };
+  const area = { width: 1000, height: 700 };
+  // Room under the picture (the label reach is left free).
+  assert.deepEqual(legendSpot({ left: 100, top: 100, width: 300, height: 200 }, size, area, 12, 20), { left: 100, top: 332 });
+  // Picture at the bottom: left of it.
+  assert.deepEqual(legendSpot({ left: 400, top: 500, width: 300, height: 190 }, size, area), { left: 188, top: 500 });
+  // Bottom-left corner: right of it.
+  assert.deepEqual(legendSpot({ left: 10, top: 500, width: 300, height: 190 }, size, area), { left: 322, top: 500 });
+  // Bottom, spanning the width: above it.
+  assert.deepEqual(legendSpot({ left: 10, top: 300, width: 980, height: 390 }, size, area), { left: 10, top: 168 });
+  // Picture fills the pane: under it, clamped inside the overlay.
+  const p = legendSpot({ left: -50, top: -50, width: 1200, height: 900 }, size, area);
+  assert.deepEqual(p, { left: 8, top: area.height - size.height - 8 });
 });
