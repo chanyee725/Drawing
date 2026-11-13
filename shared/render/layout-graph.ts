@@ -1091,6 +1091,8 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
       start: e.startArrow ? 'arrow' : 'none',
       end: e.endArrow ? 'arrow' : 'none',
       color: style.paint.color,
+      from: e.from,
+      to: e.to,
     };
     if (port) edge.soft = true;
     edgeItems.push(edge);

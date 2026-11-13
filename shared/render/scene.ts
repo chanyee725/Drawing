@@ -97,6 +97,10 @@ export interface SceneEdge {
   start: Marker;
   end: Marker;
   color?: string;
+  /** Graph types: DSL id of the source node or group. With `to` it keys the edge for the run overlay, stable across code edits that reorder lines (unlike `id`). */
+  from?: string;
+  /** Graph types: DSL id of the target node or group. */
+  to?: string;
   /** Drawn lighter (straight connectors in graph diagrams, spec §1.7). */
   soft?: boolean;
 }
