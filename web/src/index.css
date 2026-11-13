@@ -180,6 +180,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 .num { font-variant-numeric: tabular-nums; }
+/* Document path (design doc 6 §2.4): separators are decorative, drawn with empty alt text so screen readers skip them.
+   Narrow screens show only the open document, so no separator there. */
+.crumbs > li + li::before { content: "/" / ""; padding-inline: 0.125rem; color: var(--muted-foreground); }
+@media (width < 48rem) { .crumbs > li::before { content: none; } }
 /* The canvas keeps its own type; the chrome tracking above must not leak into Excalidraw. */
 .excalidraw { letter-spacing: normal; }
 @media (prefers-reduced-motion: reduce) {
