@@ -17,9 +17,10 @@ const SKIP = { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run',
 const FIXTURES = ['architecture-web-service', 'flowchart-ticket-workflow', 'sequence-login', 'erd-billing'];
 // The labels of the report: at fit zoom they read "Need identi fied" and "Raise a requisition" with gaps.
 const REPORT = 'direction right\nNeed identified [shape: oval, color: green]\nRaise a requisition\nNeed identified > Raise a requisition: The supplier ships';
-/** Picture variants the canvas shows when zoomed out (resolution.ts), and the reference: big enough that rounding is gone. */
+/** Picture variants the canvas shows when zoomed out (resolution.ts), and the reference: big enough that rounding is gone.
+ *  4x, not 8x: the whole picture is drawn at this size (up to ~9.5k px wide at 8x), which can time out on a busy machine. */
 const SMALL = [1, 0.5];
-const REFERENCE = 8;
+const REFERENCE = 4;
 
 /** Where each single-line text sits (picture units), with room around it; texts whose rooms touch are left out. */
 function textRooms(scene) {
