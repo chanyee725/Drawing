@@ -3,9 +3,10 @@
 //
 // Per-workspace switch: <workspace>/.drawing/settings.json { "prStatus": false } turns it off
 // (default on). Off, or a missing gh, never throws: the result says why.
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { runCli } from "./cli.js";
+import { ensureDirInside } from "../lock.js";
 
 export const PR_DEFAULTS = { timeoutMs: 8000, cacheMs: 30000, minGapMs: 1000 };
 
@@ -23,8 +24,22 @@ export async function prTrackingEnabled(workspaceDir) {
 /** Turns PR tracking on or off for a workspace folder; other settings in the file stay. */
 export async function setPrTracking(workspaceDir, on) {
   const cur = await readSettings(workspaceDir);
-  await mkdir(path.dirname(settingsFile(workspaceDir)), { recursive: true });
-  await writeFile(settingsFile(workspaceDir), JSON.stringify({ ...cur, prStatus: !!on }, null, 2) + "\n");
+  const file = settingsFile(workspaceDir);
+  // .drawing must be a real folder inside the workspace; settings.json must not be a symlink.
+  await ensureDirInside(workspaceDir, path.dirname(file));
+  try {
+    if (!(await lstat(file)).isFile()) throw new Error("settings.json is not a regular file");
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+  const tmp = `${file}.${process.pid}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify({ ...cur, prStatus: !!on }, null, 2) + "\n", { flag: "wx" });
+    await rename(tmp, file);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
   return !!on;
 }
 

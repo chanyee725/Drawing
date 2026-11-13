@@ -1,6 +1,6 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, symlinkSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -71,4 +71,22 @@ test("per-workspace switch: default on, off never starts gh", async () => {
   assert.equal(f.calls(), 0);
   await setPrTracking(f.ws, true);
   assert.equal((await get("feat/a")).ok, true);
+});
+
+test("setPrTracking never writes outside the workspace through symlinks", async () => {
+  // symlinked .drawing
+  const a = fakeGh({}), outA = tmp();
+  symlinkSync(outA, path.join(a.ws, ".drawing"));
+  await assert.rejects(setPrTracking(a.ws, false));
+  assert.deepEqual(readdirSync(outA), []);
+  // symlinked settings.json
+  const b = fakeGh({}), outB = tmp();
+  const target = path.join(outB, "victim.json");
+  writeFileSync(target, "{}");
+  mkdirSync(path.join(b.ws, ".drawing"));
+  symlinkSync(target, path.join(b.ws, ".drawing", "settings.json"));
+  await assert.rejects(setPrTracking(b.ws, false));
+  assert.equal(readFileSync(target, "utf8"), "{}");
+  assert.deepEqual(readdirSync(outB), ["victim.json"]);
+  assert.deepEqual(readdirSync(path.join(b.ws, ".drawing")), ["settings.json"]);
 });
