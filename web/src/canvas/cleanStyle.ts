@@ -12,6 +12,9 @@ const HAND_FONTS: ReadonlySet<unknown> = new Set([1, 5]);
 /** Size of new free-form text: the size of node text in diagram blocks. Texts already saved keep their own size. */
 export const CLEAN_FONT_SIZE = 13;
 
+/** Excalidraw's line height for Liberation Sans (its FONT_METADATA): a 13px line is 14.95 high. */
+export const CLEAN_LINE_HEIGHT = 1.15;
+
 /** Starting tool settings for a fresh canvas (`initialData.appState`). */
 export const CLEAN_APP_STATE = {
   currentItemRoughness: 0,

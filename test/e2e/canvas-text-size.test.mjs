@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { TEXT_OFFSET } from '../../web/src/canvas/insert.ts';
 
 const ON = process.env.DRAW_E2E === '1' && process.env.CHROME && process.env.PLAYWRIGHT_CORE;
 const SKIP = { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 };
@@ -100,10 +101,18 @@ async function open(t, path, elements) {
   const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) })).json();
   const f = await call('POST', '/api/file', { path, title: '글자 크기' });
   await call('PUT', `/api/file?path=${path}`, { ...f, canvas: { ...f.canvas, elements } });
-  const saved = async () => {
-    await new Promise((r) => setTimeout(r, 1500)); // autosave is debounced
-    const g = await call('GET', `/api/file?path=${path}`);
-    return new Map(g.canvas.elements.filter((e) => !e.isDeleted).map((e) => [e.id, e]));
+  /**
+   * The saved elements by id, once `ready(elements)` holds. Autosave is debounced and slower under load,
+   * so poll the file until then, up to a deadline; past it return the last read and let the asserts say what is missing.
+   */
+  const saved = async (ready, ms = 30_000) => {
+    const deadline = Date.now() + ms;
+    for (;;) {
+      const g = await call('GET', `/api/file?path=${path}`);
+      const s = new Map(g.canvas.elements.filter((e) => !e.isDeleted).map((e) => [e.id, e]));
+      if (ready(s) || Date.now() > deadline) return s;
+      await new Promise((r) => setTimeout(r, 200));
+    }
   };
 
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME, env: { ...process.env, ...withoutCleanFont(ws) } });
@@ -112,8 +121,18 @@ async function open(t, path, elements) {
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
   await page.goto(`${BASE}/#file=${path}`);
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
+  // Only the canvas view: wait until the canvas fills the space the document had, and keeps that size.
   await page.getByRole('button', { name: '캔버스', exact: true }).click();
-  await page.waitForTimeout(800);
+  await page.waitForFunction(
+    () => {
+      const w = document.querySelector('.excalidraw')?.getBoundingClientRect().width ?? 0;
+      const last = window.__canvasWidth;
+      window.__canvasWidth = w;
+      return w > window.innerWidth / 2 && w === last;
+    },
+    null,
+    { polling: 100, timeout: 30_000 },
+  );
   /** Width of one line of `str` in the clean font, measured once the font has loaded. */
   const cleanWidth = (str, px) =>
     page.evaluate(async ([s, size]) => {
@@ -125,7 +144,6 @@ async function open(t, path, elements) {
     }, [str, px]);
   return { page, saved, errors, cleanWidth };
 }
-
 
 test('new text is 13px, a saved text keeps its size, and a new label wraps inside its shape', SKIP, async (t) => {
   const { page, saved, errors, cleanWidth } = await open(t, 'size', [text('old', 100, 100, 'Saved at twenty', 9)]);
@@ -158,7 +176,11 @@ test('new text is 13px, a saved text keeps its size, and a new label wraps insid
   await page.keyboard.type(label);
   await page.keyboard.press('Escape');
 
-  const s = await saved();
+  const texts = (s) => [...s.values()].filter((e) => e.type === 'text');
+  const s = await saved((m) => {
+    const t = texts(m);
+    return t.some((e) => e.text === typed) && t.some((e) => e.text === '텍스트') && t.some((e) => e.originalText === label && m.has(e.containerId));
+  });
   const fresh = [...s.values()].find((e) => e.type === 'text' && e.text === typed);
   assert.ok(fresh, 'the typed text is saved');
   assert.equal(fresh.fontSize, 13);
@@ -170,6 +192,9 @@ test('new text is 13px, a saved text keeps its size, and a new label wraps insid
   const menu = [...s.values()].find((e) => e.type === 'text' && e.text === '텍스트');
   assert.ok(menu, 'the insert-menu text is saved');
   assert.equal(menu.fontSize, 13);
+  // It starts TEXT_OFFSET above the point, so its one line is centred on the point. (Its width depends on which
+  // font draws Hangul on the machine, so the x offset is only an estimate and not checked here.)
+  assert.ok(Math.abs(TEXT_OFFSET.y - menu.height / 2) <= 0.5, `offset y ${TEXT_OFFSET.y}, half height ${menu.height / 2}`);
 
   const bound = [...s.values()].find((e) => e.type === 'text' && e.originalText === label);
   assert.ok(bound, 'the label is saved');
