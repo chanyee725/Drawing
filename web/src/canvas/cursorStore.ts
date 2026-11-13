@@ -1,15 +1,19 @@
 // Live agent cursors (E56) for the whole page, fed by `cursor` events from the shared event stream. Memory only.
 import { useSyncExternalStore } from 'react';
-import { applyCursor, pruneGone, type Cursor, type CursorEvent } from './agentCursor.ts';
+import { applyCursorDrawn, pruneGone, type Cursor, type CursorEvent, type GlideClock } from './agentCursor.ts';
 
 let cursors: ReadonlyMap<string, Cursor> = new Map();
+/** How much of each cursor's glide has been drawn (AgentCursors). Here, not in the layer: it outlives a remount. */
+export const glideClocks = new Map<string, GlideClock>();
 const subs = new Set<() => void>();
 const set = (next: ReadonlyMap<string, Cursor>) => {
   if (next === cursors) return;
   cursors = next;
+  for (const sid of glideClocks.keys()) if (!cursors.has(sid)) glideClocks.delete(sid);
   for (const f of subs) f();
 };
-const subscribe = (f: () => void) => {
+/** f() after every change of the cursors; returns an unsubscribe function. */
+export const subscribeCursors = (f: () => void) => {
   subs.add(f);
   return () => subs.delete(f);
 };
@@ -21,7 +25,7 @@ export const reducedMotion = () =>
 
 /** One `cursor` event from the server. */
 export function applyCursorEvent(e: CursorEvent) {
-  set(applyCursor(cursors, e, now(), reducedMotion()));
+  set(applyCursorDrawn(cursors, glideClocks, e, now(), reducedMotion()));
 }
 
 /** Drop cursors that have faded out. */
@@ -38,4 +42,4 @@ export function clearCursors(file?: string) {
 
 export const cursorsNow = () => cursors;
 
-export const useCursors = () => useSyncExternalStore(subscribe, cursorsNow, cursorsNow);
+export const useCursors = () => useSyncExternalStore(subscribeCursors, cursorsNow, cursorsNow);
