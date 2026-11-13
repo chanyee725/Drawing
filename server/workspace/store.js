@@ -7,6 +7,8 @@ import { basename, dirname, join, sep } from 'node:path';
 import { ensureDirInside, LockPathError } from '../lock.js';
 import { createResolver, parseRelPath, PathError } from './paths.js';
 import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
+import { applyPlanOps } from './plan-ops.js';
+import { PLAN_VERSION } from '../../shared/dispatch/plan.ts';
 
 export class StoreError extends Error {
   constructor(status, message, extra = {}) {
@@ -560,10 +562,13 @@ export function createStore(
       } else if (e.isFile() && isDpx(e.name)) {
         let title = '';
         let revision = null;
+        let pipeline;
         try {
           const f = parseStored(await readFile(join(absDir, e.name), 'utf8'));
           title = f.title;
           revision = f.revision;
+          // Run states (실행 중 / 멈춤 / 완료) come from run records later (E21); a file with a plan is a draft until then.
+          if (f.plan) pipeline = { state: 'plan' };
         } catch {
           // unreadable file still shows up so it can be renamed or deleted
         }
@@ -576,7 +581,9 @@ export function createStore(
         // Saves replace the file (atomic rename), so its birth time is the last save on most systems; projects.js
         // takes the earlier of this and the oldest history snapshot. Without a birth time (0) the mtime stands in.
         const born = st.birthtimeMs > 0 && st.birthtimeMs < st.mtimeMs ? st.birthtime : st.mtime;
-        out.push({ type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString(), created: born.toISOString() });
+        const row = { type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString(), created: born.toISOString() };
+        if (pipeline) row.pipeline = pipeline;
+        out.push(row);
       }
     }
     // folders first
@@ -603,13 +610,24 @@ export function createStore(
   }
 
   // ---- file operations ----
-  async function createFile(rel, { title } = {}) {
+  // `body` may carry starting content (document, canvas, blocks, plan), e.g. a pipeline template; it is checked like a save.
+  async function createFile(rel, body = {}) {
     rel = checkedFileRel(rel);
     checkFolderNames(rel.split('/').slice(0, -1));
     const abs = await wrapPath(rel).catch((err) => {
       throw asParentClash(err);
     });
-    const fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
+    const { title } = body ?? {};
+    let fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
+    const { document, canvas, blocks, plan } = body ?? {};
+    if (document !== undefined || canvas !== undefined || blocks !== undefined || plan !== undefined) {
+      try {
+        fresh = { ...normalizeContent({ title: fresh.title, document, canvas, blocks, plan }), revision: fresh.revision };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+    }
     return serial(async () => {
       await ensureParent(abs);
       const file = { ...fresh, revision: Math.max(fresh.revision, (tombstones.get(rel) ?? 0) + 1) };
@@ -678,6 +696,35 @@ export function createStore(
       await atomicWrite(abs, text);
       known.set(rel, { hash: sha(text), revision: next.revision });
       return { path: rel, revision: next.revision };
+    });
+  }
+
+  // Agents change the plan without holding the whole file: step-level ops applied to what is on disk now, under
+  // the same lock as saves. `revision` is optional; when given, a stale one gets 409 like a save.
+  async function patchPlanAt(rel, body) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    const base = body?.revision;
+    if (base !== undefined && (!Number.isInteger(base) || base < 1)) throw new StoreError(400, 'revision must be an integer >= 1');
+    if (!Array.isArray(body?.ops) || body.ops.length === 0) throw new StoreError(400, 'ops must be a non-empty array');
+    return serial(async () => {
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
+      if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
+      if (base !== undefined && current.revision !== base) throw new StoreError(409, 'stale write', { revision: current.revision });
+      if (current.plan && current.plan.v > PLAN_VERSION) throw new StoreError(422, '더 새 버전에서 만든 계획이라 바꾸지 않았어요');
+      let next;
+      try {
+        const plan = applyPlanOps(current.plan, body.ops);
+        next = { ...normalizeContent({ ...current, plan }), revision: current.revision + 1 };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      const text = serialize(next);
+      await snapshotQuietly(rel, before);
+      await atomicWrite(abs, text);
+      known.set(rel, { hash: sha(text), revision: next.revision });
+      return { path: rel, revision: next.revision, plan: next.plan ?? null };
     });
   }
 
@@ -1057,5 +1104,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close, runs: runsApi };
+  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close, runs: runsApi };
 }

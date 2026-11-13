@@ -83,6 +83,7 @@ const countOf = (children) => children.reduce((s, c) => s + (c.type === 'doc' ? 
 async function docNode(f, children, created) {
   const modified = ms(f.mtime);
   return {
+    ...(f.pipeline ? { pipeline: f.pipeline } : {}),
     type: 'doc',
     path: f.path,
     name: stem(f.name),

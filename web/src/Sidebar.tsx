@@ -198,6 +198,13 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
       >
         {n.type === 'doc' ? <File className="size-[15px]! text-muted-foreground" aria-hidden /> : <FolderClosed className="size-[15px]! text-muted-foreground" aria-hidden />}
         <span className="truncate">{label}</span>
+        {n.type === 'doc' && n.pipeline?.state === 'plan' && (
+          // Pipeline file still in planning (runs come with E21). The row's pr-14 keeps it clear of the row actions.
+          <span role="img" aria-label="파이프라인: 계획" title="파이프라인 계획" className="ml-auto flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[11px] leading-4 text-muted-foreground">
+            <span aria-hidden>◐</span>
+            <span aria-hidden>계획</span>
+          </span>
+        )}
         {has && !expanded && <SidebarMenuBadge aria-label={`하위 ${n.count}개`}>{n.count}</SidebarMenuBadge>}
       </SidebarMenuButton>
       {has && n.type === 'doc' && (
