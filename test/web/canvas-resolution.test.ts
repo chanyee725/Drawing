@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MAX_SCALE, MIN_SCALE, baseFileId, pictureScale, scaleSvg, variantId } from '../../web/src/canvas/resolution.ts';
+import { MAX_SCALE, MIN_SCALE, baseFileId, exportVariants, pictureScale, scaleSvg, variantId } from '../../web/src/canvas/resolution.ts';
 import { placeBlocks, type Rect } from '../../web/src/canvas/sync.ts';
 
 test('pictureScale picks the power of two at or above the pixels per unit', () => {
@@ -60,4 +60,27 @@ test('placeBlocks keeps new blocks clear of placed ones at their drawn height', 
       const overlap = p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h;
       assert.ok(!overlap, `${out[i]!.id} overlaps ${out[j]!.id}: ${JSON.stringify(rects)}`);
     }
+});
+
+test('a PNG export uses the picture variant for its own scale, not the zoomed-out view', () => {
+  const pic = { fileId: 'blk_a_1', width: 900, height: 400 };
+  const pictureOf = (id: string) => (id === pic.fileId ? pic : undefined);
+  // Seen zoomed far out: the canvas shows the 1/8 variant.
+  const shown = [
+    { id: 'i1', type: 'image', fileId: variantId('blk_a_1', 0.125), width: 900, height: 400 },
+    { id: 'r1', type: 'rectangle', width: 10, height: 10 },
+    { id: 'i2', type: 'image', fileId: 'other', width: 50, height: 50 },
+  ];
+  const at1 = exportVariants(shown, 1, pictureOf);
+  assert.equal(at1.elements[0]!.fileId, 'blk_a_1');
+  assert.deepEqual(at1.need, [{ picture: pic, k: 1 }]);
+  assert.equal(at1.elements[1], shown[1]);
+  assert.equal(at1.elements[2], shown[2]);
+  const at2 = exportVariants(shown, 2, pictureOf);
+  assert.equal(at2.elements[0]!.fileId, 'blk_a_1--k2');
+  assert.deepEqual(at2.need, [{ picture: pic, k: 2 }]);
+  // The scene itself is not changed.
+  assert.equal(shown[0]!.fileId, 'blk_a_1--k0p125');
+  // A block drawn at half its picture size, exported at 2x, needs the 1x picture.
+  assert.equal(exportVariants([{ type: 'image', fileId: 'blk_a_1--k4', width: 450, height: 200 }], 2, pictureOf).elements[0]!.fileId, 'blk_a_1');
 });

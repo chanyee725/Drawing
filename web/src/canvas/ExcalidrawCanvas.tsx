@@ -14,7 +14,7 @@ import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../ds
 import { analyzeDiagram, prunedLayout } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
-import { baseFileId, pictureScale, scaleSvg, svgDataURL, variantId } from './resolution';
+import { baseFileId, exportVariants, pictureScale, scaleSvg, svgDataURL, variantId } from './resolution';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
@@ -669,7 +669,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       png: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        return await exportToBlob({ elements, appState: opts(o), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
+        // Block images carry the variant picked for the view; the export uses the one sharp at its own scale.
+        const ex = exportVariants(elements, o.scale, (id) => sizes.current.get(id));
+        const files = { ...api.getFiles() };
+        for (const { picture, k } of ex.need) {
+          const p = sizes.current.get(picture.fileId);
+          const id = variantId(picture.fileId, k);
+          if (p && !files[id]) files[id] = fileData(p, k);
+        }
+        return await exportToBlob({ elements: ex.elements, appState: opts(o), files, mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
       },
       key: ({ key, code, ctrl, meta, shift, alt }) => {
         const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');

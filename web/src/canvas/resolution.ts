@@ -58,3 +58,29 @@ export const svgDataURL = (svg: string) => {
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   return `data:image/svg+xml;base64,${btoa(bin)}`;
 };
+
+type ImageLike = { type: string; fileId?: string | null; width: number; height: number };
+type PictureLike = { fileId: string; width: number; height: number };
+
+/**
+ * Elements for an export at `exportScale`: each block image shows the picture variant sharp at that scale,
+ * not the one picked for the current view (a zoomed-out view shows a small variant). Images of unknown
+ * pictures are left alone. Returns the elements and the variants they need (`k` per picture).
+ */
+export function exportVariants<E extends ImageLike>(
+  elements: readonly E[],
+  exportScale: number,
+  pictureOf: (baseId: string) => PictureLike | undefined,
+): { elements: E[]; need: { picture: PictureLike; k: number }[] } {
+  const need = new Map<string, { picture: PictureLike; k: number }>();
+  const out = elements.map((el) => {
+    if (el.type !== 'image' || !el.fileId) return el;
+    const p = pictureOf(baseFileId(el.fileId));
+    if (!p) return el;
+    const k = pictureScale(Math.max(Math.abs(el.width) / p.width, Math.abs(el.height) / p.height) * exportScale, p.width, p.height);
+    const id = variantId(p.fileId, k);
+    need.set(id, { picture: p, k });
+    return id === el.fileId ? el : { ...el, fileId: id };
+  });
+  return { elements: out, need: [...need.values()] };
+}
