@@ -28,7 +28,7 @@ export function useDispatch<T>(select: (s: DispatchState) => T): T {
 }
 export const getState = () => state;
 /** Tests only: back to the empty state. */
-export const resetState = () => { state = initial(); gone.clear(); };
+export const resetState = () => { state = initial(); gone.clear(); pending = null; };
 
 /** JSON request to the Dispatch API. Writes carry x-drawing: 1 (server/app.js rejects them otherwise). */
 export async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
@@ -57,10 +57,25 @@ export function forgetTranscript(id: string) {
 // Ids removed in this page's lifetime: a late update for one of them must not bring it back.
 const gone = new Set<string>();
 
+/** The one /api/state fetch whose answer may still be applied, and the stream events seen since it started. */
+type Pending = { streamed: boolean; slices: Set<keyof DispatchState>; sessions: Map<string, Session> };
+let pending: Pending | null = null;
+
+const SLICE: Record<string, keyof DispatchState> = { tasks: 'tasks', tickets: 'tickets', limits: 'limits', settings: 'settings', providers: 'providers' };
+
 /** Applies one SSE event to the state. Exported so tests can drive it without a server. */
 export function apply(ev: string, d: unknown) {
+  if (pending) {
+    if (ev === 'snapshot') pending.streamed = true;
+    else if (ev === 'session') pending.sessions.set((d as Session).id, d as Session);
+    else if (SLICE[ev]) pending.slices.add(SLICE[ev]);
+  }
   switch (ev) {
-    case 'snapshot': setState({ ...(d as Snapshot), ready: true, online: true }); break;
+    case 'snapshot': {
+      const snap = d as Snapshot;
+      setState({ ...snap, sessions: snap.sessions.filter(s => !gone.has(s.id)), ready: true, online: true });
+      break;
+    }
     case 'session': {
       const s = d as Session;
       if (gone.has(s.id)) return;
@@ -92,17 +107,54 @@ export function apply(ev: string, d: unknown) {
 /** Events this store listens to; `prefs` (theme) is the app shell's business, not this screen's. */
 export const EVENTS = ['snapshot', 'session', 'removed', 'message', 'tasks', 'tickets', 'limits', 'settings', 'providers'] as const;
 
+/**
+ * Applies a fetched /api/state answer without undoing what the stream said while the fetch was in flight:
+ * slices updated by an event keep their live value, sessions seen in an event win, removed ids stay out.
+ */
+function applyFetched(snap: Snapshot, p: Pending) {
+  const patch: Partial<DispatchState> = { ...snap, ready: true };
+  for (const k of p.slices) delete patch[k];
+  const listed = new Set(snap.sessions.map(s => s.id));
+  const added = [...p.sessions.values()].filter(s => !listed.has(s.id)).reverse();
+  patch.sessions = [...added, ...snap.sessions.map(s => p.sessions.get(s.id) ?? s)].filter(s => !gone.has(s.id));
+  setState(patch);
+}
+
 /** Opens the event stream; returns a close function. A server without Dispatch marks the screen unavailable. */
 export function connect(): () => void {
   // The shared stream may already be open (another listener holds it), and the server only sends a snapshot to a
-  // new connection, so every subscribe fetches /api/state and applies it unless a stream snapshot arrived meanwhile.
+  // new connection, so every subscribe, and every reconnect after a drop, fetches /api/state. Only the latest fetch
+  // of a still-open connect counts, and a stream snapshot that arrives first makes it moot.
   // If Dispatch is off the state route 404s and nothing ever arrives.
-  let streamed = false;
-  const offs = EVENTS.map(ev => events.subscribeJson<unknown>(ev, d => { if (ev === 'snapshot') streamed = true; apply(ev, d); }));
-  offs.push(events.onConnection(online => setState({ online })));
-  api<Snapshot>('GET', '/api/state').then(
-    snap => { if (!streamed) apply('snapshot', snap); },
-    () => { if (!state.ready) setState({ unavailable: true }); },
-  );
-  return () => offs.forEach(off => off());
+  let closed = false;
+  let mine: Pending | null = null;
+  const refresh = () => {
+    const p: Pending = { streamed: false, slices: new Set(), sessions: new Map() };
+    pending = mine = p;
+    api<Snapshot>('GET', '/api/state').then(
+      snap => {
+        if (closed || pending !== p) return;
+        pending = null;
+        if (!p.streamed) applyFetched(snap, p);
+      },
+      () => {
+        if (closed || pending !== p) return;
+        pending = null;
+        if (!state.ready) setState({ unavailable: true });
+      },
+    );
+  };
+  let dropped = false;
+  const offs = EVENTS.map(ev => events.subscribeJson<unknown>(ev, d => apply(ev, d)));
+  offs.push(events.onConnection(online => {
+    setState({ online });
+    if (online && dropped) refresh();
+    dropped = !online;
+  }));
+  refresh();
+  return () => {
+    closed = true;
+    if (pending === mine) pending = null;
+    offs.forEach(off => off());
+  };
 }

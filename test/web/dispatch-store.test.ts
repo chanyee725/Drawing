@@ -77,3 +77,116 @@ test('connecting again applies the current /api/state even after the first visit
     globalThis.fetch = real;
   }
 });
+
+// Controllable /api/state: each call waits until the test answers it.
+function fakeFetch() {
+  const calls: { resolve: (body: unknown, status?: number) => void }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (() => new Promise<Response>(r => {
+    calls.push({ resolve: (body, status = 200) => r(new Response(JSON.stringify(body), { status })) });
+  })) as typeof fetch;
+  return { calls, restore: () => { globalThis.fetch = real; } };
+}
+const settle = () => new Promise(r => setTimeout(r, 0));
+const ids = () => getState().sessions.map(x => x.id);
+
+test('a stale /api/state answer never overwrites a newer one, and one after close is dropped', async () => {
+  const f = fakeFetch();
+  try {
+    const close1 = connect();
+    close1();
+    const close2 = connect();
+    f.calls[1].resolve({ sessions: [sess('new')] });
+    await settle();
+    f.calls[0].resolve({ sessions: [sess('old')] });
+    await settle();
+    assert.deepEqual(ids(), ['new']);
+    close2();
+    const close3 = connect();
+    close3();
+    f.calls[2].resolve({ sessions: [sess('late')] });
+    await settle();
+    assert.deepEqual(ids(), ['new']);
+  } finally {
+    f.restore();
+  }
+});
+
+test('a stream snapshot that arrives before the fetch wins over the fetched one', async () => {
+  const f = fakeFetch();
+  try {
+    const close = connect();
+    apply('snapshot', { sessions: [sess('streamed')] });
+    f.calls[0].resolve({ sessions: [sess('fetched')] });
+    await settle();
+    assert.deepEqual(ids(), ['streamed']);
+    close();
+  } finally {
+    f.restore();
+  }
+});
+
+test('events received while fetching survive the fetched snapshot; a deleted session stays gone', async () => {
+  const f = fakeFetch();
+  try {
+    const close = connect();
+    apply('removed', { id: 'x' });
+    apply('session', sess('y', { name: 'live' }));
+    apply('session', sess('z'));
+    apply('tasks', [{ id: 'live-task' }]);
+    f.calls[0].resolve({ sessions: [sess('x'), sess('y', { name: 'stale' }), sess('w')], tasks: [{ id: 'stale-task' }], roles: [] });
+    await settle();
+    assert.deepEqual(getState().sessions.map(s => [s.id, s.name]), [['z', 'z'], ['y', 'live'], ['w', 'w']]);
+    assert.deepEqual(getState().tasks, [{ id: 'live-task' }]);
+    assert.equal(getState().ready, true);
+    close();
+  } finally {
+    f.restore();
+  }
+});
+
+test('a stream snapshot is filtered by the deleted ids too', () => {
+  apply('removed', { id: 'x' });
+  apply('snapshot', { sessions: [sess('x'), sess('y')] });
+  assert.deepEqual(ids(), ['y']);
+});
+
+test('after the stream closes for good (404, 502) it reconnects with backoff and refetches /api/state', async (t) => {
+  class FakeES {
+    static all: FakeES[] = [];
+    readyState = 0;
+    onopen: ((e: Event) => void) | null = null;
+    onerror: ((e: Event) => void) | null = null;
+    constructor() { FakeES.all.push(this); }
+    addEventListener() {}
+    close() { this.readyState = 2; }
+  }
+  const g = globalThis as { EventSource?: unknown };
+  g.EventSource = FakeES;
+  const f = fakeFetch();
+  try {
+    const close = connect();
+    f.calls[0].resolve({ sessions: [sess('before')] });
+    FakeES.all[0].onopen?.({} as Event);
+    await settle();
+    assert.equal(getState().online, true);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    FakeES.all[0].readyState = 2; // e.g. the server answered 502 while restarting
+    FakeES.all[0].onerror?.({} as Event);
+    assert.equal(getState().online, false);
+    t.mock.timers.tick(1000);
+    assert.equal(FakeES.all.length, 2, 'a new stream is opened');
+    FakeES.all[1].onopen?.({} as Event);
+    assert.equal(f.calls.length, 2, '/api/state is fetched again');
+    t.mock.timers.reset();
+    f.calls[1].resolve({ sessions: [sess('after')] });
+    await settle();
+    assert.deepEqual(ids(), ['after']);
+    assert.equal(getState().online, true);
+    close();
+  } finally {
+    t.mock.timers.reset();
+    delete g.EventSource;
+    f.restore();
+  }
+});
