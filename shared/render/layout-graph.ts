@@ -526,16 +526,35 @@ function labelRect(c: Point, label: Label): Rect {
 
 const overlaps = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
+/** Distance under which a label centre counts as sitting on another line (a shared run or a split point). */
+const LABEL_LINE_CLEAR = 12;
+
+/** Whether `c` lies on, or right beside, a segment of another edge's route (so the label would read as theirs). */
+function onOtherLine(c: Point, others: readonly Point[][]): boolean {
+  for (const pts of others) {
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1]!;
+      const b = pts[i]!;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy;
+      const t = len2 ? Math.max(0, Math.min(1, ((c.x - a.x) * dx + (c.y - a.y) * dy) / len2)) : 0;
+      if (Math.hypot(a.x + dx * t - c.x, a.y + dy * t - c.y) < LABEL_LINE_CLEAR) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Label centre for an edge: the middle of its longest segment, or, when that plate would overlap a label
- * already placed or a node, moved along the line towards the end node in LABEL_SHIFT steps (first clear
- * spot wins; none clear keeps the middle). Records the chosen plate in `placed`.
+ * already placed or a node, or sits on another edge's line (a run shared with a sibling, a split point), moved along the
+ * line towards the end node in LABEL_SHIFT steps (first clear spot wins; none clear keeps the middle). Records the chosen plate in `placed`.
  */
-function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[]): Point {
+function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[], others: Point[][] = []): Point {
   const start = labelAnchor(points, route);
   const clear = (c: Point): boolean => {
     const r = labelRect(c, label);
-    return !placed.some((o) => overlaps(r, o)) && !nodeRects.some((o) => overlaps(r, o));
+    return !placed.some((o) => overlaps(r, o)) && !nodeRects.some((o) => overlaps(r, o)) && !onOtherLine(c, others);
   };
   let best = start;
   if (!clear(start)) {
@@ -993,7 +1012,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
 
   const groupItems: SceneItem[] = [];
   const nodeItems: SceneItem[] = [];
-  const edgeItems: SceneItem[] = [];
+  const edgeItems: SceneEdge[] = [];
   const labelItems: SceneItem[] = [];
   const handles: SceneHandle[] = [];
   const handle = (id: string, kind: 'node' | 'group'): void => {
@@ -1048,6 +1067,8 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
 
   const nodeRects = [...nodes.keys()].map((id) => rects.get(id)!).filter(Boolean);
   const placedLabels: Rect[] = [];
+  // Labels are placed once every route is known, so none lands on a line that is not its own.
+  const pendingLabels: { edge: SceneEdge; label: Label; style: ElementStyle }[] = [];
 
   for (const be of base.edges) {
     const { edge: e, style } = be;
@@ -1096,11 +1117,13 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     };
     if (port) edge.soft = true;
     edgeItems.push(edge);
-    const label = be.label;
-    if (label) {
-      const { x: cx, y: cy } = placeLabel(points, route, label, placedLabels, nodeRects);
-      labelItems.push(textItem(label.lines, cx, cy - label.h / 2, { size: label.size, font: style.typeface, plate: true, color: style.paint.color, tone: 'muted' }));
-    }
+    if (be.label) pendingLabels.push({ edge, label: be.label, style });
+  }
+
+  for (const { edge, label, style } of pendingLabels) {
+    const others = edgeItems.filter((o) => o !== edge).map((o) => o.points);
+    const { x: cx, y: cy } = placeLabel(edge.points, edge.route, label, placedLabels, nodeRects, others);
+    labelItems.push(textItem(label.lines, cx, cy - label.h / 2, { size: label.size, font: style.typeface, plate: true, color: style.paint.color, tone: 'muted' }));
   }
 
   const scene = finishScene(d.type, d, [...groupItems, ...edgeItems, ...nodeItems, ...labelItems]);

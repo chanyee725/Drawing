@@ -9,9 +9,11 @@ import type { Rect } from './layout-align.ts';
 export const BUS_GAP = 24;
 /** Shortest first and last segment of a rerouted edge. */
 const MIN_STUB = 8;
+/** A route of a bus member that left its bus keeps this far from every box it passes. */
+const SPLIT_CLEARANCE = 8;
 /** A port stays at least this far from a side's corners (the corner is rounded). */
 const CORNER_MARGIN = 12;
-/** Parallel horizontal runs that would overlap at one level are staggered this far apart (spec §1.7: ~5 px). */
+/** Parallel horizontal runs that would overlap at one level are staggered this far apart (spec §1.7: 5 px between parallel lines; 6 keeps an even track grid with the 1 px lines). */
 export const STAGGER = 6;
 
 export type Side = 'top' | 'bottom' | 'left' | 'right';
@@ -50,12 +52,12 @@ export function nearestSide(r: Rect, p: Point): Side {
 }
 
 /** Whether the axis-aligned segment p-q passes through the inside of `r`. */
-function segmentHits(r: Rect, p: Point, q: Point): boolean {
+function segmentHits(r: Rect, p: Point, q: Point, margin = 0): boolean {
   const x0 = Math.min(p.x, q.x);
   const x1 = Math.max(p.x, q.x);
   const y0 = Math.min(p.y, q.y);
   const y1 = Math.max(p.y, q.y);
-  return x1 > r.x + 0.5 && x0 < r.x + r.w - 0.5 && y1 > r.y + 0.5 && y0 < r.y + r.h - 0.5;
+  return x1 > r.x + 0.5 - margin && x0 < r.x + r.w - 0.5 + margin && y1 > r.y + 0.5 - margin && y0 < r.y + r.h - 0.5 + margin;
 }
 
 /** Drop repeated points and middle points of straight runs. */
@@ -104,11 +106,17 @@ export function routeEdges(
 ): void {
   // An edge that finds no new route keeps its old one, which may run along a bus or jog planned for the
   // others: plan again without it (its old route now an obstacle) until every planned edge finds a route.
+  // A bus member that cannot jog on the bus level would wander down the trunk of its siblings: it leaves
+  // the bus and gets a port of its own instead.
+  // Every failed pass adds an edge to `kept` or `split` (each edge at most once to each), so the loop ends
+  // after at most 2 x edges.length + 1 passes.
   const kept = new Set<RouteEdge>();
+  const split = new Set<RouteEdge>();
   for (;;) {
-    const failed = planRoutes(rects, parent, edges, kept);
-    if (!failed.length) return;
-    for (const e of failed) kept.add(e);
+    const r = planRoutes(rects, parent, edges, kept, split);
+    if (!r.failed.length && !r.split.length) return;
+    for (const e of r.failed) kept.add(e);
+    for (const e of r.split) split.add(e);
   }
 }
 
@@ -125,14 +133,16 @@ function collinear(p: Point, q: Point, r: Point, s: Point): boolean {
 
 /**
  * One planning pass: routes every facing edge not in `kept`, writing the new routes only when all of them
- * found one. Returns the edges that found none (nothing is written then).
+ * found one. Returns the edges that found none and the bus members that could not jog on their bus (they
+ * leave it, via `split`, on the next pass); nothing is written then. Edges in `split` never join a bus.
  */
 function planRoutes(
   rects: ReadonlyMap<string, Rect>,
   parent: ReadonlyMap<string, string | undefined>,
   edges: readonly RouteEdge[],
   kept: ReadonlySet<RouteEdge>,
-): RouteEdge[] {
+  split: ReadonlySet<RouteEdge>,
+): { failed: RouteEdge[]; split: RouteEdge[] } {
   const plans: Plan[] = [];
   const fixed: Point[][] = [];
   for (const e of edges) {
@@ -166,11 +176,14 @@ function planRoutes(
   const busGap = BUS_GAP + MIN_STUB;
   for (const list of by(outKey).values()) {
     if (list.length < 2 || new Set(list.map((p) => p.e.to)).size < 2 || list.some((p) => p.gap < busGap)) continue;
-    for (const p of list) p.bus = 'out';
+    if (list.filter((p) => !split.has(p.e)).length < 2 || new Set(list.filter((p) => !split.has(p.e)).map((p) => p.e.to)).size < 2) continue;
+    for (const p of list) if (!split.has(p.e)) p.bus = 'out';
   }
   for (const list of by(inKey).values()) {
     if (list.length < 2 || new Set(list.map((p) => p.e.from)).size < 2 || list.some((p) => p.bus || p.gap < busGap)) continue;
-    for (const p of list) p.bus = 'in';
+    const members = list.filter((p) => !split.has(p.e));
+    if (members.length < 2 || new Set(members.map((p) => p.e.from)).size < 2) continue;
+    for (const p of members) p.bus = 'in';
   }
 
   // Ports (spec §1.7): the slots on one side of a box sit at (i + 0.5) / n, in the order of their far ends
@@ -214,10 +227,10 @@ function planRoutes(
     for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.add(p);
     return out;
   };
-  const clear = (pts: Point[], skip: ReadonlySet<string>): boolean => {
+  const clear = (pts: Point[], skip: ReadonlySet<string>, margin = 0): boolean => {
     for (const [id, box] of rects) {
       if (skip.has(id)) continue;
-      for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!)) return false;
+      for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!, margin)) return false;
     }
     // Never run along a route that stays as it is.
     for (const f of fixed) {
@@ -236,6 +249,7 @@ function planRoutes(
   const routed: Plan[] = [];
   const routes = new Map<Plan, Point[]>();
   const failed: RouteEdge[] = [];
+  const left: RouteEdge[] = [];
   plans.forEach((p, i) => {
     const skip = new Set([...ancestors(p.e.from), ...ancestors(p.e.to)]);
     const v0 = sideAt(p.a, p.sa);
@@ -278,7 +292,15 @@ function planRoutes(
     ].filter((l, k, all) => all.indexOf(l) === k && s * (l - v0) >= MIN_STUB && s * (v1 - l) >= MIN_STUB);
     for (const level of levels) {
       const pts = [at(p.sa, p0, v0), at(p.sa, p0, level), at(p.sa, p1, level), at(p.sa, p1, v1)];
-      if (!clear(pts, skip)) continue;
+      // A line that left its bus must not hug a box either (it has no shared trunk to excuse a tight fit).
+      if (!clear(pts, skip, split.has(p.e) ? SPLIT_CLEARANCE : 0)) {
+        // Blocked on the bus level itself: this member parts from the bus (spec §1.7 keeps the split at BUS_GAP).
+        if (p.bus && level === levels[0]) {
+          left.push(p.e);
+          return;
+        }
+        continue;
+      }
       routes.set(p, pts);
       p.level = level;
       routed.push(p);
@@ -286,18 +308,49 @@ function planRoutes(
     }
     failed.push(p.e); // every Z cuts through a box: keep the old route
   });
-  if (failed.length) return failed;
+  if (failed.length || left.length) return { failed, split: left };
 
   for (const [p, pts] of routes) p.e.points.splice(0, p.e.points.length, ...pts);
-  stagger(routed);
-  return [];
+  // A shifted jog must still miss the boxes, keep its stubs and stay off other lines' runs, or it stays put.
+  const valid = (run: readonly Plan[]): boolean => {
+    for (const p of run) {
+      const pts = p.e.points;
+      const skip = new Set([...ancestors(p.e.from), ...ancestors(p.e.to)]);
+      if (pts.length !== 4) continue;
+      if (Math.hypot(pts[1]!.x - pts[0]!.x, pts[1]!.y - pts[0]!.y) < MIN_STUB - 0.01) return false;
+      if (Math.hypot(pts[3]!.x - pts[2]!.x, pts[3]!.y - pts[2]!.y) < MIN_STUB - 0.01) return false;
+      for (const [id, box] of rects) {
+        if (skip.has(id)) continue;
+        for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!)) return false;
+      }
+      const others = [...fixed, ...plans.filter((o) => !run.includes(o)).map((o) => o.e.points)];
+      for (const f of others) {
+        for (let j = 1; j < f.length; j++) {
+          for (let k = 1; k < pts.length; k++) {
+            if (collinear(pts[k - 1]!, pts[k]!, f[j - 1]!, f[j]!) && !sharesPort(pts, f, pts[k - 1]!, pts[k]!)) return false;
+          }
+        }
+      }
+    }
+    return true;
+  };
+  stagger(routed, valid);
+  return { failed: [], split: [] };
+}
+
+/** Whether routes `a` and `b` meet at an endpoint lying on segment p-q (lines leaving one port share their first stretch). */
+function sharesPort(a: readonly Point[], b: readonly Point[], p: Point, q: Point): boolean {
+  const ends = [a[0]!, a[a.length - 1]!];
+  const onSeg = (c: Point): boolean =>
+    c.x >= Math.min(p.x, q.x) - 0.5 && c.x <= Math.max(p.x, q.x) + 0.5 && c.y >= Math.min(p.y, q.y) - 0.5 && c.y <= Math.max(p.y, q.y) + 0.5;
+  return ends.some((e) => onSeg(e) && [b[0]!, b[b.length - 1]!].some((f) => Math.abs(f.x - e.x) < 0.5 && Math.abs(f.y - e.y) < 0.5));
 }
 
 /**
  * Jogs at one level whose runs overlap would draw on top of each other: deal them out on tracks STAGGER
  * apart, centred on the level. A bus is one run (its edges share it on purpose).
  */
-function stagger(routed: Plan[]): void {
+function stagger(routed: Plan[], valid: (run: readonly Plan[]) => boolean): void {
   type Run = { lo: number; hi: number; plans: Plan[] };
   const runs = new Map<string, Run>();
   for (const p of routed) {
@@ -341,6 +394,13 @@ function stagger(routed: Plan[]): void {
           const k = across(p.sa) ? 'y' : 'x';
           pts[1]![k] += d;
           pts[2]![k] += d;
+        }
+        if (!valid(r.plans)) {
+          for (const p of r.plans) {
+            const k = across(p.sa) ? 'y' : 'x';
+            p.e.points[1]![k] -= d;
+            p.e.points[2]![k] -= d;
+          }
         }
       });
     };
