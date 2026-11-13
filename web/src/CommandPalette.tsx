@@ -101,7 +101,7 @@ export function CommandPalette({ commands, onClose }: Props) {
               onMouseEnter={() => setIndex(i)}
               onClick={() => run(c)}
               className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm"
-              style={{ background: i === index ? 'var(--accent-soft)' : undefined, opacity: c.disabled ? 0.5 : 1 }}
+              style={{ background: i === index ? 'var(--brand-soft)' : undefined, opacity: c.disabled ? 0.5 : 1 }}
             >
               <span className="flex-1">
                 {c.title}
