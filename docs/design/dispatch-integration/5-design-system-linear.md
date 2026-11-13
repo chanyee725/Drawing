@@ -64,12 +64,16 @@ screens, or marketing gradients (section 7).
 
 ## 3. Token draft
 
+> **Colour values superseded (2026-11-13, #122):** both columns below are replaced by the stock shadcn/ui neutral
+> theme in [6-app-shell-projects.md §4](6-app-shell-projects.md) (no custom greys, no violet `--brand`; colour only for
+> status). Type moved to Pretendard only at about 108% (doc 6 §4.2). The status and role colours below still apply.
+
 Names follow shadcn so `ui/*` works unchanged; extras are ours. Values are oklch, hue 270–285 (cool grey with a
 touch of violet so the accent belongs). Starting values; tune with a headless screenshot pass.
 
 ### 3.1 Colour
 
-| Token | Dark (primary) | Light | Use |
+| Token | Dark (superseded, see doc 6 §4.1) | Light (superseded) | Use |
 |---|---|---|---|
 | `--background` | `oklch(0.16 0.006 280)` | `oklch(0.99 0.002 280)` | app frame, doc page |
 | `--panel` (new) | `oklch(0.185 0.007 280)` | `oklch(0.975 0.003 280)` | sidebar, top bar, inspector |

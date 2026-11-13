@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Headless screenshots of the E42 prototype (no visible window, no network).
-# Usage: shoot.sh <out-dir> [inter.woff2] [pretendard.woff2]
-# Font files are optional (OFL, from node_modules); they are linked into a temp copy, never committed.
+# Usage: [LAYOUTS="a b mix"] [THEMES="dark light"] shoot.sh <out-dir> [PretendardVariable.woff2]
+# The font file is optional (OFL-1.1, from node_modules/pretendard/dist/web/variable/woff2/); it is linked into a
+# temp copy, never committed.
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 out="${1:?out dir}"
-inter="${2:-}"; pret="${3:-}"
+pret="${2:-}"
 chrome="${CHROME:-google-chrome}"
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 cp "$here/index.html" "$tmp/"
 mkdir -p "$tmp/fonts" "$out"
-[ -n "$inter" ] && ln -s "$inter" "$tmp/fonts/Inter.woff2"
 [ -n "$pret" ] && ln -s "$pret" "$tmp/fonts/Pretendard.woff2"
 
 shot() { # layout theme screen width height
@@ -21,7 +21,7 @@ shot() { # layout theme screen width height
     "file://$tmp/index.html?layout=$1&theme=$2&screen=$3" >/dev/null 2>&1
   echo "$out/$name"
 }
-for l in a b; do for t in dark light; do
+for l in ${LAYOUTS:-a b mix}; do for t in ${THEMES:-dark light}; do
   for s in home project doc cmd; do shot "$l" "$t" "$s" 1440 900; done
   for s in home project doc cmd nav; do shot "$l" "$t" "$s" 390 844; done
 done; done
