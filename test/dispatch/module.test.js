@@ -221,7 +221,8 @@ test('outside a git project the dispatch module is off and drawing still works',
   const { deps } = fakeDeps(dir);
   const { app, base, stop } = await start(dir, deps);
   try {
-    assert.deepEqual(app.ctx.modules.dispatch, {});
+    assert.equal(app.ctx.modules.dispatch.hub, undefined);
+    assert.equal((await (await fetch(`${base}/api/dispatch`)).json()).reason, 'not-git');
     assert.equal((await fetch(`${base}/api/state`)).status, 404);
     assert.equal((await fetch(`${base}/api/tree`)).status, 200);
     assert.equal(existsSync(join(dir, '.dispatch')), false);
