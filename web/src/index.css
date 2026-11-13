@@ -15,9 +15,9 @@
 /*
  * App chrome tokens: the shadcn/ui default theme, base colour neutral (doc 6 §4.1), so web/src/components/ui/*
  * works unchanged. No hue anywhere except the status colours --ok, --warn and --destructive. Our only changes to
- * the defaults: light --muted-foreground is oklch(0.5 0 0) for contrast (doc 6 §5), and dark --sidebar-primary
- * is neutral instead of blue. Focus rings use --primary (lib/focus.ts). The canvas and diagram renderer keep their
- * own theme (shared/render/), not these tokens.
+ * the defaults: light --muted-foreground is oklch(0.5 0 0) for contrast (doc 6 §5), light --ring is 0.556 so
+ * focus indicators keep 3:1 (#131), and dark --sidebar-primary is neutral instead of blue. Focus rings use
+ * --primary (lib/focus.ts). The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
  */
 :root, :root[data-theme="light"] {
   color-scheme: light;
@@ -39,7 +39,7 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.556 0 0); /* shadcn light is 0.708 (2.6:1); 0.556 keeps focus indicators at 3:1+ (#131) */
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
@@ -47,7 +47,7 @@
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: oklch(0.556 0 0);
   --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 10%);
 
   /* Status colours (not in shadcn), from Dispatch light (doc 5 §3.1): only for state dots and bars. */
