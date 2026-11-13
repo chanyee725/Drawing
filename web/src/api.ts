@@ -18,7 +18,7 @@ export type TreeNode =
   | { type: 'file'; name: string; path: string; title: string; revision: number | null };
 
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
-export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number };
+export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
 export type HistoryVersion = DpxFile & { id: string; time: number };
 
 export class ApiError extends Error {

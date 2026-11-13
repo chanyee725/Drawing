@@ -426,7 +426,8 @@ export function App() {
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    if (!window.confirm(`"${label}"을(를) 지울까요? 30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.`)) return;
+    const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
+    if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
     removing.current = n.path;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
