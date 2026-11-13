@@ -48,10 +48,12 @@
 |---|---|---|
 | 대화 원문(사용자·모델·도구 입출력) | `.dispatch/transcripts/*.jsonl`에 append (D:server/sessions.js:195-202) | **메모리 링버퍼만**(세션당 400개, D:server/sessions.js:17). 디스크·로그·`.dpx.json`에 안 써요. 재시작하면 사라져요. |
 | 마지막 답변 `s.last` | 400자 잘라 `state.json`에 저장 (D:server/sessions.js:942) | 메모리에만. 디스크엔 단계 상태 코드와 시각만. 재시작 뒤 인계문은 브랜치·커밋으로 다시 확인하게 해요(이미 인계문이 그렇게 말함, D:server/sessions.js:580). |
-| 프롬프트(공통 지시·역할 프롬프트) | `state.json`의 세션에 저장 | 파이프라인 문서에 사람이 쓴 계획은 **문서 본문**이라 저장 OK(사용자가 쓴 것). 세션 객체에 복사본을 디스크로 두지 않아요. |
+| 프롬프트(공통 지시·역할 프롬프트) | `state.json`의 세션에 저장 | 파이프라인 문서에 사람이 쓴 계획은 **문서 본문**이라 저장 OK(사용자가 쓴 것). 세션의 `prompt`는 메모리에만 두고 `state.json`에서 빼요(server/dispatch/dispatch-store.js:8). 재시작 뒤엔 역할에서 다시 읽어요(server/dispatch/hub.js:885-886) — 세션마다 따로 준 프롬프트는 역할 기본값으로 돌아가요. |
+| CLI 오류·작업 메모 | `state.json`에 세션 `error`, 작업 보드 `note`, 한도 티켓 `items[].note` 저장 | 셋 다 메모리에만. 디스크로 쓸 때 `diskView()`가 빼요(server/dispatch/dispatch-store.js:10-32). 티켓의 `leadLast`·`team[].last`도 같이 빠져요. |
 | 사용량·비용·토큰 수 | `state.json` `daily` (D:server/store.js:34-40) | 그대로 저장. 숫자만. |
 | 한도 % 와 리셋 시각 | `~/.dispatch/limits.json` (D:server/limits.js:76-78) | 숫자·시각만. 위치는 §8 Q1. |
-| Codex 한도 | `~/.codex/sessions` 최신 로그 끝 256KB를 읽어 `rate_limits`만 파싱 (D:server/limits.js:10, 27-61) | 그대로. **읽기만**, 파싱한 숫자 외엔 버려요. |
+| Codex 한도 | `~/.codex/sessions` 최신 로그 끝 256KB를 읽어 `rate_limits`만 파싱 (D:server/limits.js:10, 27-61) | **OpenAI를 연결했을 때만** 읽어요(server/dispatch/hub.js:303). 연결 전엔 `~/.codex`를 건드리지 않아요. **읽기만**, 파싱한 숫자 외엔 버려요. |
+| 길이 가드 훅 표식 | 시스템 임시 폴더에 `dispatch-long-<id>` 빈 파일 | `~/.dispatch/hooks/`에 같은 빈 파일(세션 id만, 내용 없음, plugin/hooks/long-session.mjs:13). Drawing이 쓸 수 있는 폴더 안이에요. |
 | 멈춤 감지용 명령 | 해시 12자리 + 횟수 (D:skills/dispatch/reference/api.md:33) | 그대로. 명령 원문·출력 저장 금지. |
 | 프로젝트 경로 | 레지스트리에 `~`로 줄여 저장 (D:server/index.js:90) | 응답엔 폴더 이름만(server/app.js:71-72 규칙 유지). |
 | 서버 로그 | 에러 메시지 일부 | 에러 종류만(`err.code ?? err.name`, server/app.js:101-102). CLI stderr 꼬리(D:server/sessions.js:883, 894)는 **UI 응답에만** 싣고 `console`에는 안 써요. |
