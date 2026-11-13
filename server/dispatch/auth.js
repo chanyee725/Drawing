@@ -66,7 +66,7 @@ export async function providerStatus() {
     claude: { name: "Claude", installed: !!cv, cli: cv, ...cs, ...state.claude, store: CLI.claude.store,
               run: "claude -p --output-format stream-json", keySupported: false },
     openai: { name: "OpenAI Codex", installed: !!ov, cli: ov, ...os, ...state.openai, store: CLI.openai.store,
-              run: "codex exec --json", keySupported: true },
+              run: "codex exec --json", keySupported: false },
   };
 }
 
@@ -98,19 +98,6 @@ export function cancelLogin(id) {
 
 export async function logout(id) {
   await run(CLI[id].bin, CLI[id].logout, { timeout: 15000 }).catch(() => {});
-}
-
-// Codex only: the key goes straight to the CLI's stdin and is never kept in memory beyond this call.
-export function loginWithKey(id, key) {
-  if (id !== "openai") return Promise.reject(new Error("API 키 로그인은 Codex만 지원해요"));
-  return new Promise((resolve, reject) => {
-    const p = spawn("codex", ["login", "--with-api-key"], { stdio: ["pipe", "ignore", "pipe"] });
-    let err = "";
-    p.stderr.on("data", d => { err += d; });
-    p.on("error", reject);
-    p.on("exit", code => code === 0 ? resolve() : reject(new Error(err.trim().slice(0, 200) || `code ${code}`)));
-    p.stdin.end(key);
-  });
 }
 
 // Strip the child-process handle before sending state to the browser.

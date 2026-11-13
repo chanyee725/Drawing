@@ -20,7 +20,7 @@ const CLAUDE_MODELS = [
 ].map(m => ({ ...m, provider: "claude", efforts: CLAUDE_EFFORTS, defaultEffort: null, contextWindow: 200000 }));
 
 // Codex publishes its catalog through `codex debug models`; only "list" models are user-selectable.
-async function codexModels() {
+export async function codexModels() {
   try {
     const { stdout } = await run("codex", ["debug", "models"], { maxBuffer: 64 << 20, timeout: 20000 });
     const data = JSON.parse(stdout);
@@ -39,6 +39,11 @@ async function codexModels() {
   } catch {
     return [];
   }
+}
+
+/** Claude and Gemini models are a fixed list: reading it starts no process. */
+export function staticModels() {
+  return [...GEMINI_MODELS, ...CLAUDE_MODELS];
 }
 
 export async function loadModels() {
