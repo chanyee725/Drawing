@@ -296,3 +296,58 @@ test('erd: table titles, key fields and badges are weight 400 (E60)', async () =
   assert.ok(texts.length > 0);
   assert.ok(texts.every((tx) => tx.kind === 'text' && tx.weight === 400));
 });
+
+test('sequence: solid lifelines with a participant head at both ends (E60)', async () => {
+  const src = fixture('sequence-login');
+  const { scene } = await renderDiagram(src);
+  const { ast } = parse(src);
+  const columns = ast.type === 'sequence' ? ast.columns.length : 0;
+  assert.ok(columns > 0);
+  const heads = scene.items.filter((it): it is SceneBox => it.kind === 'box' && it.role === 'column');
+  assert.equal(heads.length, columns * 2);
+  assert.equal(heads.filter((h) => h.id !== undefined).length, columns, 'only the top head carries the participant id');
+  const lifelines = scene.items.filter((it) => it.kind === 'line' && it.points.length === 2 && it.points[0]!.x === it.points[1]!.x);
+  assert.equal(lifelines.length, columns);
+  for (const l of lifelines) {
+    if (l.kind !== 'line') continue;
+    assert.equal(l.dashed, false);
+    const [a, b] = l.points as [{ x: number; y: number }, { x: number; y: number }];
+    const mine = heads.filter((h) => Math.abs(h.x + h.w / 2 - a.x) < 0.01).sort((p, q) => p.y - q.y);
+    assert.equal(mine.length, 2);
+    assert.ok(Math.abs(mine[0]!.y + mine[0]!.h - a.y) < 0.01, 'the line starts under the top head');
+    assert.ok(Math.abs(mine[1]!.y - b.y) < 0.01, 'the line ends on the bottom head');
+    assert.deepEqual([mine[0]!.w, mine[0]!.h], [mine[1]!.w, mine[1]!.h]);
+  }
+});
+
+test('erd: row rules, mono types, lowercase keys on the right, icon right of the title (E60)', async () => {
+  const { scene, svg } = await renderDiagram(fixture('erd-billing'));
+  const box = (id: string) => scene.items.find((it): it is SceneBox => it.kind === 'box' && it.role === 'entity' && it.id === id)!;
+  const users = box('users');
+  const inside = <T extends { x: number; y: number }>(p: T) => p.x >= users.x && p.x <= users.x + users.w && p.y >= users.y && p.y <= users.y + users.h;
+  const rules = scene.items.filter((it) => it.kind === 'line' && !it.dashed && it.points[0]!.y === it.points[1]!.y && inside(it.points[0]!));
+  assert.equal(rules.length, 2, 'three rows, two rules between them');
+  const texts = scene.items.filter((it) => it.kind === 'text' && inside(it));
+  const find = (s: string) => texts.find((tx) => tx.kind === 'text' && tx.lines.join('') === s);
+  const [name, type, pk, title] = [find('id'), find('string'), find('pk'), find('users')];
+  assert.ok(name?.kind === 'text' && type?.kind === 'text' && pk?.kind === 'text' && title?.kind === 'text');
+  assert.equal(type.font, 'mono');
+  assert.equal(pk.font, 'mono');
+  assert.equal(name.font, 'clean');
+  assert.deepEqual([pk.anchor, pk.on?.color], ['end', 'orange']);
+  assert.ok(name.x < type.x && type.x < pk.x, 'name, then type, then the key at the right end');
+  assert.equal(scene.items.some((it) => it.kind === 'text' && /^(PK|FK)$/.test(it.lines.join(''))), false);
+  const icon = scene.items.find((it) => it.kind === 'icon' && inside(it));
+  assert.ok(icon?.kind === 'icon' && icon.x > title.x && icon.x + icon.size <= users.x + users.w);
+  // Mono text names its stack and is scaled to the measured 0.6em advance; no mono face is embedded.
+  assert.match(svg, /font-family="&#39;JetBrains Mono&#39;[^"]*" style="font-size-adjust:ch-width 0.6"/);
+  assert.doesNotMatch(svg, /@font-face\{font-family:'JetBrains Mono'/);
+});
+
+test('erd: Chen cardinality writes "many" as * (E60)', async () => {
+  const { scene } = await renderDiagram('notation chen\na { id int pk }\nb { id int pk\n aId int fk }\nc { id int }\na.id < b.aId\nb.id <> c.id', { type: 'erd' });
+  const marks = scene.items.flatMap((it) => (it.kind === 'text' && /^[1*MN]$/.test(it.lines.join('')) ? [it.lines.join('')] : []));
+  assert.deepEqual([...marks].sort(), ['*', '*', '*', '1']);
+  const fk = scene.items.find((it) => it.kind === 'text' && it.lines.join('') === 'fk');
+  assert.ok(fk?.kind === 'text' && fk.tone === 'muted' && fk.anchor === 'end');
+});
