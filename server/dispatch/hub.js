@@ -1,8 +1,8 @@
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawnCli } from "./cli.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
 import { CHILD_PROMPT, NAMES, PERMS, SPAWN_PROMPT } from "./roles.js";
@@ -91,8 +91,10 @@ export function activityOf(name = "", text = "") {
 }
 
 export class Hub extends EventEmitter {
-  constructor({ root, store, models, roles, port, limits }) {
+  constructor({ root, store, models, roles, port, limits, spawnCli: spawner = spawnCli }) {
     super();
+    // Every agent CLI starts through this (server/dispatch/cli.js); tests pass a fake.
+    this.spawnCli = spawner;
     this.root = root;
     this.store = store;
     this.models = models;
@@ -892,9 +894,15 @@ export class Hub extends EventEmitter {
       this.touch(s, { status: "error", error: e.message });
       return;
     }
-    if (s.provider === "claude") this.startClaude(s, prompt);
-    else if (s.provider === "gemini") this.startGemini(s, prompt);
-    else this.startCodex(s, prompt);
+    try {
+      if (s.provider === "claude") this.startClaude(s, prompt);
+      else if (s.provider === "gemini") this.startGemini(s, prompt);
+      else this.startCodex(s, prompt);
+    } catch (e) {
+      // spawnCli refused (not an allowed CLI, or a real CLI under npm test): nothing started.
+      this.push(s, { kind: "error", text: e.message });
+      this.touch(s, { status: "error", error: e.message });
+    }
   }
 
   attach(s, proc) {
@@ -932,7 +940,7 @@ export class Hub extends EventEmitter {
       command: process.execPath, args: [MCP_SCRIPT], env: this.mcpEnv(s) } } }),
       "--allowedTools", "mcp__dispatch");
     // DISPATCH_URL / DISPATCH_SESSION let the plugin's length hook (hooks/long-session.mjs) find this session.
-    const proc = spawn("claude", args, { cwd: s.cwd, env: { ...sessionEnv(), DISPATCH_URL: `http://127.0.0.1:${this.port}`, DISPATCH_SESSION: s.id }, stdio: ["pipe", "pipe", "pipe"] });
+    const proc = this.spawnCli("claude", args, { cwd: s.cwd, env: { ...sessionEnv(), DISPATCH_URL: `http://127.0.0.1:${this.port}`, DISPATCH_SESSION: s.id }, stdio: ["pipe", "pipe", "pipe"] });
     s._costBase = s.cost;
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onClaude(s, m));
@@ -1036,7 +1044,7 @@ export class Hub extends EventEmitter {
     // Codex has no system-prompt flag in exec mode, so the role prompt leads the first turn.
     const system = this.systemPrompt(s);
     args.push(first && system ? `[역할]\n${system}\n\n[작업]\n${prompt}` : prompt);
-    const proc = spawn("codex", args, { cwd: s.cwd, env: sessionEnv(), stdio: ["ignore", "pipe", "pipe"] });
+    const proc = this.spawnCli("codex", args, { cwd: s.cwd, env: sessionEnv(), stdio: ["ignore", "pipe", "pipe"] });
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onCodex(s, m));
     this.touch(s, { status: "running", error: null });
@@ -1100,8 +1108,9 @@ export class Hub extends EventEmitter {
     if (s.effort) args.push("--effort", s.effort);
     if (s.providerSessionId) args.push("--conversation", s.providerSessionId);
 
-    const env = { ...process.env, ...this.mcpEnv(s) };
-    const proc = spawn("agy", args, { cwd: s.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+    // Same environment as Claude/Codex (headless Playwright), plus the MCP variables.
+    const env = { ...sessionEnv(), ...this.mcpEnv(s) };
+    const proc = this.spawnCli("agy", args, { cwd: s.cwd, env, stdio: ["ignore", "pipe", "pipe"] });
     this.attach(s, proc);
     onJsonLines(proc.stdout, m => this.onGemini(s, m));
     this.touch(s, { status: "running", error: null });
