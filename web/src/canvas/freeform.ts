@@ -164,6 +164,19 @@ function iconBefore(tx: SceneText, group: SceneBox, icons: SceneIcon[]) {
     .sort((a, b) => b.x - a.x)[0];
 }
 
+type Rect = { id: string; type: string; x: number; y: number; width: number; height: number; isDeleted?: boolean; frameId?: string | null };
+
+/**
+ * The frame converted shapes belong to: the image's own frame, else the smallest live frame that holds the whole
+ * image (block images are rebuilt with no frameId on load, so a block that sits in a frame may not be marked as in it).
+ */
+export function frameFor(img: Rect, elements: readonly Rect[]): string | null {
+  if (img.frameId) return img.frameId;
+  const holds = (f: Rect) => img.x >= f.x && img.y >= f.y && img.x + img.width <= f.x + f.width && img.y + img.height <= f.y + f.height;
+  const frames = elements.filter((e) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe') && holds(e));
+  return frames.sort((a, b) => a.width * a.height - b.width * b.height)[0]?.id ?? null;
+}
+
 type El = { id: string; type: string; boundElements?: readonly { id: string; type: string }[] | null; [k: string]: unknown };
 
 /** Bind arrows to the shapes they touch (both sides know each other), after convertToExcalidrawElements. */

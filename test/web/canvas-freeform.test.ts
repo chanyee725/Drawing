@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bindArrows, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
+import { bindArrows, frameFor, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
 import type { Scene } from '../../shared/render/scene.ts';
 import { layoutDiagram } from '../../shared/render/index.ts';
 import { parseArchitecture, parseFlowchart } from '../../shared/dsl/index.ts';
@@ -150,4 +150,16 @@ test('a real architecture group with an icon converts without an icon gap', asyn
     assert.ok(g.kind === 'box' && Math.abs((title.x as number) - (g.x + 14)) < 0.5, `${name} title at the group's padding, got ${title.x} vs ${g.kind === 'box' && g.x}`);
   }
   assert.deepEqual(skeletons.filter((s) => s.type === 'rectangle' && s.label).map((s) => (s.label as { text: string }).text).sort(), ['API', 'DB', 'Worker']);
+});
+
+test('frameFor: the image keeps its own frame, else the smallest live frame that holds it whole', () => {
+  const r = (id: string, type: string, x: number, y: number, width: number, height: number, more = {}) => ({ id, type, x, y, width, height, ...more });
+  const img = r('img', 'image', 100, 100, 200, 100);
+  const big = r('big', 'frame', 0, 0, 1000, 1000);
+  const small = r('small', 'frame', 50, 50, 400, 300);
+  const part = r('part', 'frame', 150, 0, 400, 400);
+  assert.equal(frameFor(img, [img, big, small, part]), 'small');
+  assert.equal(frameFor(img, [img, r('gone', 'frame', 50, 50, 300, 200, { isDeleted: true }), big]), 'big');
+  assert.equal(frameFor(img, [img, part, r('rect', 'rectangle', 0, 0, 1000, 1000)]), null, 'partly inside or not a frame');
+  assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small]), 'own');
 });

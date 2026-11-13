@@ -19,7 +19,7 @@ import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, hash, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
-import { bindArrows, sceneToFreeform } from './freeform';
+import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -250,7 +250,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const { skeletons, bindings } = sceneToFreeform(scene, { x: img.x, y: img.y, width: img.width, height: img.height }, () => Math.random().toString(36).slice(2, 12));
     const converted = convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as ExcalidrawElement[];
     // A block inside a frame leaves its shapes in that frame.
-    const inFrame = img.frameId ? converted.map((e) => ({ ...e, frameId: img.frameId })) : converted;
+    const frameId = frameFor(img, els);
+    const inFrame = frameId ? converted.map((e) => ({ ...e, frameId })) : converted;
     const made = bindArrows(inFrame, bindings);
     const fresh = made.filter((e) => !(e as { containerId?: string }).containerId).map((e) => e.id);
     xapi.updateScene({
