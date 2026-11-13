@@ -27,6 +27,11 @@ export interface ThemeColors {
   edgeSoft: string;
   /** Solid offset shadow, no blur. */
   shadow: string;
+  /**
+   * Sequence look that differs from the other diagrams (§2.4), dark only: participant boxes are flat (no offset
+   * shadow) with their own neutral fill and border, and message labels take `label` instead of the line colour.
+   */
+  sequence?: { columnFill: string; columnStroke: string; label: string };
 }
 
 export const THEMES: Record<Theme, ThemeColors> = {
@@ -59,6 +64,8 @@ export const THEMES: Record<Theme, ThemeColors> = {
     flowEdge: '#e7e9ec',
     edgeSoft: '#5b6370',
     shadow: '#2b2f36',
+    // The border reads 3.4:1 on the background (non-text contrast needs 3:1); the label is the text colour.
+    sequence: { columnFill: '#2b2b2b', columnStroke: '#6b6b6b', label: '#e7e9ec' },
   },
 };
 

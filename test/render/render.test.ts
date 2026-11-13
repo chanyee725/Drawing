@@ -348,6 +348,32 @@ test('sequence: message labels sit on their line and cut it; no bold text (E60)'
   assert.ok(label!.x > Math.min(line!.points[0]!.x, line!.points[1]!.x) && label!.x < Math.max(line!.points[0]!.x, line!.points[1]!.x));
 });
 
+test('sequence dark: flat grey participant boxes without a shadow, bright message labels; light unchanged (E62)', async () => {
+  const { scene } = await renderDiagram(fixture('sequence-login'));
+  const heads = (svg: string): string[] => svg.match(/<g data-role="column"[^>]*>.*?<\/g>/g) ?? [];
+  const dark = sceneToSvg(scene, { theme: 'dark' });
+  const light = sceneToSvg(scene, { theme: 'light' });
+  assert.ok(heads(dark).length > 0);
+  for (const g of heads(dark)) {
+    assert.equal((g.match(/<(rect|path|ellipse|polygon)/g) ?? []).length, 1, 'one shape: no offset shadow copy');
+    assert.match(g, /fill="#2b2b2b" stroke="#6b6b6b"/);
+  }
+  for (const g of heads(light)) {
+    assert.equal((g.match(/<rect/g) ?? []).length, 2, 'light keeps the offset shadow');
+    assert.match(g, /fill="#e8e8e8" stroke="none"/);
+  }
+  const labelFill = (svg: string): string | undefined => svg.match(/<text[^>]*fill="([^"]+)"[^>]*>(?:(?!<\/text>).)*2\. find user/)?.[1];
+  assert.equal(labelFill(dark), '#e7e9ec');
+  assert.equal(labelFill(light), '#667085');
+  // A coloured participant keeps its colour; only the shadow goes.
+  const tinted = await renderDiagram('A [color: blue]\nB\nA > B: hi', { type: 'sequence', theme: 'dark' });
+  const all = heads(tinted.svg);
+  assert.equal(all.length, 4);
+  assert.ok(all.every((g) => (g.match(/<rect/g) ?? []).length === 1));
+  assert.equal(all.filter((g) => /stroke="#53b1fd"/.test(g) && !/#2b2b2b/.test(g)).length, 2);
+  assert.equal(all.filter((g) => /fill="#2b2b2b" stroke="#6b6b6b"/.test(g)).length, 2);
+});
+
 test('erd: table titles, key fields and badges are weight 400 (E60)', async () => {
   const { scene } = await renderDiagram(fixture('erd-billing'));
   const texts = scene.items.filter((it) => it.kind === 'text' && it.lines.join('') !== 'Billing');
