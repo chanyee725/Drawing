@@ -122,7 +122,8 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
     const w = Math.ceil(Math.max(iconSize, label.w, sub?.w ?? 0) + 8);
     return { node, style, label, sub, shape, iconOnly: true, card: false, iconSize, w, h: Math.ceil(iconSize + 6 + textHeight(label, sub)) };
   }
-  const iconSize = icon ? Math.round(size * 1.5) : 0;
+  // Box-card icons stay 20px at every textSize (spec §2.1); other icons scale with the text.
+  const iconSize = icon ? (card ? 20 : Math.round(size * 1.5)) : 0;
   const iconW = icon ? iconSize + 8 : 0;
   if (BUCKETED.has(shape)) return measureBucketed(node, style, shape, iconSize, card);
   const label = measureLabel(node.label, size, style.typeface, style.wrap, NODE_TEXT_MAX);

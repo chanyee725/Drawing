@@ -107,3 +107,38 @@ test('subtitle: at least 4.5:1 on every pastel node fill, light and dark', async
     }
   }
 });
+
+test('box card: icon stays 20px and inset 20px at every textSize', async () => {
+  for (const size of ['small', 'medium', 'large']) {
+    const s = await scene(`textSize ${size}\nWeb [icon: react]`);
+    const b = box(s, 'Web')!;
+    const ic = icon(s, 'react');
+    assert.equal(ic.size, 20, `icon size at ${size}`);
+    assert.equal(ic.x, b.x + 20, `icon inset at ${size}`);
+    assert.equal(ic.y + ic.size / 2, b.y + b.h / 2, `icon centred at ${size}`);
+  }
+});
+
+test('box card: card size per textSize (52 minimum, subtitle cards grow with the text, never shrink)', async () => {
+  const plain: number[] = [];
+  const withSub: number[] = [];
+  for (const size of ['small', 'medium', 'large']) {
+    plain.push(box(await scene(`textSize ${size}\nWeb [icon: react]`), 'Web')!.h);
+    withSub.push(box(await scene(`textSize ${size}\nWeb [icon: react, subtitle: React SPA]`), 'Web')!.h);
+  }
+  assert.deepEqual(plain, [52, 52, 52]);
+  assert.equal(withSub[0], 56);
+  assert.ok(withSub[1]! >= withSub[0]! && withSub[2]! > withSub[0]!, `subtitle heights ${withSub}`);
+});
+
+test('box card: cards with and without a subtitle in one group share the tallest height, title stays centred', async () => {
+  const s = await scene('Stack {\n  One [icon: react, subtitle: React SPA]\n  Two [icon: server]\n}');
+  const one = box(s, 'One')!;
+  const two = box(s, 'Two')!;
+  assert.equal(one.h, 56);
+  assert.equal(two.h, 56);
+  const t = text(s, 'Two');
+  assert.ok(Math.abs(t.y + (t.lines.length * t.lineHeight) / 2 - (two.y + two.h / 2)) < 0.5, 'one-line title centred');
+  const ic = icon(s, 'server');
+  assert.equal(ic.y + ic.size / 2, two.y + two.h / 2);
+});
