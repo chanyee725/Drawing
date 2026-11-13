@@ -904,7 +904,7 @@ export function App() {
             }
           />
           <PlanStrip session={session} />
-          {hasPlan && <RunStrip code={planCode} inRunView={view === 'run'} onRunView={() => setView('run')} />}
+          {hasPlan && <RunStrip code={planCode} inRunView={view === 'run'} onRunView={() => setView('run')} onOpenFile={openFile} />}
               {view === 'run' ? (
             <LazyBoundary onFail={flushForReload}>
               <Suspense fallback={null}>

@@ -1,14 +1,16 @@
 // Run status strip (E22, docs/design/dispatch-integration/3-ux-flow.md §4): one line under the top bar on every view
 // of a pipeline file with runs, a second line only when a session needs a person. While a run is live it also keeps
 // the Dispatch stream open (live session states, limits) and feeds the canvas overlay. E27: 멈추기 while running,
-// 이어서 하기 and 계획 다시 열기 while paused; amber while the usage-limit guard holds the run.
+// 이어서 하기 and 계획 다시 열기 while paused; amber while the usage-limit guard holds the run. E28: 복제해서 새 계획 on a
+// done run (opens the new draft); while a past run is picked it says so, draws that run on the canvas and offers
+// 최근 실행 보기.
 import { lazy, Suspense, useEffect, useId, useRef, useState } from 'react';
 import { Button } from '../components/ui/button';
 import { connect } from '../dispatch/store.ts';
 import { FOCUS_RING } from '../lib/focus';
 import { cn } from '../lib/utils';
-import { ACTION_LABEL, actionsFor, requestAction, type RunAction } from './runControl.ts';
-import { reloadRun } from './runData.ts';
+import { ACTION_LABEL, DUPLICATE_LABEL, actionsFor, canDuplicate, requestAction, requestDuplicate, type RunAction } from './runControl.ts';
+import { reloadRun, selectRun } from './runData.ts';
 import { overlaySteps } from './runModel.ts';
 import { setRunSteps } from './runStore.ts';
 import { useRunModel } from './useRunModel.ts';
@@ -21,12 +23,14 @@ type Props = {
   /** The run view is showing (its button reads as current). */
   inRunView: boolean;
   onRunView: () => void;
+  /** Open a file (the new draft after 복제해서 새 계획). */
+  onOpenFile: (path: string) => void;
 };
 
-export function RunStrip({ code, inRunView, onRunView }: Props) {
+export function RunStrip({ code, inRunView, onRunView, onOpenFile }: Props) {
   const m = useRunModel(code);
   const [sheet, setSheet] = useState<string | null>(null);
-  const [busy, setBusy] = useState<RunAction | null>(null);
+  const [busy, setBusy] = useState<RunAction | 'duplicate' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -34,6 +38,8 @@ export function RunStrip({ code, inRunView, onRunView }: Props) {
   const block = m.record?.plan.snapshot.block;
   const path = m.data.path;
   const runState = m.record?.state;
+  // A past run the person picked in the run view (E28), not the file's current one.
+  const past = m.data.selected !== null;
 
   // A new state (or another file) makes an old refusal stale.
   useEffect(() => setError(null), [path, runState]);
@@ -48,16 +54,30 @@ export function RunStrip({ code, inRunView, onRunView }: Props) {
   // Live session states and limits only while a run is live.
   useEffect(() => (m.running ? connect() : undefined), [m.running]);
 
-  // The canvas overlay follows the live run; it goes away when the run ends.
+  // The canvas overlay follows the live run, or the past run the person picked; it goes away when the run ends.
   useEffect(() => {
-    if (block) setRunSteps(block, m.running ? overlaySteps(m.rows) : null);
-  }, [block, m.running, m.rows]);
+    if (block) setRunSteps(block, m.running || past ? overlaySteps(m.rows) : null);
+  }, [block, m.running, past, m.rows]);
   useEffect(() => (block ? () => setRunSteps(block, null) : undefined), [block]);
 
   if (!m.strip) return null;
   const s = m.strip;
   const first = s.attention[0];
-  const actions = actionsFor(s.state);
+  const actions = past ? [] : actionsFor(s.state);
+  const duplicable = !past && canDuplicate(s.state);
+
+  const duplicate = async () => {
+    if (busy) return;
+    setBusy('duplicate');
+    setError(null);
+    try {
+      const r = await requestDuplicate(path);
+      if ('error' in r) setError(r.error);
+      else onOpenFile(r.path);
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const act = async (action: RunAction) => {
     if (busy) return;
@@ -81,8 +101,14 @@ export function RunStrip({ code, inRunView, onRunView }: Props) {
         </span>
         {s.progress.total > 0 && <progress className="run-progress w-16 shrink-0" value={s.progress.percent} max={100} aria-label="진행률" />}
         <span className="min-w-0 flex-1 truncate text-foreground" title={s.parts.join(' · ')}>
+          {past && <span className="mr-1.5 rounded-sm border px-1 text-muted-foreground">지난 실행</span>}
           {s.parts.join(' · ')}
         </span>
+        {past && (
+          <Button variant="ghost" size="sm" className={cn('h-6 px-2 text-xs', FOCUS_RING)} onClick={() => void selectRun(null)}>
+            최근 실행 보기
+          </Button>
+        )}
         <Button variant="ghost" size="sm" className={cn('h-6 px-2 text-xs', FOCUS_RING)} aria-pressed={inRunView} onClick={onRunView}>
           실행 보기
         </Button>
@@ -98,6 +124,11 @@ export function RunStrip({ code, inRunView, onRunView }: Props) {
             {busy === a ? `${ACTION_LABEL[a]}…` : ACTION_LABEL[a]}
           </Button>
         ))}
+        {duplicable && (
+          <Button variant="ghost" size="sm" className={cn('h-6 px-2 text-xs', FOCUS_RING)} aria-disabled={busy !== null || undefined} onClick={() => void duplicate()}>
+            {busy === 'duplicate' ? `${DUPLICATE_LABEL}…` : DUPLICATE_LABEL}
+          </Button>
+        )}
       </div>
       {error && !confirming && (
         <div className="flex min-h-8 items-center gap-2 border-t px-3" role="alert" data-run-error>
