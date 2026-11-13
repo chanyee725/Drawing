@@ -206,8 +206,18 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   assert.equal(await page.getByRole('combobox', { name: '명령 찾기' }).count(), 0, 'no command menu over the settings dialog');
   assert.equal(await dialog.count(), 1);
   // The dashboard's create keys stay quiet too: the native <dialog> has no role attribute (#242).
+  // They ask for a name with window.prompt, which Playwright dismisses on its own, so count the prompts (#252).
+  // A listener takes over dismissing, so it dismisses too (or the page would hang on the prompt).
+  let prompts = 0;
+  const onPrompt = (d) => {
+    prompts++;
+    d.dismiss().catch(() => {});
+  };
+  page.on('dialog', onPrompt);
   for (const k of ['d', 'c', 'p', '/']) await page.keyboard.press(k);
   await page.waitForTimeout(200);
+  page.off('dialog', onPrompt);
+  assert.equal(prompts, 0, 'no name prompt behind the settings dialog');
   assert.equal(await page.locator('main[data-screen="dashboard"]').count(), 1, 'no new file behind the settings dialog');
   assert.equal(await dialog.count(), 1);
 
