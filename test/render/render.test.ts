@@ -418,3 +418,26 @@ test('arrows, dashes and math signs are measured near their real width in the cl
     assert.ok(w >= em * 100 * 0.95 && w <= em * 100 * 1.05, `${ch} measured ${w}, real ${em * 100}`);
   }
 });
+
+test('sequence: a message label cuts the lifelines it crosses; self labels clear their loop (E60 follow-up)', async () => {
+  const { PLATE_PAD } = await import('../../shared/render/text.ts');
+  const { scene, svg } = await renderDiagram('A\nB\nC\nA > C: a long message label that crosses the lifeline of B\nB > B: a self note long enough to reach C', { type: 'sequence' });
+  const lifelines = scene.items.filter((it) => it.kind === 'line' && it.points[0]!.x === it.points[1]!.x);
+  assert.equal(lifelines.length, 3);
+  assert.ok(lifelines.every((l) => l.kind === 'line' && l.cut === true), 'every lifeline takes the label cut');
+  const mask = /<mask id="([^"]+)"/.exec(svg)?.[1];
+  assert.ok(mask);
+  assert.equal(svg.split(`<polyline points=`).filter((s) => s.startsWith(`"`) && new RegExp(`^"[^"]*" mask="url\\(#${mask}\\)"`).test(s)).length, 3);
+  // B's lifeline runs under the A > C label, a plate centred between A and C.
+  const { textWidth } = await import('../../shared/render/text.ts');
+  const label = scene.items.find((it) => it.kind === 'text' && it.lines.join('') === 'a long message label that crosses the lifeline of B');
+  const bx = lifelines[1]!.kind === 'line' ? lifelines[1]!.points[0]!.x : NaN;
+  assert.ok(label?.kind === 'text' && label.plate);
+  assert.ok(Math.abs(label.x - bx) < textWidth(label.lines[0]!, label.size, label.font) / 2, 'the label spans B');
+  // The self-message label is a plate too; its cut (PLATE_PAD + 1 left of the text) stays clear of the loop's right side.
+  const self = scene.items.find((it) => it.kind === 'text' && it.lines.join('').startsWith('a self note'));
+  const loop = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'elbow');
+  assert.ok(self?.kind === 'text' && self.plate && self.anchor === 'start' && loop);
+  const loopRight = Math.max(...loop.points.map((p) => p.x));
+  assert.ok(self.x - PLATE_PAD - 1 > loopRight + 1, 'the cut does not reach the loop stroke');
+});

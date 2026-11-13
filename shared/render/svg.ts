@@ -292,9 +292,9 @@ function edgeMarkup(e: SceneEdge, { theme, c, edge }: Ctx, mask: string): string
   return `<g data-edge="${esc(e.id)}"${mask}${soft}><path d="${d}" fill="none" stroke="${color}" stroke-width="${EDGE_W}" stroke-linecap="butt" stroke-linejoin="miter"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
-function lineMarkup(l: SceneLine, { t, c }: Ctx): string {
+function lineMarkup(l: SceneLine, { t, c }: Ctx, mask: string): string {
   const dash = l.dashed ? DASH : '';
-  return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
+  return `<polyline points="${pts(l.points)}"${l.cut ? mask : ''} fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
 }
 
 /** A solid pill with its text centred (shared/render/badge.ts); dark fills stay in the dark filter's reach (§2.3). */
@@ -318,7 +318,7 @@ function itemMarkup(it: SceneItem, ctx: Ctx, mask: string): string {
     case 'edge':
       return edgeMarkup(it, ctx, mask);
     case 'line':
-      return lineMarkup(it, ctx);
+      return lineMarkup(it, ctx, mask);
     case 'badge':
       return badgeMarkup(it, ctx);
   }
