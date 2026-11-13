@@ -55,6 +55,8 @@ export function createFileSession(deps: Deps) {
   let reloadStopped = false;
   // An outside-change reload is already running.
   let reloading = false;
+  // While a move of the open file is in flight, saves wait: a PUT now would go to the old path.
+  let holds = 0;
 
   const setStatus = (status: string, statusAlert = false) => set({ status, statusAlert });
   const clearTimer = () => {
@@ -74,7 +76,7 @@ export function createFileSession(deps: Deps) {
     saving = saving.then(async () => {
       const p = state.path;
       const f = state.file;
-      if (!p || !f || !dirty || conflicted) return;
+      if (!p || !f || !dirty || conflicted || holds > 0) return;
       const seq = editSeq;
       inFlight = true;
       if (!reloadStopped) setStatus('저장 중이에요…');
@@ -143,6 +145,18 @@ export function createFileSession(deps: Deps) {
     isDirty: () => dirty,
     /** Leaving now would lose something: unsaved edits or a save still running. */
     hasUnsaved: () => dirty || inFlight,
+    /** Pause saving (a move of the open file is running); call the returned function to resume. Pending edits then save. */
+    hold() {
+      holds += 1;
+      clearTimer();
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        holds -= 1;
+        if (holds === 0 && dirty && !conflicted) schedule(0);
+      };
+    },
     /** Resolves once queued saves are done. */
     idle: () => saving,
     save,

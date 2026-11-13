@@ -143,3 +143,14 @@ test('the editor adds no trailing paragraph on its first transaction once the do
     assert.ok(next.state.doc.eq(start.doc), 'the document is unchanged');
   }
 });
+
+test('docHasContent: text, a diagram or a frame count; empty paragraphs do not', async () => {
+  const { docHasContent, diagramNode, frameNode } = await import('../../web/src/doc/model.ts');
+  const para = (text?: string) => ({ type: 'paragraph', content: text ? [{ type: 'text', text }] : undefined });
+  assert.equal(docHasContent({ type: 'doc', content: [para(), para('  ')] }), false);
+  assert.equal(docHasContent({ type: 'doc', content: [] }), false);
+  assert.equal(docHasContent({ type: 'doc', content: [para(), para('hi')] }), true);
+  assert.equal(docHasContent({ type: 'doc', content: [diagramNode('b1')] }), true);
+  assert.equal(docHasContent({ type: 'doc', content: [frameNode('f1', '')] }), true);
+  assert.equal(docHasContent(null), false);
+});

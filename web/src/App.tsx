@@ -33,7 +33,13 @@ const NARROW = '(max-width: 767px)';
 // The open file lives in the URL hash so a reload reopens it. Only the workspace-relative path is kept.
 const setHashPath = (p: string | null) => {
   const url = `${window.location.pathname}${window.location.search}${p ? `#file=${encodeURIComponent(p)}` : ''}`;
-  window.history.replaceState(null, '', url);
+  window.history.replaceState({ drawing: 1 }, '', url);
+};
+// A link followed in this tab was cancelled or failed: the browser already added a history entry for it.
+// Step back over that entry (state is null on entries the browser made) so history has no duplicate of the open file.
+const undoLinkEntry = (current: string | null) => {
+  if (window.history.state === null) window.history.back();
+  else setHashPath(current);
 };
 
 function useNarrow() {
@@ -253,7 +259,7 @@ export function App() {
       }
       void open(link.path).then((ok) => {
         if (ok) jumpTo(link.heading);
-        else setHashPath(session.getState().path);
+        else undoLinkEntry(session.getState().path);
       });
     };
     window.addEventListener('hashchange', onHash);
@@ -375,8 +381,13 @@ export function App() {
     ownMoves.current.add(from);
     setTimeout(() => ownMoves.current.delete(from), 5000);
     let readFailed = false;
+    let release = () => {};
     try {
       await session.flush();
+      // An edit made while the (possibly slow) move runs must not be saved to the old path. Only the open
+      // file (or the folder holding it) needs this: holding for an unrelated move would also skip the save on tab close.
+      const open = session.getState().path;
+      if (open && (open === from || (n.type === 'folder' && open.startsWith(`${from}/`)))) release = session.hold();
       const r = await api.move(from, to, n.type);
       const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
       if (next) {
@@ -400,6 +411,8 @@ export function App() {
     } catch (e) {
       ownMoves.current.delete(from);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
+    } finally {
+      release();
     }
   };
   const moveInto = (n: TreeNode, dir: string) => {
@@ -415,7 +428,8 @@ export function App() {
 
   const remove = async (n: TreeNode) => {
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    if (!window.confirm(`"${label}"을(를) 지울까요? 30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.`)) return;
+    const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
+    if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
     removing.current = n.path;
     try {
       if (n.type === 'file') await api.removeFile(n.path);
@@ -453,7 +467,7 @@ export function App() {
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
   };
   const pdfScope = exportSelected ? 'selection' : showDoc ? 'document' : 'canvas';
-  const pdfExport = () => void report(pdfScope === 'document' ? Promise.resolve().then(exportDocumentPdf) : exportCanvas(canvasHandle.current, 'pdf', session.getState().file?.title ?? '', exportOptions));
+  const pdfExport = () => void report(pdfScope === 'document' ? Promise.resolve().then(() => exportDocumentPdf(session.getState().file?.document)) : exportCanvas(canvasHandle.current, 'pdf', session.getState().file?.title ?? '', exportOptions));
   const openExport = useCallback((o: boolean) => {
     if (o) setExportSelected(canvasHandle.current?.scope().selected ?? false);
     setExportOpen(o);

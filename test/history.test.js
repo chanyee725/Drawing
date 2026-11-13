@@ -338,3 +338,41 @@ test('history: the state at the end of an edit session is kept (snapshot the fil
     assert.ok((await titles(store, 'a')).includes('C4-session-end'));
   });
 });
+
+test('history: deleting or moving files leaves no empty folders under .drawing/history', async () => {
+  await withStore({}, async ({ store, ws }) => {
+    await store.createFolder('p');
+    await store.createFolder('p/q');
+    await store.createFile('p/q/a');
+    await save(store, 'p/q/a', 'one');
+    await store.move('p/q/a', 'a', 'file'); // history moves out of p/q
+    assert.equal(await stat(join(ws, '.drawing/history/p')).then(() => true, () => false), false, 'moved: p/q and p are gone');
+    await store.createFile('p/q/b');
+    await save(store, 'p/q/b', 'one');
+    await store.removeFile('p/q/b'); // history goes to the trash
+    assert.equal(await stat(join(ws, '.drawing/history/p')).then(() => true, () => false), false, 'deleted: p/q and p are gone');
+    assert.equal(await stat(join(ws, '.drawing/history')).then((s) => s.isDirectory()), true, 'the history root stays');
+  });
+});
+
+test('trash: items from a file deleted outside the app say they restore a snapshot', async () => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-hist-'));
+  let fire;
+  const store = createStore(ws, { watchDebounceMs: 0, watchFn: (_d, _o, cb) => ((fire = cb), { on() {}, close() {} }) });
+  try {
+    await store.createFile('a');
+    await save(store, 'a', 'one');
+    await store.createFile('b');
+    await store.startWatching();
+    await rm(join(ws, 'a.dpx.json'));
+    fire('change', 'a.dpx.json');
+    await store.removeFile('b');
+    await new Promise((r) => setTimeout(r, 50));
+    const items = (await store.trash()).items;
+    assert.equal(items.find((i) => i.path === 'a.dpx.json').fromSnapshot, true);
+    assert.equal(items.find((i) => i.path === 'b.dpx.json').fromSnapshot, false);
+  } finally {
+    await store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});

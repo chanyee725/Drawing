@@ -114,6 +114,12 @@ test('PDF export prints the document or one picture', { skip: !ON && 'set DRAW_E
     const p = await page.evaluate(() => window.__prints);
     assert.equal(p[0].where, 'frame');
     assert.ok(p[0].svg, 'iframe holds the svg');
+    // Sandboxed, and kept (however long the dialog stays open) until the browser fires afterprint.
+    const sandbox = await page.evaluate(() => document.querySelector('iframe[data-print-frame]')?.getAttribute('sandbox'));
+    assert.ok(sandbox && !sandbox.includes('allow-scripts'), `sandbox: ${sandbox}`);
+    assert.equal(await page.locator('iframe[data-print-frame]').count(), 1, 'frame stays while printing');
+    await page.evaluate(() => document.querySelector('iframe[data-print-frame]').contentWindow.dispatchEvent(new Event('afterprint')));
+    assert.equal(await page.locator('iframe[data-print-frame]').count(), 0, 'afterprint removes the frame');
   });
 
   await t.test('canvas print (nothing selected, canvas only) uses the iframe', async () => {

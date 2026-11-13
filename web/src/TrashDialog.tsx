@@ -102,6 +102,11 @@ export function TrashDialog({ onClose, onRestored }: Props) {
                 <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
                   {when(i.deletedAt)}에 지웠어요
                 </div>
+                {i.fromSnapshot && (
+                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
+                    앱 밖에서 지워서 마지막 버전 기록으로 돌아와요. 마지막으로 저장한 내용보다 오래됐을 수 있어요
+                  </div>
+                )}
               </div>
               <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
                 {busy === i.id ? '되살리는 중이에요…' : '되살리기'}
