@@ -3,8 +3,10 @@
 // - answers the status commands the server uses (--version, auth status, login status);
 // - for a session turn, prints the JSON lines of $FAKE_CLI_SCENARIO (a JSON-lines file) or a short
 //   default reply in that CLI's stream format, then exits with $FAKE_CLI_EXIT (default 0).
+//   Two scenario lines are actions, not output: { "$sleep": ms } waits, { "$write": { file, text } } writes
+//   `text` to the absolute path `file` (a test's scratch folder), like an agent editing a file.
 // It never talks to the network and never reads credentials.
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const DEFAULT = {
@@ -37,7 +39,13 @@ function scenario(bin) {
   return readFileSync(file, "utf8").split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
 }
 
-const emit = lines => { for (const l of lines) process.stdout.write(JSON.stringify(l) + "\n"); };
+async function emit(lines) {
+  for (const l of lines) {
+    if (l.$sleep) await new Promise(r => setTimeout(r, l.$sleep));
+    else if (l.$write) writeFileSync(l.$write.file, l.$write.text);
+    else process.stdout.write(JSON.stringify(l) + "\n");
+  }
+}
 const finish = () => process.exit(Number(process.env.FAKE_CLI_EXIT || 0));
 
 export function run(bin) {
@@ -47,16 +55,19 @@ export function run(bin) {
   const status = STATUS[bin][args.slice(0, 2).join(" ")];
   if (status !== undefined) { process.stdout.write(status + "\n"); return finish(); }
 
-  if (bin !== "claude") { emit(scenario(bin)); return finish(); }
+  if (bin !== "claude") { emit(scenario(bin)).then(finish); return; }
   // claude -p --input-format stream-json: one turn per user line on stdin, alive until stdin ends.
+  // Turns are played one after another, so a scenario's $sleep holds back the next turn's lines too.
   let first = true;
+  let turns = Promise.resolve();
   const rl = createInterface({ input: process.stdin });
   rl.on("line", line => {
     let msg;
     try { msg = JSON.parse(line); } catch { return; }
     if (msg.type !== "user") return;
-    emit(first ? scenario(bin) : DEFAULT.claude.slice(1));
+    const lines = first ? scenario(bin) : DEFAULT.claude.slice(1);
     first = false;
+    turns = turns.then(() => emit(lines));
   });
-  rl.on("close", finish);
+  rl.on("close", () => turns.then(finish));
 }

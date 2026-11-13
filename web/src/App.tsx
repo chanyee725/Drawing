@@ -19,6 +19,8 @@ import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 import { RunStrip } from './run/RunStrip';
 import { onRunEvent, reloadRun, watchRun } from './run/runData';
+import { applyCursorEvent, clearCursors } from './canvas/cursorStore';
+import type { CursorEvent } from './canvas/agentCursor';
 import type { RunEvent } from './run/runModel';
 // The run view (E22) loads when it is first shown.
 const RunView = lazy(() => import('./run/RunView'));
@@ -423,14 +425,21 @@ export function App() {
     const offRun = events.subscribeJson<RunEvent>('run', (e) => {
       onRunEvent(e);
       if (e.run) void refreshTree();
+      // A run that ended: no agent is editing its file any more.
+      if (e.run?.endedAt) clearCursors(e.file);
     });
-    // Events missed while the stream was down: read the run again.
+    // Live agent cursors (E56): where an agent session is editing a diagram. A malformed event moves nothing.
+    const offCursor = events.subscribeJson<CursorEvent>('cursor', applyCursorEvent);
+    // Events missed while the stream was down: read the run again. Cursors from before the gap are stale.
     const offOpen = events.onConnection((online) => {
-      if (online) void reloadRun();
+      if (!online) return;
+      clearCursors();
+      void reloadRun();
     });
     return () => {
       offWorkspace();
       offRun();
+      offCursor();
       offOpen();
     };
   }, [session, load, refreshTree]);
