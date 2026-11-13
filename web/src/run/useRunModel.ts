@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useDispatch } from '../dispatch/store.ts';
 import { useRunData } from './runData.ts';
-import { nodeLabels, sessionRows, stepRows, stripModel, type LiveSession } from './runModel.ts';
+import { isLive, nodeLabels, sessionRows, stepRows, stripModel, type LiveSession } from './runModel.ts';
 
 /** Re-render every 30s while `on`, so "8분째" stays current. */
 function useNow(on: boolean): number {
@@ -20,7 +20,8 @@ function useNow(on: boolean): number {
 export function useRunModel(code: string | undefined) {
   const data = useRunData();
   const record = data.record;
-  const running = record?.state === 'running';
+  // Running or paused: the sessions are still there (live states, overlay, the stream stays open).
+  const running = isLive(record?.state);
   const now = useNow(running);
   const sessions = useDispatch((s) => s.sessions);
   const five = useDispatch((s) => s.limits.five);

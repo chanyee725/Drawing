@@ -69,12 +69,12 @@ export default function RunView({ code }: { code: string | undefined }) {
             {m.rows.map((r) => (
               <li key={r.id}>
                 <div className="flex items-baseline gap-2">
-                  <span aria-hidden className={VIEW_TONE[r.view]}>
+                  <span aria-hidden className={r.paused === 'limit' ? 'text-warn' : r.paused ? 'text-muted-foreground' : VIEW_TONE[r.view]}>
                     {r.glyph}
                   </span>
                   <span className="min-w-0 flex-1 truncate">
                     {r.n} {r.title}
-                    <span className="sr-only"> · {r.label}</span>
+                    {r.paused !== 'limit' && <span className="sr-only"> · {r.label}</span>}
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{r.time}</span>
                 </div>
