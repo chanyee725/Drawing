@@ -11,10 +11,9 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from './sheet';
 const SIDEBAR_WIDTH = '264px';
 const MOBILE_QUERY = '(max-width: 767px)';
 
-// Sidebar colours. shadcn's own names are --sidebar, --sidebar-accent and --sidebar-border; until the token
-// ticket (#132) adds them, these map onto the app's existing tokens.
+// Sidebar colours. The shell and sidebar sit on --sidebar; the inset panel stays on --background.
 const C = {
-  bg: 'bg-panel text-foreground',
+  bg: 'bg-sidebar text-sidebar-foreground',
   hover: 'hover:bg-accent hover:text-foreground',
   active: 'aria-[current=page]:bg-muted aria-[current=page]:text-foreground',
   border: 'border-border',
