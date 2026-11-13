@@ -222,3 +222,34 @@ test('divider rows: a divider inside a group splits its connected children too (
     for (const p of e.points) assert.ok(p.x > g.x && p.x < g.x + g.w && p.y > g.y && p.y < g.y + g.h, `${e.from}>${e.to} leaves G at ${p.x},${p.y}`);
   }
 });
+
+test('divider rows: two edges across between the same pair each go around, apart from each other (#244)', async () => {
+  const runs = (e: SceneEdge) => e.points.slice(1).map((q, k) => [e.points[k]!, q] as const);
+  /** Length two segments share on one line (parallel and closer than `space`). */
+  const overlap = (a: SceneEdge, b: SceneEdge, space: number): number => {
+    let most = 0;
+    for (const [p, q] of runs(a)) {
+      for (const [r, t] of runs(b)) {
+        const flat = p.y === q.y;
+        if (flat !== (r.y === t.y) || (flat ? p.x === q.x : p.y === q.y)) continue;
+        if (Math.abs(flat ? p.y - r.y : p.x - r.x) >= space) continue;
+        const lo = Math.max(flat ? Math.min(p.x, q.x) : Math.min(p.y, q.y), flat ? Math.min(r.x, t.x) : Math.min(r.y, t.y));
+        const hi = Math.min(flat ? Math.max(p.x, q.x) : Math.max(p.y, q.y), flat ? Math.max(r.x, t.x) : Math.max(r.y, t.y));
+        most = Math.max(most, hi - lo);
+      }
+    }
+    return most;
+  };
+  const cases: [string, string[]][] = [];
+  for (const dir of ['down', 'up', 'right', 'left']) {
+    cases.push([`${dir} there and back`, [`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'A > D', 'D > A']]);
+    cases.push([`${dir} twice`, [`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'D > A', 'D > A']]);
+  }
+  for (const [what, code] of cases) {
+    const s = await scene(code.join('\n'), 'flowchart');
+    assertClear(s, 'Phase 2', what);
+    const pair = s.items.filter((i): i is SceneEdge => i.kind === 'edge' && [i.from, i.to].sort().join() === 'A,D');
+    assert.equal(pair.length, 2, `${what}: both edges drawn`);
+    assert.ok(overlap(pair[0]!, pair[1]!, 8) <= 1, `${what}: the two routes run apart: ${JSON.stringify(pair.map((e) => e.points))}`);
+  }
+});

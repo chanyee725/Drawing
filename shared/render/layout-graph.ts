@@ -1012,8 +1012,9 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
 /**
  * Real routes for the edges that cross a divider row (#244): around the other nodes and groups of the
  * rows' scope and the divider labels, never along a divider line, inside the group when the rows are in
- * one. Parallel edges between the same two nodes keep their offsets from routeElbow (they would share one
- * route). An edge with no such route keeps its elbow.
+ * one. Parallel edges between the same two nodes are routed one after the other, each kept off the routes
+ * already found (never along them), so they run on their own tracks. An edge with no such route keeps its
+ * elbow.
  */
 function routeAcross(
   d: GraphDiagram,
@@ -1037,14 +1038,13 @@ function routeAcross(
     for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.add(p);
     return out;
   };
-  const pairs = new Map<string, number>();
+  const pairKey = (be: BaseEdge): string => [be.edge.from, be.edge.to].sort().join('\u0000');
+  // Parallel edges not routed yet: their placeholder elbows sit on the tracks the first one needs.
+  const waiting = new Set(list);
   for (const be of list) {
-    const k = [be.edge.from, be.edge.to].sort().join('\u0000');
-    pairs.set(k, (pairs.get(k) ?? 0) + 1);
-  }
-  for (const be of list) {
+    waiting.delete(be);
     const { from, to } = be.edge;
-    if (from === to || (pairs.get([from, to].sort().join('\u0000')) ?? 0) > 1) continue;
+    if (from === to) continue;
     const scope = scopeOf.get(be.edge.id);
     const skip = new Set([...chain(from), ...chain(to)]);
     const blocks: Rect[] = [];
@@ -1076,7 +1076,7 @@ function routeAcross(
       const y1 = Math.max(...all.map((r) => r.y + r.h)) + 2 * ROUTE_GAP;
       bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     }
-    const lines = others.filter((o) => o !== be).map((o) => o.points);
+    const lines = others.filter((o) => o !== be && !(waiting.has(o) && pairKey(o) === pairKey(be))).map((o) => o.points);
     const route = routeAround(rects.get(from)!, rects.get(to)!, blocks, bands, bounds, lines);
     if (route) be.points = route.map((p) => ({ x: round(p.x), y: round(p.y) }));
   }
