@@ -203,7 +203,7 @@ export function App() {
 
   // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
   // slices it shows, never blocks, canvas or document.
-  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree() }));
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');

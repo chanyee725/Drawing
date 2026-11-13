@@ -3,7 +3,7 @@ import type { ImageKind } from './export/actions';
 import { IS_MAC } from './platform';
 import { SCALES, describeExport, type ExportOptions } from './export/options';
 import { Button } from './components/ui/button';
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Kbd } from './components/ui/kbd';
 
 type Props = {
@@ -24,7 +24,7 @@ type Props = {
 };
 
 /** A pill that sets an option and keeps the menu open. */
-const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[pressed=true]:border-primary data-[pressed=true]:bg-muted data-[pressed=true]:font-semibold data-[pressed=true]:text-foreground';
+const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[state=checked]:border-primary data-[state=checked]:bg-muted data-[state=checked]:font-semibold data-[state=checked]:text-foreground';
 const keep = (fn: () => void) => (e: Event) => {
   e.preventDefault();
   fn();
@@ -43,7 +43,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
   const items: { label: string; hint: string; kbd?: string; off: boolean; run: () => void; id: string }[] = [
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
     { id: 'png', label: 'PNG로 내보내기', hint: `${scope} · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('png') },
-    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: 'Shift+Alt+C', off: !canvasReady, run: () => onImage('copy') },
+    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', off: !canvasReady, run: () => onImage('copy') },
     {
       id: 'pdf',
       label: 'PDF로 저장(인쇄)',
@@ -64,29 +64,29 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
         <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
           <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
             <legend className="sr-only">이미지 옵션</legend>
-            <div className="flex items-center gap-1" role="group" aria-label="PNG 크기">
+            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => onOptions({ ...options, scale: Number(v) as ExportOptions['scale'] })}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">PNG 크기</span>
               {SCALES.map((s) => (
-                <DropdownMenuItem key={s} data-export-scale={s} data-pressed={options.scale === s} aria-pressed={options.scale === s} className={pill} onSelect={keep(() => onOptions({ ...options, scale: s }))}>
+                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={keep(() => {})}>
                   {s}배
-                </DropdownMenuItem>
+                </DropdownMenuRadioItem>
               ))}
-            </div>
-            <div className="flex items-center gap-1" role="group" aria-label="색상">
+            </DropdownMenuRadioGroup>
+            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="색상" value={String(options.dark)} onValueChange={(v) => onOptions({ ...options, dark: v === 'true' })}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">색상</span>
               {([false, true] as const).map((d) => (
-                <DropdownMenuItem key={String(d)} data-export-dark={String(d)} data-pressed={options.dark === d} aria-pressed={options.dark === d} className={pill} onSelect={keep(() => onOptions({ ...options, dark: d }))}>
+                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={keep(() => {})}>
                   {d ? '다크' : '라이트'}
-                </DropdownMenuItem>
+                </DropdownMenuRadioItem>
               ))}
-            </div>
+            </DropdownMenuRadioGroup>
             <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-xs" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
               배경을 투명하게
             </DropdownMenuCheckboxItem>
           </fieldset>
           <DropdownMenuSeparator />
           {items.map((it) => (
-            <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} title={it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : undefined} onSelect={() => it.run()} className="items-start">
+            <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start">
               <div className="flex min-w-0 flex-1 flex-col">
                 <span>{it.label}</span>
                 <span className="text-xs text-muted-foreground">{it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}</span>
