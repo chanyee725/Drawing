@@ -1,6 +1,7 @@
-// Version history of the open file: the saved versions, a read-only preview, and "restore".
+// Version history of the open file: the saved versions, a rendered read-only preview, and "restore".
 // Restoring is a normal save of that version's content over the current file (App does it).
-import { useEffect, useRef, useState } from 'react';
+import { X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import { api, ApiError, type HistoryEntry, type HistoryVersion } from './api';
 import { documentToMarkdown } from './export/markdown';
 import { Button } from './components/ui/button';
@@ -24,38 +25,60 @@ const errText = (e: unknown, fallback: string) => {
   return fallback;
 };
 
-/** Block diagrams and free-form drawings of a version, drawn with the same renderers as the app (loaded on use). */
-function Pictures({ v, dark }: { v: HistoryVersion; dark: boolean }) {
-  const [svgs, setSvgs] = useState<string[]>([]);
+type Rendered = { html: string | null; rest: string[] };
+
+/**
+ * A version drawn the way the app shows it: the document with its diagrams in place, then the blocks the
+ * document does not embed and the free-form drawing. Same renderers as the app, loaded on use.
+ */
+function Rendered({ v, dark }: { v: HistoryVersion; dark: boolean }) {
+  const [out, setOut] = useState<Rendered | null>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
-    setSvgs([]);
+    setOut(null);
     setFailed(false);
     (async () => {
-      const out: string[] = [];
-      const { renderBlock } = await import('./canvas/render');
-      for (const b of v.blocks) out.push((await renderBlock({ ...b, id: `history:${v.id}:${b.id}` }, dark ? 'dark' : 'light')).svg);
+      const [{ renderBlock }, { versionHtml }] = await Promise.all([import('./canvas/render'), import('./doc/previewHtml')]);
+      const pictures = new Map<string, string>();
+      for (const b of v.blocks) pictures.set(b.id, (await renderBlock({ ...b, id: `history:${v.id}:${b.id}` }, dark ? 'dark' : 'light')).svg);
+      const html = versionHtml(v.document, pictures);
+      const embedded = new Set(html === null ? [] : [...html.matchAll(/data-block-id="([^"]*)"/g)].map((m) => m[1]));
+      const rest = v.blocks.filter((b) => !embedded.has(b.id)).map((b) => pictures.get(b.id) ?? '');
       const elements = ((v.canvas as { elements?: unknown[] } | null)?.elements ?? []).filter((e) => !(e as { isDeleted?: boolean }).isDeleted && (e as { type?: string }).type !== 'image');
       if (elements.length) {
         const { exportToSvg } = await import('@excalidraw/excalidraw');
         const el = await exportToSvg({ elements: elements as never, appState: { exportBackground: false, exportWithDarkMode: dark }, files: null, exportPadding: 8 });
-        out.push(el.outerHTML);
+        rest.push(el.outerHTML);
       }
-      if (live) setSvgs(out);
+      if (live) setOut({ html, rest });
     })().catch(() => live && setFailed(true));
     return () => {
       live = false;
     };
   }, [v, dark]);
-  if (failed) return <p className="text-sm text-muted-foreground">그림을 그리지 못했어요</p>;
+  const picture = 'max-w-full overflow-auto rounded-md border p-2 [&_svg]:h-auto [&_svg]:max-w-full';
+  // Until it is drawn (or when it cannot be), the text of the document still shows.
+  const text = (
+    <pre className="font-sans text-sm break-words whitespace-pre-wrap">{documentToMarkdown('', v.document, v.blocks).trim()}</pre>
+  );
   return (
-    <div className="flex flex-col gap-3" aria-label="그림 미리보기">
-      {svgs.map((s, i) => (
-        // The SVG comes from our own renderers, not from file text.
-        <div key={i} className="max-w-full overflow-auto rounded-md border p-2 [&_svg]:h-auto [&_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: s }} />
-      ))}
-    </div>
+    <>
+      {out?.html != null ? (
+        // The HTML comes from the editor's schema serializer and our own renderers, not from raw file text.
+        <div className="doc-editor history-doc min-h-0! [&_figure]:my-3 [&_figure_svg]:h-auto [&_figure_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: out.html }} />
+      ) : (
+        text
+      )}
+      {failed && <p className="text-sm text-muted-foreground">그림을 그리지 못했어요</p>}
+      {!!out?.rest.length && (
+        <div className="flex flex-col gap-3" aria-label="그림 미리보기">
+          {out.rest.map((s, i) => (
+            <div key={i} className={picture} dangerouslySetInnerHTML={{ __html: s }} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -65,7 +88,6 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
   const [preview, setPreview] = useState<HistoryVersion | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     let live = true;
@@ -112,8 +134,8 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
       <DialogContent aria-label="버전 기록" aria-describedby={undefined} className="h-[min(40rem,calc(100%-2rem))] w-[min(56rem,calc(100%-2rem))] max-w-none">
         <DialogHeader>
           <DialogTitle className="mr-auto">버전 기록</DialogTitle>
-          <Button ref={closeRef} variant="outline" size="sm" onClick={onClose}>
-            닫기
+          <Button variant="ghost" size="icon-sm" aria-label="닫기" title="닫기" onClick={onClose} className="max-md:size-11">
+            <X />
           </Button>
         </DialogHeader>
         {message && (
@@ -142,13 +164,11 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
             {!picked ? null : !preview ? (
               <p className="text-sm text-muted-foreground">불러오는 중이에요…</p>
             ) : (
-              <div className="flex flex-col gap-4">
+              <article data-testid="history-doc" aria-label="읽기 전용 미리보기" className="mx-auto flex max-w-2xl flex-col gap-4">
                 <p className="text-xs text-muted-foreground">읽기 전용 미리보기예요</p>
-                <pre data-testid="history-doc" className="font-sans text-sm break-words whitespace-pre-wrap">
-                  {documentToMarkdown(preview.title, preview.document, preview.blocks)}
-                </pre>
-                <Pictures v={preview} dark={dark} />
-              </div>
+                <h3 className="text-xl font-semibold break-words">{preview.title || '제목 없는 파일'}</h3>
+                <Rendered v={preview} dark={dark} />
+              </article>
             )}
           </section>
         </div>
