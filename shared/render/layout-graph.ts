@@ -580,9 +580,9 @@ function onOtherLine(c: Point, others: readonly Point[][]): boolean {
 /**
  * Label centre for an edge: the middle of its longest segment, or, when that plate would overlap a label
  * already placed or a node, or sits on another edge's line (a run shared with a sibling, a split point), moved along the
- * line towards the end node in LABEL_SHIFT steps (first clear spot wins; if every spot is near another line, the first one clear of labels and nodes; none clear keeps the middle). Records the chosen plate in `placed`.
+ * line towards the end node in LABEL_SHIFT steps (first clear spot wins; if every spot is near another line, the first one clear of labels and nodes, the middle included; none clear keeps the middle). Records the chosen plate in `placed`. Exported for tests.
  */
-function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[], others: Point[][] = []): Point {
+export function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[], others: Point[][] = []): Point {
   const start = labelAnchor(points, route);
   const clear = (c: Point, ignoreLines = false): boolean => {
     const r = labelRect(c, label);
@@ -615,9 +615,10 @@ function placeLabel(points: Point[], route: string, label: Label, placed: Rect[]
       return path[path.length - 1]!;
     };
     // Second pass (staggered tracks sit 6 px apart, so every spot can be near another line): the first spot
-    // clear of labels and nodes, as before the line check existed.
+    // clear of labels and nodes, as before the line check existed. It starts at the middle itself (d = 0),
+    // which the first pass skipped only because of the line check.
     search: for (const ignoreLines of [false, true]) {
-      for (let d = LABEL_SHIFT; d <= total; d += LABEL_SHIFT) {
+      for (let d = ignoreLines ? 0 : LABEL_SHIFT; d <= total; d += LABEL_SHIFT) {
         const c = at(d);
         if (clear(c, ignoreLines)) { best = { x: round(c.x), y: round(c.y) }; break search; }
       }
