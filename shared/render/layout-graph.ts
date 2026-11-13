@@ -1075,8 +1075,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   for (const g of nodes.values()) {
     const r = rects.get(g.node.id)!;
     handle(g.node.id, 'node');
-    const { style, label } = g;
-    const { sub } = g;
+    const { style, label, sub } = g;
     // The subtitle is muted, kept readable on the node's fill (svg.ts); on a bold fill it takes the contrast colour.
     const subItem = (x: number, y: number, anchor: 'start' | 'middle', on?: ElementStyle['paint']): SceneItem =>
       textItem(sub!.lines, x, y, { size: sub!.size, font: style.typeface, anchor, tone: 'muted', ...(on ? { on } : {}) });

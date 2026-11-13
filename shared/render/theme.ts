@@ -168,7 +168,6 @@ export function resolvePaint(paint: Paint, theme: Theme, soft = false, shadow = 
   if (soft) return { fill: rgba(stroke, theme === 'light' ? 0.08 : 0.1), stroke, text: t.text };
   return { fill: paint.mode === 'bold' ? mix(stroke, t.background, 0.3) : pastelOf(paint.color, theme), stroke, text: t.text };
 }
-/** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 /**
  * Muted text (a subtitle) on `fill`: `muted` itself when it reads at 4.5:1 or better, otherwise moved toward
  * `text` in 10% steps until it does. Pale tinted fills need a slightly darker grey than white does.
@@ -186,6 +185,7 @@ export function readableMuted(muted: string, text: string, fill: string): string
   return text;
 }
 
+/** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 function contrastText(fill: string): string {
   const l = luminance(fill);
   const dark = luminance('#1f2329');

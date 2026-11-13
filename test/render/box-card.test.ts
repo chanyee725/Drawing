@@ -128,7 +128,7 @@ test('box card: card size per textSize (52 minimum, subtitle cards grow with the
   }
   assert.deepEqual(plain, [52, 52, 52]);
   assert.equal(withSub[0], 56);
-  assert.ok(withSub[1]! >= withSub[0]! && withSub[2]! > withSub[0]!, `subtitle heights ${withSub}`);
+  assert.deepEqual(withSub, [56, 56, 63]);
 });
 
 test('box card: cards with and without a subtitle in one group share the tallest height, title stays centred', async () => {
