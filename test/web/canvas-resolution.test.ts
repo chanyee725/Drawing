@@ -29,9 +29,11 @@ test('pictureScale stays within its limits and the bitmap area cap', () => {
 
 test('variant ids keep the picture id and come back to it', () => {
   assert.equal(variantId('blk_a_1', 1), 'blk_a_1');
-  assert.equal(variantId('blk_a_1', 2), 'blk_a_1@2');
-  assert.equal(variantId('blk_a_1', 0.5), 'blk_a_1@0.5');
-  assert.equal(baseFileId('blk_a_1@2'), 'blk_a_1');
+  assert.equal(variantId('blk_a_1', 2), 'blk_a_1--k2');
+  assert.equal(variantId('blk_a_1', 0.5), 'blk_a_1--k0p5');
+  // Usable in a CSS id selector (Excalidraw's SVG export looks images up that way).
+  assert.match(variantId('blk_a_1', 0.125), /^[A-Za-z0-9_-]+$/);
+  assert.equal(baseFileId('blk_a_1--k2'), 'blk_a_1');
   assert.equal(baseFileId('blk_a_1'), 'blk_a_1');
 });
 

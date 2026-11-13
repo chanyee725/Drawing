@@ -27,10 +27,12 @@ export function pictureScale(pixelsPerUnit: number, w: number, h: number): numbe
   return k;
 }
 
-const SEP = '@';
+// Excalidraw's SVG export looks images up with `#image-<fileId>` as a CSS selector, so the id must stay a
+// plain identifier: no "@" or ".". 2 → "--k2", 0.5 → "--k0p5".
+const SEP = '--k';
 
 /** File id of a picture's variant; factor 1 is the picture's own id. */
-export const variantId = (fileId: string, k: number) => (k === 1 ? fileId : `${fileId}${SEP}${k}`);
+export const variantId = (fileId: string, k: number) => (k === 1 ? fileId : `${fileId}${SEP}${String(k).replace('.', 'p')}`);
 
 /** The picture's own file id for a variant id (or for the picture's own id). */
 export const baseFileId = (id: string) => {
