@@ -75,10 +75,10 @@ test("cli: refuses anything outside the allowlist, and any shell", async () => {
   await assert.rejects(runCli("git", ["--version"], { shell: "/bin/sh" }), e => e.code === "ECLIDENIED");
 });
 
-test("cli: a real agent CLI never starts under npm test", async () => {
-  // An executable named claude in a folder without the fake marker counts as real.
+test("cli: a real agent CLI or gh never starts under npm test", async () => {
+  // An executable named claude (or gh) in a folder without the fake marker counts as real.
   const dir = tmp("drawing-real-cli-");
-  for (const bin of ["claude", "codex", "agy"]) {
+  for (const bin of ["claude", "codex", "agy", "gh"]) {
     writeFileSync(path.join(dir, bin), `#!${process.execPath}\nprocess.exit(0);\n`);
     chmodSync(path.join(dir, bin), 0o755);
     const env = { ...process.env, PATH: dir };
@@ -87,6 +87,7 @@ test("cli: a real agent CLI never starts under npm test", async () => {
   }
   // Not on PATH at all: refused too, never looked up elsewhere.
   assert.throws(() => spawnCli("claude", [], { env: { ...process.env, PATH: tmp("drawing-empty-bin-") } }), e => e.code === "ECLIDENIED");
+  await assert.rejects(runCli("gh", ["--version"], { env: { ...process.env, PATH: tmp("drawing-empty-bin-") } }), e => e.code === "ECLIDENIED");
 });
 
 test("cli: the real seam runs the fake CLIs from a marked folder", async () => {
