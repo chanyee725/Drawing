@@ -62,7 +62,9 @@ test('history: keeps the newest 50 and drops the oldest', async () => {
     assert.equal(t.length, 50);
     assert.equal(t[0], 'v54');
     assert.equal(t[49], 'v5');
-    assert.equal((await readdir(join(ws, '.drawing/history/a.dpx.json'))).length, 50);
+    // Plus the `born` mark (creation time, not a version).
+    assert.deepEqual((await readdir(join(ws, '.drawing/history/a.dpx.json'))).filter((n) => !n.endsWith('.json')), ['born']);
+    assert.equal((await readdir(join(ws, '.drawing/history/a.dpx.json'))).length, 51);
   });
 });
 
@@ -111,8 +113,8 @@ const DAY = 24 * 60 * MIN;
 test('history: failures never break a save', async () => {
   await withStore({}, async ({ store, ws }) => {
     await store.createFile('a');
-    // `.drawing/history` is a file, so snapshots cannot be written
-    await mkdir(join(ws, '.drawing'));
+    // `.drawing/history` is a file, so snapshots cannot be written (it was a folder holding the `born` mark)
+    await rm(join(ws, '.drawing/history'), { recursive: true });
     await (await import('node:fs/promises')).writeFile(join(ws, '.drawing/history'), 'x');
     await save(store, 'a', 'one');
     assert.equal((await store.readFile('a')).title, 'one');
