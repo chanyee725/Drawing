@@ -278,3 +278,21 @@ test('an icon name equal to any glyph name picks that glyph', async () => {
   for (const g of ['user', 'queue', 'balancer', 'bucket', 'placeholder', 'search'] as const) assert.equal(glyphFor(g), g);
   assert.equal(glyphFor('  Queue '), 'queue');
 });
+
+test('sequence: message labels sit on their line and cut it; no bold text (E60)', async () => {
+  const { scene } = await renderDiagram(fixture('sequence-login'));
+  const texts = scene.items.filter((it) => it.kind === 'text');
+  assert.ok(texts.every((tx) => tx.weight === 400 || tx.lines.join('') === 'Login'), 'only the diagram title may be bold');
+  const label = texts.find((tx) => tx.lines.join('') === '2. find user');
+  assert.ok(label?.plate, 'message label is a plate label');
+  const line = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'straight' && Math.abs(it.points[0]!.y - (label!.y + label!.lineHeight / 2)) < 0.5);
+  assert.ok(line, 'a message line runs through the label centre');
+  assert.ok(label!.x > Math.min(line!.points[0]!.x, line!.points[1]!.x) && label!.x < Math.max(line!.points[0]!.x, line!.points[1]!.x));
+});
+
+test('erd: table titles, key fields and badges are weight 400 (E60)', async () => {
+  const { scene } = await renderDiagram(fixture('erd-billing'));
+  const texts = scene.items.filter((it) => it.kind === 'text' && it.lines.join('') !== 'Billing');
+  assert.ok(texts.length > 0);
+  assert.ok(texts.every((tx) => tx.kind === 'text' && tx.weight === 400));
+});
