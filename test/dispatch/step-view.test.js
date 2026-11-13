@@ -39,7 +39,8 @@ test("stepView: five states from stage and sessions", () => {
 
 test("stepView without a board stage falls back to sessions", () => {
   assert.equal(stepView({ sessions: ses("working", "done") }), "active");
-  assert.equal(stepView({ sessions: ses("done", "done") }), "done");
+  assert.equal(stepView({ sessions: ses("done", "done") }), "review", "finished sessions are not a merge");
+  assert.equal(stepView({ stage: "done", sessions: ses("done", "done") }), "done", "only board stage done gives done");
   assert.equal(stepView({ sessions: ses("resting") }), "active");
 });
 

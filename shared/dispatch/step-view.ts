@@ -80,8 +80,9 @@ export function stepView(s: StepInput): StepView {
   if (s.stage === 'review') return 'review';
   if (s.stage === 'impl' || s.stage === 'test' || s.stage === 'merge') return 'active';
   if (s.stage === 'plan' || s.sessions.length === 0) return 'pending';
-  // No board stage: fall back to the sessions alone.
-  return s.sessions.every((x) => x.state === 'done') ? 'done' : 'active';
+  // No board stage: fall back to the sessions alone. A finished session is not a merge (§5.1: `done` is board
+  // stage `done` only), so all-finished means waiting for review, never `done`.
+  return s.sessions.every((x) => x.state === 'done') ? 'review' : 'active';
 }
 
 /** A session waits on a person: a "사람 기다림" tag on an active/review step, not a progress state. */
