@@ -151,6 +151,8 @@ const toDoc = (n: DocNodeDto): ProjectDoc => ({
   children: n.children.map(toDoc),
 });
 export const projectsApi = {
+  /** Files with a run going now (GET /api/runs/active). */
+  running: () => call<{ files: string[] }>('GET', '/api/runs/active').then((r) => r.files),
   projects: () =>
     call<{ projects: ProjectDto[]; loose: DocNodeDto[] }>('GET', '/api/workspace/projects').then(
       (r): ProjectsResponse => ({

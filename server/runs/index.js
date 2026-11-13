@@ -35,6 +35,14 @@ export async function setup(ctx) {
       return recorder.close();
     },
     routes: [
+      // Files with a run going now, for "실행 중" counts on the project home (no path needed).
+      {
+        method: 'GET',
+        path: '/api/runs/active',
+        handler(_req, res) {
+          send(res, 200, { files: recorder.runningFiles() });
+        },
+      },
       route('GET', '/api/runs', (p) => recorder.list(p)),
       route('GET', '/api/runs/run', (p, q) => recorder.read(p, q.get('id'))),
       // Starting a run from the file's plan needs the plan/approval flow (E20).

@@ -116,6 +116,31 @@ test('the tree mark follows runs: running while one is live, then done or paused
   });
 });
 
+test('tree mark and /api/runs/active agree: a finished or trashed run is not running', async () => {
+  await withApp(async ({ call, app }) => {
+    const recorder = app.ctx.modules.runs.recorder;
+    await call('POST', '/api/file', { path: 'p', blocks: [block], plan });
+    const mark = async () => (await call('GET', '/api/tree')).body.tree.find((n) => n.path === 'p.dpx.json')?.pipeline;
+    const active = async () => (await call('GET', '/api/runs/active')).body.files;
+    const a = await recorder.startRun({ file: 'p', plan, revision: 1 });
+    assert.deepEqual(await mark(), { state: 'running' });
+    assert.deepEqual(await active(), ['p.dpx.json']);
+    // endRun marks the record finished before its last write; it is still in memory but no longer running.
+    const ending = recorder.endRun(a.id, 'done');
+    assert.notDeepEqual(await recorder.markOf('p.dpx.json'), { state: 'running' });
+    assert.deepEqual(recorder.runningFiles(), []);
+    await ending;
+    assert.deepEqual(await mark(), { state: 'done' });
+    assert.deepEqual(await active(), []);
+    // A live run whose file is in the trash is not running anywhere.
+    const b = await recorder.startRun({ file: 'p', plan, revision: 1 });
+    await app.ctx.modules.workspace.store.removeFile('p');
+    assert.notDeepEqual(await recorder.markOf('p.dpx.json'), { state: 'running' });
+    assert.deepEqual(await active(), []);
+    await recorder.endRun(b.id, 'stopped');
+  });
+});
+
 function sseReader(base) {
   const events = [];
   const ac = new AbortController();
