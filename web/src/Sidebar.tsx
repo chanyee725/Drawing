@@ -2,9 +2,9 @@
 // (모든 파일 A, 최근 R, 보관함 B), projects with their nested sub-documents, one row per model with its connection
 // status (SidebarModels.tsx) and settings. Built from the shadcn Sidebar (components/ui/sidebar.tsx).
 import { useEffect, useRef, useState } from 'react';
-import { Archive, ChevronRight, Clock, File, Files, FolderClosed, FolderInput, Moon, MoreHorizontal, Pencil, Plus, Search, Settings, SquarePen, Sun, Trash2 } from 'lucide-react';
+import { Archive, ChevronRight, Clock, File, Files, FolderClosed, FolderInput, MoreHorizontal, Pencil, Plus, Search, Settings, SquarePen, Trash2 } from 'lucide-react';
 import type { DocNode, PipelineMark, Project, ProjectsView } from './api';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Kbd } from './components/ui/kbd';
 import {
   Sidebar as SidebarRoot,
@@ -45,10 +45,8 @@ type Props = {
   onMove: (item: MoveItem, dir: string) => Promise<boolean>;
   onArchive: () => void;
   onCommands: () => void;
-  theme: 'light' | 'dark';
-  onToggleTheme: () => void;
-  settingsOpen: boolean;
-  onSettingsOpen: (open: boolean) => void;
+  /** Opens the settings dialog (the 설정 row). */
+  onSettings: () => void;
 };
 
 const ICON_BUTTON = 'flex size-[30px] shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-accent hover:text-foreground max-md:size-11 [&>svg]:size-[17px] ' + FOCUS_RING;
@@ -366,23 +364,12 @@ export function Sidebar(p: Props) {
         <SidebarModels />
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu open={p.settingsOpen} onOpenChange={p.onSettingsOpen}>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="group/row" aria-keyshortcuts=",">
-                  <Settings aria-hidden />
-                  <span className="truncate">설정</span>
-                  {/* The key is announced through aria-keyshortcuts, so the button's name stays 설정. */}
-                  <Kbd aria-hidden className="ml-auto opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 max-md:hidden">,</Kbd>
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="w-56">
-                <DropdownMenuLabel>설정</DropdownMenuLabel>
-                <DropdownMenuItem onSelect={p.onToggleTheme}>
-                  {p.theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
-                  {p.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SidebarMenuButton className="group/row" aria-haspopup="dialog" aria-keyshortcuts="," onClick={p.onSettings}>
+              <Settings aria-hidden />
+              <span className="truncate">설정</span>
+              {/* The key is announced through aria-keyshortcuts, so the button's name stays 설정. */}
+              <Kbd aria-hidden className="ml-auto opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 max-md:hidden">,</Kbd>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
