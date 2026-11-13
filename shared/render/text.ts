@@ -15,7 +15,8 @@ const HANGUL_FALLBACK = "'Noto Sans KR', 'Noto Sans CJK KR', 'Apple SD Gothic Ne
 
 export const FONT_FAMILY: Record<Typeface, string> = {
   clean: `'${CLEAN_FONT_NAME}', ${HANGUL_FALLBACK}, system-ui, -apple-system, 'Segoe UI', sans-serif`,
-  mono: "'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
+  // Hangul after `monospace`: a Korean family listed earlier would take the Latin too when no mono face is installed.
+  mono: `'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace, ${HANGUL_FALLBACK}`,
   rough: `'Shantell Sans', ${HANGUL_FALLBACK}, system-ui, sans-serif`,
 };
 
@@ -31,7 +32,9 @@ const SYMBOL: Record<string, number> = {
   '+': 0.63, '<': 0.63, '=': 0.63, '>': 0.63, '~': 0.63, '±': 0.63, '×': 0.63, '÷': 0.63, '−': 0.63, '&': 0.61, '$': 0.61,
 };
 
-function isWideChar(code: number): boolean {
+/** Hangul, CJK and emoji: measured at 1em in every face, mono included (a monospace font has no such glyphs, so
+ * they come from a fallback at its own width, about 0.9-1em). */
+export function isWideChar(code: number): boolean {
   return (
     (code >= 0x1100 && code <= 0x11ff) || // Hangul Jamo
     (code >= 0x2e80 && code <= 0xa4cf) || // CJK, kana, etc.

@@ -113,6 +113,8 @@ export interface SceneLine {
   tone: 'muted' | 'normal';
   /** Stroke width; default 1 (sequence lifelines). Dividers use the connector width. */
   width?: number;
+  /** Cut under plate labels like an edge (sequence lifelines, which long message labels cross). */
+  cut?: boolean;
 }
 
 /** A solid chip on an element's top-right corner (`badge:`). The box is the chip itself (shared/render/badge.ts). */
