@@ -84,6 +84,45 @@ export const busyIds = (providers: Partial<Record<string, ProviderInfo>>): Provi
 
 /** Polling stops after this long even if the server still says a login runs; 다시 확인 checks again. */
 export const LOGIN_POLL_LIMIT_MS = 10 * 60_000;
+export const LOGIN_POLL_EVERY_MS = 2000;
+export const LOGIN_POLL_TIMEOUT_NOTE = '로그인을 너무 오래 기다렸어요. 다시 확인을 눌러 주세요.';
+
+type Clock = { now: () => number; setInterval: (fn: () => void, ms: number) => unknown; clearInterval: (t: unknown) => void };
+const realClock: Clock = { now: () => Date.now(), setInterval: (fn, ms) => setInterval(fn, ms), clearInterval: (t) => clearInterval(t as number) };
+
+/**
+ * Checks back every LOGIN_POLL_EVERY_MS while a CLI login runs and gives up after LOGIN_POLL_LIMIT_MS (calling
+ * `onGiveUp` once). Returns a stop function. Each call starts a fresh window, so 다시 확인 restarts it.
+ */
+export function pollLogins(load: () => void, onGiveUp: () => void, clock: Clock = realClock): () => void {
+  const started = clock.now();
+  const t = clock.setInterval(() => {
+    if (clock.now() - started > LOGIN_POLL_LIMIT_MS) {
+      clock.clearInterval(t);
+      onGiveUp();
+      return;
+    }
+    load();
+  }, LOGIN_POLL_EVERY_MS);
+  return () => clock.clearInterval(t);
+}
+
+type Focusable = { isConnected: boolean; focus: () => void; checkVisibility?: () => boolean };
+type FocusRoot = { activeElement: unknown; body: unknown; querySelectorAll: (s: string) => ArrayLike<unknown> };
+const canFocus = (el: unknown): el is Focusable =>
+  !!el && typeof (el as Focusable).focus === 'function' && (el as Focusable).isConnected && (el as Focusable).checkVisibility?.() !== false;
+
+/**
+ * After the settings dialog closes: the browser returns focus to the opener, but on a phone the drawer that held
+ * the opener has already closed, so focus would drop to <body>. Then focus the opener if it is still on screen,
+ * else the visible sidebar (menu) button (#230 review). Leaves focus alone when it already landed somewhere.
+ */
+export function focusAfterClose(opener: unknown, root: FocusRoot = document): void {
+  const now = root.activeElement;
+  if (now && now !== root.body) return;
+  const target = canFocus(opener) ? opener : Array.from(root.querySelectorAll('[data-slot="sidebar-trigger"]')).find(canFocus);
+  target?.focus();
+}
 
 /**
  * Logins that ended since the last check without connecting and without an error of their own: the CLI exited
