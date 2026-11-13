@@ -35,7 +35,7 @@ test('nodes become shapes with bound labels, edges arrows with labels, groups da
   // Placed where the image is, scaled to its width (2x here).
   assert.deepEqual([a.x, a.y, a.width, a.height], [1040, 600, 200, 80]);
   assert.equal(group.strokeStyle, 'dashed');
-  assert.deepEqual(a.label, { text: 'A', fontSize: 28, strokeColor: (a.label as { strokeColor: string }).strokeColor });
+  assert.deepEqual(a.label, { text: 'A', fontSize: 28, fontFamily: 9, strokeColor: (a.label as { strokeColor: string }).strokeColor });
   assert.equal((b.label as { text: string }).text, 'B?');
   assert.equal(title.text, 'Group');
   // Bent like the drawing, relative to its first point.
