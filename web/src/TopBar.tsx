@@ -7,12 +7,13 @@ import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
 import { IS_MAC } from './platform';
 
-export type View = 'doc' | 'both' | 'canvas';
+export type View = 'doc' | 'both' | 'canvas' | 'run';
 
 const VIEWS: { id: View; label: string }[] = [
   { id: 'doc', label: '문서' },
   { id: 'both', label: '둘 다' },
   { id: 'canvas', label: '캔버스' },
+  { id: 'run', label: '실행' },
 ];
 
 type Props = {
@@ -22,6 +23,8 @@ type Props = {
   /** The status is a problem: keep it visible on narrow screens. */
   statusAlert?: boolean;
   view: View;
+  /** A pipeline file is open: offer the 실행 view. */
+  canRun?: boolean;
   /** Below md: one pane at a time, so no 둘 다; 버전 기록 lives in the ⋯ menu. */
   narrow?: boolean;
   onView: (v: View) => void;
@@ -36,7 +39,7 @@ type Props = {
   onCommands?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, statusAlert, view, narrow, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, canRun, narrow, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
   return (
     <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-sidebar px-2 md:gap-3 md:px-3">
       {onToggleNav && (
@@ -66,7 +69,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, narrow, onVi
         <span className="hidden truncate md:inline">{status}</span>
       </span>
       <Segmented className="shrink-0 md:mx-auto" aria-label="보기 방식">
-        {VIEWS.filter((v) => !narrow || v.id !== 'both').map((v) => (
+        {VIEWS.filter((v) => (!narrow || v.id !== 'both') && (canRun || v.id !== 'run')).map((v) => (
           <SegmentedItem key={v.id} active={view === v.id} onClick={() => onView(v.id)} className={cn('px-2 md:px-3', FOCUS_RING)}>
             {v.label}
           </SegmentedItem>
