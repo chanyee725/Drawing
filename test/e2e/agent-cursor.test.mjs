@@ -103,13 +103,15 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   await page.locator('.excalidraw').first().waitFor();
 
   await call('POST', '/api/providers/claude/login');
-  const { sessions } = await call('POST', '/api/sessions', { items: [{ role: 'impl', name: 'Kit', prompt: 'draw two boxes' }], worktree: false });
+  const { sessions } = await call('POST', '/api/sessions', { items: [{ role: 'impl', prompt: 'draw two boxes' }], worktree: false });
   assert.equal(sessions.length, 1);
+  const name = sessions[0].name; // the hub picks the session's name
+  assert.ok(name);
 
   const cursor = page.locator('[data-agent-cursor]');
   await cursor.waitFor({ timeout: 15_000 });
   assert.equal(await cursor.getAttribute('data-role'), 'impl');
-  assert.match(await cursor.locator('.agent-cursor-tag').textContent(), /Kit/);
+  assert.match(await cursor.locator('.agent-cursor-tag').textContent(), new RegExp(name));
   const at = () => cursor.evaluate((el) => el.style.translate.split(' ').map((v) => parseFloat(v)));
   await page.waitForTimeout(400);
   const first = await at();
@@ -119,19 +121,29 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   await page.locator('[data-agent-cursor][data-phase="thinking"]').waitFor({ timeout: 5000 });
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'agent-cursor-thinking.png') });
 
-  // The second edit: the cursor glides 300 scene units down (r2 centre → r3 centre), passing through between.
+  // Record where the cursor is drawn on every frame, so the 220 ms glide is seen whole.
+  await page.evaluate(() => {
+    const ys = (window.__cursorYs = []);
+    const tick = () => {
+      const el = document.querySelector('[data-agent-cursor]');
+      if (el?.style.translate) ys.push(parseFloat(el.style.translate.split(' ')[1]));
+      if (ys.length < 2000) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+
+  // The second edit: the cursor goes from r2's centre (460,30) to r3's (460,330).
   await page.locator('[data-agent-cursor][data-phase="editing"]').waitFor({ timeout: 8000 });
-  const samples = [];
-  for (let i = 0; i < 12; i++) {
-    samples.push(await at());
-    await page.waitForTimeout(25);
-  }
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(600);
   const second = await at();
-  const zoom = await page.evaluate(() => 1); // default zoom 1 in a fresh file
+  const ys = await page.evaluate(() => window.__cursorYs);
+  // An edit from outside reopens the canvas centred on its content at zoom 1 (ExcalidrawCanvas initialData,
+  // scrollToContent). Content bounds: y 0..60 before (centre 30), y 0..360 after (centre 180); x 0..520 both times.
+  // So on screen the cursor keeps its x and lands (330 - 180) - (30 - 30) = 150 px lower: still on r3's centre.
   assert.ok(Math.abs(second[0] - first[0]) < 2, `same x: ${first} → ${second}`);
-  assert.ok(Math.abs(second[1] - first[1] - 300 * zoom) < 2, `moved 300 down: ${first} → ${second}`);
-  assert.ok(samples.some(([, y]) => y > first[1] + 5 && y < second[1] - 5), `glided through the middle: ${JSON.stringify(samples)}`);
+  assert.ok(Math.abs(second[1] - first[1] - 150) < 2, `on r3's centre: ${first} → ${second}`);
+  // It glided: some frames drew it between the two places, not only at one or the other.
+  assert.ok(ys.some((y) => y > first[1] + 5 && y < second[1] - 5), `glided through the middle: ${JSON.stringify(ys.filter((y, i) => y !== ys[i - 1]))}`);
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'agent-cursor-second.png') });
 
   // The session stops editing and its turn ends: the cursor goes.
