@@ -3,6 +3,7 @@
 import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOutcome } from '../dsl/adapter.ts';
 import type { ReconcileReason } from '../../../shared/render/overrides.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
+import type { Scene } from '../../../shared/render/scene.ts';
 import { drawSig, fileIdFor, hash, type BlockLike, type OriginAnchor } from './sync.ts';
 import { svgDataURL } from './resolution.ts';
 
@@ -12,9 +13,10 @@ export type BlockPicture = { fileId: string; dataURL: string; /** The picture as
   /** The renderer itself failed (threw) on the current code. */ failed: boolean;
   /** Layout origin of a real drawing with the layout applied. Lets the canvas keep a moved layout still on screen (design §5.6). */
   anchor?: OriginAnchor;
-  /** The code changed so much that the saved layout was left out of this picture (design §4.2). */ layoutReset?: ReconcileReason };
+  /** The code changed so much that the saved layout was left out of this picture (design §4.2). */ layoutReset?: ReconcileReason;
+  /** The laid-out scene drawn in this picture (scene units = picture px), for the run overlay; absent for placeholders. */ scene?: Scene };
 
-type Drawn = { svg: string; width: number; height: number; errors?: number; lastGood?: boolean; failed?: boolean; anchor?: OriginAnchor; layoutReset?: ReconcileReason };
+type Drawn = { svg: string; width: number; height: number; scene?: Scene; errors?: number; lastGood?: boolean; failed?: boolean; anchor?: OriginAnchor; layoutReset?: ReconcileReason };
 
 const MIN = 40;
 const MAX_PICTURES = 200;
@@ -60,7 +62,7 @@ function picture(blockId: string, r: Drawn): BlockPicture {
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: svgDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false };
+    p = { fileId, dataURL: svgDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false, ...(r.scene ? { scene: r.scene } : {}) };
     pictures.set(fileId, p);
     if (pictures.size > MAX_PICTURES) pictures.delete(pictures.keys().next().value!);
   }
@@ -117,5 +119,5 @@ async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
   const applied = !state.stale && !state.failed && !reset && (!b.layout || b.layout.v === BLOCK_LAYOUT_VERSION);
   const o = state.scene.origin;
   const anchor = applied && o ? { key: hash(`${theme}\n${b.type}\n${b.code}`), x: o.x, y: o.y } : undefined;
-  return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length, lastGood: state.stale, failed: state.failed, anchor, layoutReset: reset };
+  return { svg: state.svg, width: state.scene.width, height: state.scene.height, scene: state.scene, errors: state.errors.length, lastGood: state.stale, failed: state.failed, anchor, layoutReset: reset };
 }

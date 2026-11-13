@@ -14,7 +14,8 @@
 
 /*
  * App chrome tokens: the shadcn/ui default theme, base colour neutral (doc 6 §4.1), so web/src/components/ui/*
- * works unchanged. No hue anywhere except the status colours --ok, --warn and --destructive. Our only changes to
+ * works unchanged. No hue anywhere except the status colours (--ok, --warn, --bad, --idle, --destructive) and the
+ * agent role colours (--role-*), which only the run overlay uses. Our only changes to
  * the defaults: light --muted-foreground is oklch(0.5 0 0) for contrast (doc 6 §5), light --ring is 0.556 so
  * focus indicators keep 3:1 (#131), and dark --sidebar-primary is neutral instead of blue. Focus rings use
  * --primary (lib/focus.ts). The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
@@ -53,6 +54,15 @@
   /* Status colours (not in shadcn), from Dispatch light (doc 5 §3.1): only for state dots and bars. */
   --ok: oklch(0.62 0.15 155);
   --warn: oklch(0.72 0.15 70);
+  --bad: oklch(0.6 0.2 25);
+  --idle: oklch(0.62 0.08 250);
+  /* Agent role lanes from Dispatch light (doc 5 §3.1): the run overlay's agent colours. */
+  --role-lead: oklch(0.56 0.2 290);
+  --role-impl: oklch(0.56 0.18 255);
+  --role-review: oklch(0.68 0.15 65);
+  --role-test: oklch(0.6 0.14 160);
+  --role-design: oklch(0.62 0.19 0);
+  --role-docs: oklch(0.55 0.04 250);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -87,6 +97,15 @@
   /* Status colours from Dispatch's monitor theme (tuned for dark panels). */
   --ok: oklch(0.76 0.17 150);
   --warn: oklch(0.82 0.15 80);
+  --bad: oklch(0.7 0.2 25);
+  --idle: oklch(0.68 0.04 250);
+  /* Role lanes from Dispatch dark. */
+  --role-lead: oklch(0.7 0.16 290);
+  --role-impl: oklch(0.7 0.14 255);
+  --role-review: oklch(0.78 0.13 70);
+  --role-test: oklch(0.74 0.13 160);
+  --role-design: oklch(0.72 0.16 0);
+  --role-docs: oklch(0.7 0.03 250);
 }
 :root {
   /* Sizes: doc 6 §4.2 (first draft x1.08): 30px rows and controls, 48px header, 264px sidebar, 691px doc column. */
@@ -343,13 +362,46 @@ body {
 .canvas-insert input:focus { border-color: var(--ring); box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
 .doc-frame .doc-diagram-pic img { background: #fff; }
 
+/* Progress board overlay (design 2 §5.1): rings, glyph badges, labels and active edges over a block picture.
+   Colour always comes with a glyph and a text label. Motion is opt-in (no-preference) and can be paused. */
+.run-layer { position: absolute; pointer-events: none; z-index: 4; }
+.run-layer svg { display: block; overflow: visible; }
+.run-ring { fill: none; stroke: currentColor; stroke-width: 2; }
+.run-ring[data-view='pending'] { stroke-dasharray: 4 3; }
+.run-ring[data-view='done'] { stroke-width: 1.5; }
+.run-corner circle { fill: var(--background); stroke: currentColor; stroke-width: 1.5; }
+.run-corner text { fill: currentColor; font: 600 11px var(--font-sans); }
+.run-label rect { fill: var(--background); stroke: currentColor; stroke-width: 1; }
+.run-label text { fill: var(--foreground); font: 500 11px var(--font-sans); }
+.run-edge { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.run-edge[data-edge-kind='flow'] { stroke-dasharray: 6 6; }
+/* Static form (reduced motion, or paused): a thicker ring and a still dashed edge in the same colour. */
+.run-layer[data-still] .run-ring.is-live { stroke-width: 3; }
+@media (prefers-reduced-motion: reduce) {
+  .run-ring.is-live { stroke-width: 3; }
+  .run-motion { display: none; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .run-layer:not([data-still]) .run-ring.is-live { animation: run-pulse 0.8s ease-in-out infinite alternate; }
+  .run-layer:not([data-still]) .run-edge[data-edge-kind='flow'] { animation: run-flow 0.9s linear infinite; }
+}
+@keyframes run-pulse { from { opacity: 1; } to { opacity: 0.5; } }
+@keyframes run-flow { to { stroke-dashoffset: -12; } }
+.run-motion {
+  position: absolute; right: 0; bottom: 100%; margin-bottom: 6px; pointer-events: auto;
+  font-size: 12px; line-height: 16px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--background); color: var(--muted-foreground); white-space: nowrap;
+}
+.run-motion:hover { color: var(--foreground); background: var(--accent); }
+.run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
+
 /* PDF export (print dialog): only the document column is printed while <html> has .print-doc. */
 @media print {
   html.print-doc body * { visibility: hidden !important; }
   html.print-doc section[aria-label='문서'], html.print-doc section[aria-label='문서'] * { visibility: visible !important; }
   html.print-doc, html.print-doc body, html.print-doc #root, html.print-doc #root div { height: auto !important; overflow: visible !important; position: static !important; }
   html.print-doc section[aria-label='문서'] { position: absolute !important; left: 0; top: 0; width: 100%; max-width: none; padding: 0; }
-  html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions { display: none !important; }
+  html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions, html.print-doc .run-layer { display: none !important; }
   html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
   /* Light tokens on paper; [data-theme] repeats so this outranks :root[data-theme='dark']. */
   html.print-doc, html.print-doc[data-theme] { color-scheme: light; --foreground: #0a0a0a; --background: #fff; --muted: #f5f5f5; --muted-foreground: #636363; --border: #e5e5e5; }
