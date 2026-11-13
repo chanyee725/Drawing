@@ -122,6 +122,8 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       y += 4;
       const pts: Point[] = [{ x: sx, y }, { x: x0 + SELF_W, y }, { x: x0 + SELF_W, y: y + SELF_H }, { x: sx, y: y + SELF_H }];
       mid.push({ ...common, points: pts, route: 'elbow' });
+      // No plate: the gap after a self message (SELF_W + 12 + label + 24, above) keeps the label clear of the next
+      // lifeline, so there is nothing to cut, and a hole would only nick the loop's own right side.
       if (label.lines.length) front.push(textItem(label.lines, x0 + SELF_W + 8, y + SELF_H / 2 - label.h / 2, { size: MSG_SIZE, font: style.typeface, anchor: 'start', color: style.paint.color }));
       y += SELF_H + 20;
       return;
@@ -213,7 +215,9 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
   });
   const bottom = y + 8;
 
-  // Lifelines are solid and end in a second copy of the participant head (09-examples-style §2.4).
+  // Lifelines are solid and end in a second copy of the participant head (09-examples-style §2.4). They sit under
+  // the activation bars and heads, and a message label that spans a middle participant cuts its lifeline the way it
+  // cuts its own line, so the text never reads as struck through.
   const lifelines: SceneItem[] = [];
   const heads: SceneItem[] = [];
   const head = (c: Column, top: number, id: string | undefined): void => {
@@ -228,7 +232,7 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
     heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', on: c.style.paint, lineHeight: lineHeightOf(c.label.size) }));
   };
   for (const c of cols) {
-    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: false, tone: 'muted' });
+    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: false, tone: 'muted', cut: true });
     head(c, headerH - c.h, c.id);
     // The bottom copy carries no id: the top head stays the one element for this participant.
     head(c, bottom, undefined);
