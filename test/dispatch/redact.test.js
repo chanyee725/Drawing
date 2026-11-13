@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { MASK, redact } from "../../server/dispatch/redact.js";
+import { MASK, redact, redactDeep } from "../../server/dispatch/redact.js";
 import { Hub } from "../../server/dispatch/hub.js";
 import { diskView, Store } from "../../server/dispatch/dispatch-store.js";
 import { SharedLimits } from "../../server/dispatch/limits.js";
@@ -140,4 +140,40 @@ test("permission requests reach the UI masked, while the allow answer keeps the 
   assert.doesNotMatch(shown, /example\.com|ghp_|sk-ant|aaaaaaaa/);
   assert.match(shown, /\[가림\]/);
   assert.equal(hub.rt(s.id).perms.get("r1").input, raw);
+});
+
+test("an allow response writes the original input and suggestions to the CLI stdin", async () => {
+  const { hub, s } = await makeHub();
+  const raw = { command: `curl ${MAIL}`, nested: [{ k: KEY }] };
+  const written = [];
+  const r = hub.rt(s.id);
+  r.proc = { stdin: { write: line => written.push(line) } };
+  r.perms.set("r1", { requestId: "r1", tool: "Bash", input: raw, description: "d", suggestions: [{ rule: GH }] });
+  hub.respondPermission(s.id, "r1", "allow", true);
+  assert.equal(written.length, 1);
+  const { response } = JSON.parse(written[0]).response;
+  assert.equal(response.behavior, "allow");
+  assert.deepEqual(response.updatedInput, raw);
+  assert.deepEqual(response.updatedPermissions, [{ rule: GH }]);
+  assert.doesNotMatch(written[0], /\[가림\]/);
+});
+
+test("limit tickets get a masked leadLast", async () => {
+  const { hub, s } = await makeHub();
+  s.canSpawn = true;
+  hub.rt(s.id).lastText = `report for ${MAIL} with ${KEY}`;
+  (hub.store.data.tasks ||= {}).t1 = { id: "t1", title: "x", stage: "doing", lead: s.id, createdAt: 0, updatedAt: 0 };
+  hub.limitHit = () => ({ key: "five:1", reason: "5시간 한도 90%", resetAt: Date.now() + 1000 });
+  hub.interrupt = () => {};
+  hub.checkTickets();
+  const [t] = Object.values(hub.store.data.tickets);
+  assert.match(t.leadLast, /\[가림\]/);
+  assert.doesNotMatch(t.leadLast, /example\.com|sk-ant/);
+});
+
+test("redactDeep masks string values but leaves object keys alone (documented)", () => {
+  const out = redactDeep({ [MAIL]: `mail ${MAIL}`, list: [KEY] });
+  assert.deepEqual(Object.keys(out), [MAIL, "list"]);
+  assert.equal(out[MAIL], `mail ${MASK}`);
+  assert.deepEqual(out.list, [MASK]);
 });

@@ -23,12 +23,8 @@ type Props = {
   disabled?: boolean;
 };
 
-/** A pill that sets an option and keeps the menu open. */
+/** An option pill; picking one keeps the menu open (onSelect preventDefault). */
 const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[state=checked]:border-primary data-[state=checked]:bg-muted data-[state=checked]:font-semibold data-[state=checked]:text-foreground';
-const keep = (fn: () => void) => (e: Event) => {
-  e.preventDefault();
-  fn();
-};
 
 export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -64,10 +60,13 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
         <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
           <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
             <legend className="sr-only">이미지 옵션</legend>
-            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => onOptions({ ...options, scale: Number(v) as ExportOptions['scale'] })}>
+            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
+              const scale = SCALES.find((s) => String(s) === v);
+              if (scale) onOptions({ ...options, scale });
+            }}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">PNG 크기</span>
               {SCALES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={keep(() => {})}>
+                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={(e) => e.preventDefault()}>
                   {s}배
                 </DropdownMenuRadioItem>
               ))}
@@ -75,7 +74,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="색상" value={String(options.dark)} onValueChange={(v) => onOptions({ ...options, dark: v === 'true' })}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">색상</span>
               {([false, true] as const).map((d) => (
-                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={keep(() => {})}>
+                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={(e) => e.preventDefault()}>
                   {d ? '다크' : '라이트'}
                 </DropdownMenuRadioItem>
               ))}

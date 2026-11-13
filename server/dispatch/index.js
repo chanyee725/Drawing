@@ -6,7 +6,7 @@
 // git project, or another server already uses the project's .dispatch/ (project.js, E13): the
 // drawing tool works on its own and GET /api/dispatch says why.
 import path from "node:path";
-import { runCli } from "./cli.js";
+import { ownGitEnv, runCli } from "./cli.js";
 import { cancelLogin, login, logout, providerStatus, publicStatus } from "./auth.js";
 import { Burn } from "./burn.js";
 import { Store } from "./dispatch-store.js";
@@ -23,9 +23,6 @@ import { effectiveRoles, teamSettings } from "./settings.js";
 export const HUB_EVENTS = ["session", "message", "limits", "removed", "tasks", "tickets"];
 const THEMES = ["system", "light", "dark", "monitor"];
 
-// The folder decides the project, not GIT_DIR / GIT_WORK_TREE inherited from whoever started us.
-const GIT_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
-const ownGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !GIT_ENV.includes(k)));
 
 /** The git top level that holds dir, or null when dir is not in a git work tree. */
 export async function gitTop(dir) {
