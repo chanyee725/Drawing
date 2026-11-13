@@ -67,6 +67,12 @@ async function run(t, cpuThrottle) {
     { $sleep: 300 },
     { $write: { file: abs, text: fileWith([r1, rect('r2', 400, 0), rect('r3', 400, 300)], 60) } }, // r3 centre: 460,330
     result(2),
+    { $sleep: 2000 },
+    // A third edit that moves no shape (only the title): the server sends a cursor event without a place.
+    tool(3),
+    { $sleep: 300 },
+    { $write: { file: abs, text: JSON.stringify({ ...JSON.parse(fileWith([r1, rect('r2', 400, 0), rect('r3', 400, 300)], 70)), title: 'demo 2' }) } },
+    result(3),
     { $sleep: 2500 },
     { type: 'assistant', message: { id: 'm3', content: [{ type: 'text', text: 'done' }], usage: { input_tokens: 1, output_tokens: 1 } } },
     { type: 'result', subtype: 'success', total_cost_usd: 0.001 },
@@ -161,9 +167,15 @@ async function run(t, cpuThrottle) {
   // Record where the cursor is drawn on every frame, so the 220 ms glide is seen whole.
   await page.evaluate(() => {
     const ys = (window.__cursorYs = []);
+    // Which cursor node drew each frame: a remount re-centres the view, so screen ys only compare within one node.
+    const mounts = (window.__cursorMounts = []);
+    let node = null;
     const tick = () => {
       const el = document.querySelector('[data-agent-cursor]');
-      if (el?.style.translate && el.style.visibility !== 'hidden') ys.push(parseFloat(el.style.translate.split(' ')[1]));
+      if (el?.style.translate && el.style.visibility !== 'hidden') {
+        if (el !== node) (node = el), mounts.push(ys.length);
+        ys.push(parseFloat(el.style.translate.split(' ')[1]));
+      }
       if (ys.length < 2000) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -171,16 +183,22 @@ async function run(t, cpuThrottle) {
 
   // The second edit: the cursor goes from r2's centre (460,30) to r3's (460,330).
   await page.locator('[data-agent-cursor][data-phase="editing"]').waitFor({ timeout: 8000 });
-  // Until it has landed (a throttled page draws fewer frames, so the glide takes longer there).
-  await page.waitForFunction(
+  // Until it has landed (a throttled page draws fewer frames, so the glide takes longer there). A timeout here
+  // fails the test with where the cursor was drawn, not silently.
+  const landed = await page.waitForFunction(
     (y0) => {
       const el = document.querySelector('[data-agent-cursor]');
       return el && el.style.visibility !== 'hidden' && Math.abs(parseFloat(el.style.translate.split(' ')[1]) - y0 - 150) < 2;
     },
     first[1],
     { timeout: 10_000, polling: 'raf' },
-  ).catch(() => {});
+  ).then(() => true, (e) => e);
+  if (landed !== true) {
+    const seen = await page.evaluate(() => window.__cursorYs);
+    assert.fail(`the cursor did not land on r3 (${first[1] + 150}): ${landed.message.split('\n')[0]}; drawn ys: ${JSON.stringify(seen.filter((y, i) => y !== seen[i - 1]))}`);
+  }
   await page.waitForTimeout(100);
+  const landedAt = await page.evaluate(() => window.__cursorYs.length);
   const second = await at();
   const ys = await page.evaluate(() => window.__cursorYs);
   // An edit from outside reopens the canvas centred on its content at zoom 1 (ExcalidrawCanvas initialData,
@@ -189,13 +207,32 @@ async function run(t, cpuThrottle) {
   assert.ok(Math.abs(second[0] - first[0]) < 2, `same x: ${first} → ${second}`);
   assert.ok(Math.abs(second[1] - first[1] - 150) < 2, `on r3's centre: ${first} → ${second}`);
   // It glided: some frames drew it between the two places, not only at one or the other.
-  assert.ok(ys.some((y) => y > first[1] + 5 && y < second[1] - 5), `glided through the middle: ${JSON.stringify(ys.filter((y, i) => y !== ys[i - 1]))}`);
+  const path = JSON.stringify(ys.filter((y, i) => y !== ys[i - 1]));
+  assert.ok(ys.some((y) => y > first[1] + 5 && y < second[1] - 5), `glided through the middle: ${path}`);
+  // Only ever forward: on each cursor node, from where it was to where it lands, no frame jumps back (a replayed
+  // glide, #254). The remount after the second edit re-centres the view, which moves the screen y of the glide's
+  // start (scene y 30) from first[1] to first[1] - 150; within that node the glide goes from there to r3.
+  const mounts = await page.evaluate(() => window.__cursorMounts);
+  const runs = mounts.map((at, i) => ys.slice(at, mounts[i + 1]));
+  for (const run of runs) assert.ok(run.every((y, i) => i === 0 || y >= run[i - 1] - 1), `moved one way only: ${JSON.stringify(runs)}`);
+  const last = runs.at(-1);
+  assert.ok(last.every((y) => y > first[1] - 152 && y < second[1] + 2), `stayed between the two places: ${path}`);
+  assert.ok(Math.abs(last.at(-1) - second[1]) < 2, `ended on r3: ${path}`);
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'agent-cursor-second.png') });
 
   // No cursor node ever entered the DOM unplaced (one per mount: the first edit and the remount after the second).
   const adds = await page.evaluate(() => window.__cursorAdds);
   assert.ok(adds.length >= 2, `cursor mounts seen: ${JSON.stringify(adds)}`);
   assert.ok(adds.every((a) => a.hidden || (a.at && a.at !== 'none')), `placed or hidden before the first paint: ${JSON.stringify(adds)}`);
+
+  // The edit without a place keeps the landed cursor where it is: thinking, then editing again, and no frame
+  // replays the glide from its start (#254).
+  await page.locator('[data-agent-cursor][data-phase="thinking"]').waitFor({ timeout: 8000 });
+  await page.locator('[data-agent-cursor][data-phase="editing"]').waitFor({ timeout: 8000 });
+  await page.waitForTimeout(600);
+  const after = (await page.evaluate(() => window.__cursorYs)).slice(landedAt);
+  assert.ok(after.length > 0 && after.every((y) => Math.abs(y - second[1]) < 2), `stayed on r3: ${JSON.stringify(after.filter((y, i) => y !== after[i - 1]))}`);
+  assert.ok(Math.abs((await at())[1] - second[1]) < 2);
 
   // The session stops editing and its turn ends: the cursor goes.
   await cursor.waitFor({ state: 'detached', timeout: 15_000 });
