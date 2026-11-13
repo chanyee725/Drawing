@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asTreeNode, newFileDir, openPathsFor, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
+import { asTreeNode, newFileDir, openPathsFor, paletteScope, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
 import type { DocNode, ProjectsView } from '../../web/src/api.ts';
 
 const doc = (path: string, children: DocNode[] = []): DocNode => ({
@@ -66,4 +66,15 @@ test('percent clamps and rounds', () => {
   assert.equal(percent(1.4), 100);
   assert.equal(percent(null), null);
   assert.equal(percent(Number.NaN), null);
+});
+
+test('paletteScope follows the screen: open file on the document, shown project on its home, none on the dashboard', () => {
+  // A file of A stays loaded while the user is on "모든 파일": no stale A chip there.
+  assert.equal(paletteScope({ kind: 'all' }, view, 'A/login.dpx.json'), null);
+  assert.equal(paletteScope({ kind: 'recent' }, view, 'A/login.dpx.json'), null);
+  assert.deepEqual(paletteScope({ kind: 'doc' }, view, 'A/login.dpx.json'), { path: 'A', name: 'Alpha' });
+  assert.equal(paletteScope({ kind: 'doc' }, view, 'x.dpx.json'), null);
+  // A project home wins over the loaded file of another project.
+  assert.deepEqual(paletteScope({ kind: 'project', path: 'A' }, view, 'B/y.dpx.json'), { path: 'A', name: 'Alpha' });
+  assert.deepEqual(paletteScope({ kind: 'project', path: 'Z' }, null, null), { path: 'Z', name: 'Z' });
 });

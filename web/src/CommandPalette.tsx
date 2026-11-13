@@ -12,8 +12,8 @@ export type { Command } from './commands';
 type Props = {
   commands: Cmd[];
   onClose: () => void;
-  /** Name of the project the user is in; shown as a chip, and its files are listed first. */
-  scope?: string | null;
+  /** Project the user is in: its name is shown as a chip, and its files (under its path) are listed first. */
+  scope?: { path: string; name: string } | null;
   /** Start with only this section (G P opens the menu on projects). */
   onlyGroup?: Cmd['group'];
 };
@@ -25,7 +25,8 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
   const list = useMemo(() => {
     const found = filterCommands(commands, query).filter((c) => !group || c.group === group);
     // Files of the current project come first inside their section.
-    return scope ? [...found.filter((c) => c.hint?.startsWith(`${scope}/`)), ...found.filter((c) => !c.hint?.startsWith(`${scope}/`))] : found;
+    const mine = (c: Cmd) => !!scope && !!c.hint?.startsWith(`${scope.path}/`);
+    return scope ? [...found.filter(mine), ...found.filter((c) => !mine(c))] : found;
   }, [commands, query, group, scope]);
   const groups = useMemo(() => groupCommands(list), [list]);
   // Sections reorder the list, so the first row on screen is the first enabled one in section order.
@@ -86,16 +87,22 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
             <CommandInput
               ref={input}
               value={query}
-              onValueChange={(v) => {
-                setQuery(v);
-                if (v) setGroup(undefined);
+              // G P keeps the menu on projects while typing; Backspace in an empty box widens it to everything.
+              onValueChange={setQuery}
+              onKeyDown={(e) => {
+                if (e.key === 'Backspace' && !query && group && !e.nativeEvent.isComposing) setGroup(undefined);
               }}
               placeholder={group === 'project' ? '프로젝트 이름을 입력해요' : '명령이나 파일 이름을 입력해요'}
               className="h-11"
             />
+            {group === 'project' && (
+              <span data-slot="group-chip" title="지우기를 누르면 모든 명령을 찾아요" className="mr-1.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                프로젝트만
+              </span>
+            )}
             {scope && (
               <span data-slot="scope-chip" title="지금 프로젝트" className="max-w-32 shrink-0 truncate rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground">
-                {scope}
+                {scope.name}
               </span>
             )}
           </div>
