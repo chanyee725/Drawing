@@ -177,6 +177,13 @@ test('new arrows are elbowed and new shapes are not hand-drawn', () => {
   assert.equal(CLEAN_APP_STATE.currentItemFontFamily, CLEAN_FONT_FAMILY);
 });
 
+// New free-form text is as big as node text in diagram blocks (E64).
+test('new free-form text starts at 13px, and a skeleton that sets its own size keeps it', () => {
+  assert.equal(CLEAN_APP_STATE.currentItemFontSize, 13);
+  assert.equal(cleanSkeleton(shapeSkeleton('text', { x: 0, y: 0 })).fontSize, 13);
+  assert.equal(cleanSkeleton({ type: 'text', text: 'a', fontSize: 20 }).fontSize, 20);
+});
+
 test('insert-menu skeletons get the clean style instead of the hand-drawn defaults', () => {
   for (const kind of ['rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'text', 'frame'] as const) {
     const sk = cleanSkeleton(shapeSkeleton(kind, { x: 0, y: 0 }));

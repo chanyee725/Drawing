@@ -55,7 +55,8 @@ export type ProviderLimits = {
 export type ProviderInfo = { installed?: boolean | null; connected?: boolean; busy?: boolean; url?: string | null; error?: string | null };
 export type DispatchSettings = { guard: { enabled: boolean; five: number; seven: number }; team: { ctxHandoff?: number; handoffMTokens?: number } & Record<string, unknown> };
 
-export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
+export type VersionLabel = 'draft' | 'approved' | 'done';
+export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number; /** Pipeline milestones this version stands for (E28). */ labels?: VersionLabel[] };
 export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
 export type HistoryVersion = DpxFile & { id: string; time: number };
 

@@ -3,19 +3,24 @@
 // §2-3 and 4-operations-and-rules.md G2.
 //
 // Approval state lives in the Dispatch state file as metadata only:
-//   store.data.pipelines[path] = { lead, state: 'plan' | 'running' | 'paused', draftRevision, approvedRevision,
-//                                  approvedAt, runId, steps, links, pause?, carry? }
+//   store.data.pipelines[path] = { lead, state: 'plan' | 'running' | 'paused' | 'done', draftRevision,
+//                                  approvedRevision, approvedAt, runId, steps, links, pause?, carry?, doneAt? }
 // `steps` is the approved step ids and `links` maps a session id to its step. E27: `pause` is { by: 'limit' |
-// 'stop', at, resetAt? } while paused; `carry` is { from: runId, steps: [ids] } after 계획 다시 열기, the steps the
+// 'stop', at, resetAt? } while paused; `carry` is { from: runId, steps: [ids], results? } after 계획 다시 열기, the steps the
 // stopped run finished, so the next 시작하기 marks them done instead of running them again. The lead's draft plan (for the
 // "바뀐 점" list) is kept in memory only, so after a restart the list is empty.
+// E28: once the board closes every step the run ends `done`, the server writes the 완료 summary block into the
+// document once, and the history labels the draft, approved and done versions. A done plan is a record: running it
+// again means 복제해서 새 계획 (POST /api/pipeline/duplicate), a fresh draft without the summary.
 import { StoreError } from '../workspace/store.js';
 import { FILE_EXT } from '../workspace/model.js';
 import { redact } from '../dispatch/redact.js';
+import { mergeResult, pickResult } from '../runs/record.js';
 import { effectiveRoles } from '../dispatch/settings.js';
 import { buildPlanFile, planChanges, writePlanProblem, PLAN_BLOCK_ID } from '../../shared/dispatch/plan-write.ts';
 import { resolvedStep } from '../../shared/dispatch/plan.ts';
 import { planOrderIn } from '../../shared/dispatch/plan-diagram.ts';
+import { nodeLabels, summaryNodes, withSummary, withoutSummary } from '../../shared/dispatch/run-summary.ts';
 
 const MAX_BODY = 1024 * 1024;
 export const PIPELINE_DIR = 'pipelines';
@@ -130,6 +135,7 @@ export async function setup(ctx) {
     // A task that names a step and an owner links that owner's session (set_task often comes after create_sessions).
     hub.on('tasks', () => {
       for (const s of hub.sessions) if (s.parent && leadEntries(s.parent, ['running', 'paused']).length) follow(hub.publicSession(s));
+      void finishClosed();
     });
     // The usage-limit guard pauses running plans and resumes the ones it paused once the window clears (G1).
     hub.on('limits', () => syncLimit());
@@ -213,7 +219,7 @@ export async function setup(ctx) {
     const entry = entries()?.[path] ?? null;
     const state = entry?.state ?? (file.plan ? 'plan' : null);
     const { blockers, sessions } =
-      state === 'running' ? { blockers: [], sessions: 0 } : state === 'paused' ? { blockers: resumeBlockers(entry), sessions: 0 } : check(path, file, entry);
+      state === 'running' || state === 'done' ? { blockers: [], sessions: 0 } : state === 'paused' ? { blockers: resumeBlockers(entry), sessions: 0 } : check(path, file, entry);
     const l = dispatch()?.hub.currentLimits() ?? null;
     return {
       path,
@@ -225,6 +231,7 @@ export async function setup(ctx) {
       approvedAt: entry?.approvedAt ?? null,
       runId: entry?.runId ?? null,
       pause: state === 'paused' ? (entry.pause ?? null) : null,
+      doneAt: state === 'done' ? (entry.doneAt ?? null) : null,
       blockers,
       changes: state === 'plan' && entry ? planChanges(drafts.get(path), file.plan) : [],
       sessions,
@@ -233,8 +240,8 @@ export async function setup(ctx) {
   }
 
   // ---- write_plan ----
-  async function freePath(title) {
-    const stem = `${PIPELINE_DIR}/${planFileName(title)}`;
+  async function freePath(title, dir = PIPELINE_DIR) {
+    const stem = `${dir ? `${dir}/` : ''}${planFileName(title)}`;
     for (let i = 1; i < 100; i++) {
       const p = `${stem}${i === 1 ? '' : `-${i}`}${FILE_EXT}`;
       if (!(await readOrNull(p))) return p;
@@ -261,6 +268,7 @@ export async function setup(ctx) {
     const existing = path ? all[path] : null;
     if (existing?.state === 'paused') throw new StoreError(409, '멈춘 계획이에요. 사용자가 계획 다시 열기를 누르면 고칠 수 있어요');
     if (existing?.state === 'running') throw new StoreError(409, '실행 중인 계획은 바꿀 수 없어요. 바뀐 점은 note_step으로 남겨 주세요');
+    if (existing?.state === 'done') throw new StoreError(409, '완료된 계획이에요. 사용자가 복제해서 새 계획을 누르면 그 파일을 고칠 수 있어요');
     if (existing && existing.lead !== lead.id) throw new StoreError(409, '다른 관리자가 쓴 계획이에요');
     const current = path ? await readOrNull(path) : null;
     if (current && !existing && current.plan) throw new StoreError(409, '사람이 쓴 계획 파일이에요. path 없이 새로 써 주세요');
@@ -283,6 +291,7 @@ export async function setup(ctx) {
     all[path] = { lead: lead.id, state: 'plan', draftRevision: revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {}, ...(existing?.carry && { carry: existing.carry }) };
     drafts.set(path, built.plan);
     save();
+    await ws.labelVersion(path, 'draft');
     ctx.hub.broadcast('workspace', { kind: 'change', path, revision });
     changed(path);
     const out = { path, revision, state: 'plan' };
@@ -303,6 +312,7 @@ export async function setup(ctx) {
     const entry = entries()[path];
     if (entry?.state === 'running') throw new StoreError(409, '이미 실행 중이에요');
     if (entry?.state === 'paused') throw new StoreError(409, '멈춘 계획이에요. 이어서 하기나 계획 다시 열기를 눌러 주세요');
+    if (entry?.state === 'done') throw new StoreError(409, '완료된 계획이에요. 다시 돌리려면 복제해서 새 계획을 눌러 주세요');
     const file = await readOrNull(path);
     if (!file) throw new StoreError(404, 'not found');
     if (file.revision !== body.revision) throw new StoreError(409, '계획이 바뀌었어요. 다시 확인해 주세요', { revision: file.revision });
@@ -332,16 +342,25 @@ export async function setup(ctx) {
       await recorder.endRun(record.id, 'stopped').catch(() => {});
       throw new StoreError(409, err.message);
     }
+    await ws.labelVersion(path, 'approved');
     changed(path);
     return { path, state: 'running', runId: record.id, revision: file.revision, changes };
   }
 
   // ---- 멈추기 · 이어서 하기 · 계획 다시 열기 (E27) ----
 
+  /**
+   * Board tasks this run closed: the lead's step tasks that went done after this run's 시작하기. A duplicated plan
+   * keeps the lead and step ids, so tasks an earlier run closed must not count for it.
+   */
+  function closedTasks(e) {
+    const since = e.approvedAt ?? 0;
+    return (dispatch()?.hub.tasks ?? []).filter((t) => t.lead === e.lead && t.step && t.stage === 'done' && (t.stageAt ?? 0) >= since);
+  }
+
   /** Steps of a running or paused plan the board has not closed yet, in plan order. */
   function openSteps(e) {
-    const d = dispatch();
-    const done = new Set((d?.hub.tasks ?? []).filter((t) => t.lead === e.lead && t.step && t.stage === 'done').map((t) => t.step));
+    const done = new Set(closedTasks(e).map((t) => t.step));
     return (e.steps ?? []).filter((id) => !done.has(id));
   }
 
@@ -453,12 +472,26 @@ export async function setup(ctx) {
     const file = await readOrNull(path);
     if (!file) throw new StoreError(404, 'not found');
     const d = dispatch();
-    const done = (e.steps ?? []).filter((id) => !openSteps(e).includes(id));
     const runId = e.runId;
+    // Steps this run carried over from an earlier stopped run stay done, with how they closed then.
+    const record = runId ? await recorder.read(path, runId).catch(() => null) : null;
+    const carried = Object.keys(record?.steps ?? {}).filter((id) => record.steps[id].carried);
+    const open = openSteps(e);
+    const done = (e.steps ?? []).filter((id) => !open.includes(id) || carried.includes(id));
+    // How the board closed them, kept now: the next run only counts tasks closed after its own 시작하기.
+    const results = {};
+    for (const id of carried) {
+      const r = pickResult(record.steps[id].result);
+      if (r) results[id] = r;
+    }
+    for (const [id, r] of Object.entries(resultsOf(e))) {
+      const next = mergeResult(results[id], pickResult(r));
+      if (next) results[id] = next;
+    }
     if (runId) await quietly(recorder.endPaused(path, runId, 'stopped'));
     Object.assign(e, { state: 'plan', draftRevision: file.revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} });
     delete e.pause;
-    if (runId && done.length) e.carry = { from: runId, steps: done };
+    if (runId && done.length) e.carry = { from: runId, steps: done, results };
     else delete e.carry;
     drafts.set(path, file.plan);
     save();
@@ -482,7 +515,11 @@ export async function setup(ctx) {
     const old = await recorder.read(path, e.carry.from).catch(() => null);
     if (!old) return null;
     const steps = {};
-    for (const id of e.carry.steps) if (old.steps?.[id]) steps[id] = old.steps[id];
+    for (const id of e.carry.steps) {
+      if (!old.steps?.[id]) continue;
+      const result = e.carry.results?.[id];
+      steps[id] = result ? { ...old.steps[id], result } : old.steps[id];
+    }
     return { from: e.carry.from, steps };
   }
 
@@ -509,6 +546,96 @@ export async function setup(ctx) {
   // A window can reset without any new event (time passes): look again now and then.
   const limitTimer = setInterval(() => void syncLimit(), 30_000);
   limitTimer.unref?.();
+
+  // ---- 완료 · 복제해서 새 계획 (E28) ----
+
+  /** Steps the board has not closed and the run did not carry over from a stopped run. */
+  async function unclosed(path, e) {
+    const open = openSteps(e);
+    if (!open.length) return open;
+    const record = await recorder.read(path, e.runId).catch(() => null);
+    return open.filter((id) => !record?.steps?.[id]?.carried);
+  }
+
+  /** How the board closed each step: merged at a checked commit, else abandoned (closed without a commit). */
+  function resultsOf(e) {
+    const out = {};
+    for (const t of closedTasks(e)) {
+      if (!e.steps?.includes(t.step)) continue;
+      if (t.mergeCheck?.ok === true && t.mergeCheck.commit) out[t.step] = { commit: t.mergeCheck.commit, ...(t.mergeCheck.base && { base: t.mergeCheck.base }) };
+      else if (!t.commit && !out[t.step]) out[t.step] = { abandoned: true };
+    }
+    return out;
+  }
+
+  /** Running -> done: the run record ends, the summary block goes into the document once, the version is labelled. */
+  async function finish(path, e) {
+    const d = dispatch();
+    const results = resultsOf(e);
+    Object.assign(e, { state: 'done', doneAt: Date.now() });
+    save();
+    const record = e.runId ? await quietly(recorder.endRun(e.runId, 'done', { results })) : null;
+    if (record) {
+      try {
+        const file = await readOrNull(path);
+        const roles = d ? effectiveRoles(d.hub.roles, d.store) : [];
+        const code = file?.blocks?.find((b) => b.id === record.plan?.snapshot?.block)?.code;
+        const nodes = summaryNodes(record, { labels: nodeLabels(code), roleName: (r) => roles.find((x) => x.id === r)?.name ?? r });
+        const r = await ws.editDocument(path, (doc) => withSummary(doc, nodes));
+        ctx.hub.broadcast('workspace', { kind: 'change', path, revision: r.revision });
+        await ws.labelVersion(path, 'done');
+      } catch (err) {
+        // The file went away or cannot be written: the run record still says done.
+        console.error('pipeline summary:', err?.code ?? err?.name);
+      }
+    }
+    changed(path);
+  }
+
+  /** Running plans whose steps the board has all closed end as done. */
+  const finishing = new Set();
+  async function finishClosed() {
+    for (const [path, e] of Object.entries(entries() ?? {})) {
+      if (e.state !== 'running' || !e.steps?.length || finishing.has(path)) continue;
+      finishing.add(path);
+      try {
+        if ((await unclosed(path, e)).length === 0 && e.state === 'running') await finish(path, e);
+      } catch (err) {
+        console.error('pipeline finish:', err?.message);
+      } finally {
+        finishing.delete(path);
+      }
+    }
+  }
+
+  /**
+   * 복제해서 새 계획: a new draft next to `path` with the same plan, diagram and notes, without the summary block.
+   * The lead that wrote the original owns the copy when it is still there and has no other plan going.
+   */
+  async function duplicate(body) {
+    if (typeof body?.path !== 'string') throw new StoreError(400, 'path is required');
+    const path = ws.runs.fileRel(body.path);
+    const file = await readOrNull(path);
+    if (!file) throw new StoreError(404, 'not found');
+    if (!file.plan) throw new StoreError(400, '계획이 있는 파일이 아니에요');
+    const title = `${file.title || '계획'} 복사`;
+    const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+    const to = await freePath(title, dir);
+    const r = await ws.createFile(to, { title, document: withoutSummary(file.document), canvas: file.canvas, blocks: file.blocks, plan: file.plan });
+    const all = entries();
+    const lead = all?.[path]?.lead;
+    const d = dispatch();
+    const alive = lead && d?.hub.get(lead) && d.hub.get(lead).status !== 'done';
+    if (all && alive && !leadEntries(lead, ['plan', 'running', 'paused']).length) {
+      all[r.path] = { lead, state: 'plan', draftRevision: r.revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} };
+      drafts.set(r.path, file.plan);
+      save();
+    }
+    await ws.labelVersion(r.path, 'draft');
+    ctx.hub.broadcast('workspace', { kind: 'create', path: r.path, revision: r.revision });
+    changed(r.path);
+    return { path: r.path, revision: r.revision, lead: all?.[r.path]?.lead ?? null };
+  }
 
   // ---- note_step ----
   function note(body) {
@@ -544,6 +671,8 @@ export async function setup(ctx) {
     stop,
     resume,
     reopen,
+    duplicate,
+    finishClosed,
     syncLimit,
     close: () => {
       clearInterval(limitTimer);
@@ -561,6 +690,7 @@ export async function setup(ctx) {
       route('POST', '/api/pipeline/stop', (b) => stop(b)),
       route('POST', '/api/pipeline/resume', (b) => resume(b)),
       route('POST', '/api/pipeline/reopen', (b) => reopen(b)),
+      route('POST', '/api/pipeline/duplicate', (b) => duplicate(b)),
     ],
   };
 }
