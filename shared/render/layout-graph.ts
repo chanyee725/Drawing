@@ -8,7 +8,7 @@ import type { ElkExtendedEdge, ElkNode } from './elk.ts';
 import { PLATE_PAD } from './text.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
-import { alignLayout } from './layout-align.ts';
+import { alignLayout, orthogonalize } from './layout-align.ts';
 import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -530,6 +530,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     const o = edgeOffset(le, abs);
     const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: round(p.x + o.x), y: round(p.y + o.y) }));
     if (flipped(e, order)) points.reverse();
+    points.splice(0, points.length, ...orthogonalize(points));
     const key = pairKey(e);
     const pairIndex = pairSeen.get(key) ?? 0;
     pairSeen.set(key, pairIndex + 1);

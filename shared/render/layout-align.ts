@@ -42,6 +42,21 @@ function segmentHits(r: Rect, p: Point, q: Point): boolean {
   return x1 > r.x + 0.5 && x0 < r.x + r.w - 0.5 && y1 > r.y + 0.5 && y0 < r.y + r.h - 0.5;
 }
 
+/**
+ * ELK's hierarchical routes come back with sub-pixel jogs (a bend 0.3 px off the line before it), which
+ * draw as short slanted pieces. Snap every coordinate within 1 px of the previous point onto it.
+ */
+export function orthogonalize(points: Point[]): Point[] {
+  const out = points.map((p) => ({ ...p }));
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1]!;
+    const b = out[i]!;
+    if (Math.abs(b.x - a.x) < 1) b.x = a.x;
+    if (Math.abs(b.y - a.y) < 1) b.y = a.y;
+  }
+  return out;
+}
+
 /** Drop repeated points and middle points of straight runs. */
 function tidy(points: Point[]): Point[] {
   const out: Point[] = [];
@@ -67,7 +82,7 @@ export function moveEnd(points: Point[], end: boolean, dx: number, dy: number): 
   if (pts.length < 2) return pts;
   if (end) pts.reverse();
   const [p, q] = pts as [Point, Point];
-  const vertical = Math.abs(p.x - q.x) < 0.01;
+  const vertical = Math.abs(p.x - q.x) < 1;
   const across = vertical ? dx : dy;
   if (pts.length === 2 && Math.abs(across) >= 0.01) {
     if (vertical) {
@@ -93,7 +108,7 @@ function stub(points: Point[], end: boolean): { len: number; vertical: boolean; 
   const n = points.length;
   const p = end ? points[n - 1]! : points[0]!;
   const q = end ? points[n - 2]! : points[1]!;
-  const vertical = Math.abs(p.x - q.x) < 0.01;
+  const vertical = Math.abs(p.x - q.x) < 1;
   const d = vertical ? q.y - p.y : q.x - p.x;
   return { len: Math.abs(d), vertical, sign: Math.sign(d) };
 }
