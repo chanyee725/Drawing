@@ -125,6 +125,11 @@ test('write_plan writes a draft, gates create_sessions, and 시작하기 hands t
     const stale = await call('POST', '/api/pipeline/start', { path: w.body.path, revision: w.body.revision });
     assert.equal(stale.status, 409);
     assert.equal(stale.body.revision, saved.body.revision);
+    // The refused start did not start anything: still a plan, no run, lead not told.
+    st = await call('GET', `/api/pipeline?path=${encodeURIComponent(w.body.path)}`);
+    assert.equal(st.body.state, 'plan');
+    assert.equal(st.body.runId, null);
+    assert.doesNotMatch(d.hub.transcript(lead.id).filter((m) => m.kind === 'user').map((m) => m.text).join('\n'), /계획 승인/);
     const go = await call('POST', '/api/pipeline/start', { path: w.body.path, revision: saved.body.revision });
     assert.equal(go.status, 200, JSON.stringify(go.body));
     assert.equal(go.body.state, 'running');
