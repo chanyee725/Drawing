@@ -75,8 +75,9 @@
   --ring: oklch(0.556 0 0);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  /* Stock dark --sidebar-primary is blue (264); set to the neutral primary so no hue is left outside status. */
+  --sidebar-primary: oklch(0.922 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
@@ -104,8 +105,8 @@
   --text-2: var(--foreground);
   --text-3: var(--muted-foreground);
   --text-4: var(--muted-foreground);
-  --brand: var(--ring);
-  --brand-soft: var(--muted);
+  --focus: var(--primary); /* focus ring: white-ish in dark, near-black in light */
+  --selected: var(--muted);
   --btn-bg: var(--primary);
   --btn-fg: var(--primary-foreground);
   --idle: var(--muted-foreground);
@@ -127,7 +128,7 @@ body {
 button { font: inherit; color: inherit; letter-spacing: inherit; }
 .num { font-variant-numeric: tabular-nums; }
 :focus { outline: none; }
-:focus-visible, .show-focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+:focus-visible, .show-focus { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 svg.i { width: 17px; height: 17px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 svg.i.sm { width: 15px; height: 15px; }
@@ -253,7 +254,7 @@ table.ft { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .ft th { text-align: left; font-weight: 500; font-size: 13px; color: var(--text-3); height: 35px; padding: 0 13px; border-bottom: 1px solid var(--border); }
 .ft td { height: 43px; padding: 0 13px; border-bottom: 1px solid var(--border); color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ft tr.r:hover td { background: var(--hover); }
-.ft tr.sel td { background: var(--brand-soft); }
+.ft tr.sel td { background: var(--selected); }
 .ft td.n { color: var(--text-1); }
 .ft .nm { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .ft .nm span { overflow: hidden; text-overflow: ellipsis; }
@@ -428,7 +429,7 @@ const KIND = { doc: ['doc', '문서'], canvas: ['canvas', '캔버스'], flow: ['
 
 /* Sample data: made up; no real names. */
 const PROJECTS = [
-  { id: 'pay', name: '결제 시스템', color: 'oklch(0.58 0.16 283)', letter: '결', desc: '결제 요청부터 정산까지 흐름을 정리해요.', docs: [
+  { id: 'pay', name: '결제 시스템', letter: '결', desc: '결제 요청부터 정산까지 흐름을 정리해요.', docs: [
     { t: '로그인 로직', k: 'doc', made: '10월 28일', edit: '3분 전', kids: [
       { t: '토큰 갱신', k: 'doc', made: '11월 2일', edit: '3분 전' },
       { t: '세션 만료 처리', k: 'canvas', made: '11월 2일', edit: '어제' } ] },
@@ -436,10 +437,10 @@ const PROJECTS = [
       { t: '이벤트 스키마', k: 'canvas', made: '11월 5일', edit: '2시간 전' } ] },
     { t: '결제 흐름', k: 'canvas', made: '10월 21일', edit: '어제' },
     { t: '결제 개선 파이프라인', k: 'flow', made: '11월 10일', edit: '20분 전', run: true } ] },
-  { id: 'onb', name: '온보딩 개편', color: 'oklch(0.62 0.14 155)', letter: '온', docs: [
+  { id: 'onb', name: '온보딩 개편', letter: '온', docs: [
     { t: '첫 화면 흐름', k: 'canvas', made: '11월 1일', edit: '어제' },
     { t: '안내 문구 정리', k: 'doc', made: '11월 3일', edit: '3일 전' } ] },
-  { id: 'inf', name: '인프라', color: 'oklch(0.66 0.13 70)', letter: '인', docs: [
+  { id: 'inf', name: '인프라', letter: '인', docs: [
     { t: '배포 구조', k: 'canvas', made: '9월 14일', edit: '11월 7일' },
     { t: '로그 보관 정책', k: 'doc', made: '9월 20일', edit: '10월 30일' } ] },
 ];
@@ -545,7 +546,7 @@ function cards(scoped) {
     ['flow', '새 파이프라인 계획', '에이전트 작업을 계획해요', 'P'],
     ['tpl', '템플릿에서 만들기', '자주 쓰는 틀로 시작해요', 'T'],
   ];
-  return `<div class="cards">${c.map(([i, t, s, k, b]) => `<button class="card"><span class="ic ${b ? 'brand' : ''}">${ic(i)}</span><span><b>${t}</b><small>${s}</small></span><kbd>${k}</kbd></button>`).join('')}</div>`;
+  return `<div class="cards">${c.map(([i, t, s, k, b]) => `<button class="card"><span class="ic">${ic(i)}</span><span><b>${t}</b><small>${s}</small></span><kbd>${k}</kbd></button>`).join('')}</div>`;
 }
 const TABS = ['전체', '최근', '프로젝트별', '미분류'];
 function tabs(sel = 0) {

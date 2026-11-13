@@ -11,7 +11,7 @@ public look, not measured values.
    on Tailwind v4, and Dispatch already ships shadcn/ui new-york with oklch tokens
    (`Dispatch/web/components.json:1-7`, `Dispatch/web/src/index.css:9-43`). One token file serves both apps.
 2. **Dark first, light kept.** Default to the OS, but tune dark first. Three surfaces + one 1px border step,
-   low-contrast grey ramp, one accent hue (violet, already ours: `web/src/index.css:12,24`).
+   low-contrast grey ramp, no accent hue: primary, focus and selection are neutral (shadcn stock, doc 6 §4.1).
 3. **Type: Inter Variable 13px for UI, 15px for the document body**, Pretendard as the Korean fallback. Bundle
    both as files (no CDN), per CLAUDE.md.
 4. **Density: 28px rows/controls, 4px grid, 6px radius, almost no shadows** (only on floating layers).
@@ -36,7 +36,7 @@ public look, not measured values.
 
 Observations:
 
-- Drawing already has the right bones (thin borders, muted text, violet accent) but no scale: sizes are
+- Drawing already has the right bones (thin borders, muted text; its accent colour goes away) but no scale: sizes are
   scattered (`h-8`, `h-12`, `text-sm`, 14/15/13/12px) and shadows are ad hoc (`index.css:136,174`).
 - Dispatch's monitor theme is already the closest thing to Linear in either repo: dark, flat panels, thin
   borders, small radius (`Dispatch/web/src/index.css:134-147`). Its status colours (`--ok/--warn/--bad/--idle`)
@@ -65,38 +65,35 @@ screens, or marketing gradients (section 7).
 ## 3. Token draft
 
 > **Colour values superseded (2026-11-13, #122):** both columns below are replaced by the stock shadcn/ui neutral
-> theme in [6-app-shell-projects.md §4](6-app-shell-projects.md) (no custom greys, no violet `--brand`; colour only for
+> theme in [6-app-shell-projects.md §4](6-app-shell-projects.md) (no custom greys, no accent hue; colour only for
 > status). Type moved to Pretendard only at about 108% (doc 6 §4.2). The status and role colours below still apply.
 
 Names follow shadcn so `ui/*` works unchanged; extras are ours. Values are oklch, hue 270–285 (cool grey with a
-touch of violet so the accent belongs). Starting values; tune with a headless screenshot pass.
+touch of hue). Starting values; tune with a headless screenshot pass.
 
 ### 3.1 Colour
 
 | Token | Dark (superseded, see doc 6 §4.1) | Light (superseded) | Use |
 |---|---|---|---|
-| `--background` | `oklch(0.16 0.006 280)` | `oklch(0.99 0.002 280)` | app frame, doc page |
-| `--panel` (new) | `oklch(0.185 0.007 280)` | `oklch(0.975 0.003 280)` | sidebar, top bar, inspector |
-| `--card` / `--popover` | `oklch(0.21 0.008 280)` | `oklch(1 0 0)` | menus, dialogs, cards |
-| `--muted` / `--secondary` | `oklch(0.24 0.008 280)` | `oklch(0.955 0.004 280)` | inputs, segmented bg, code |
+| `--background` | `oklch(0.16 0.006 0)` | `oklch(0.99 0.002 0)` | app frame, doc page |
+| `--panel` (new) | `oklch(0.185 0.007 0)` | `oklch(0.975 0.003 0)` | sidebar, top bar, inspector |
+| `--card` / `--popover` | `oklch(0.21 0.008 0)` | `oklch(1 0 0)` | menus, dialogs, cards |
+| `--muted` / `--secondary` | `oklch(0.24 0.008 0)` | `oklch(0.955 0.004 0)` | inputs, segmented bg, code |
 | `--accent` (shadcn: hover row) | `oklch(1 0 0 / 5%)` | `oklch(0 0 0 / 4%)` | hover, selected row bg |
-| `--border` | `oklch(1 0 0 / 8%)` | `oklch(0.91 0.004 280)` | every 1px line |
-| `--border-strong` (new) | `oklch(1 0 0 / 14%)` | `oklch(0.86 0.005 280)` | input, focus-less outlines |
-| `--foreground` | `oklch(0.94 0.004 280)` | `oklch(0.2 0.01 280)` | primary text |
-| `--text-2` (new) | `oklch(0.78 0.008 280)` | `oklch(0.38 0.01 280)` | secondary text |
-| `--muted-foreground` | `oklch(0.62 0.01 280)` | `oklch(0.53 0.012 280)` | meta, placeholders |
-| `--text-4` (new) | `oklch(0.48 0.01 280)` | `oklch(0.68 0.01 280)` | disabled, hints |
-| `--brand` (new, our violet) | `oklch(0.68 0.16 285)` | `oklch(0.55 0.2 285)` | focus ring, selection, links, primary button |
-| `--brand-soft` (new) | `oklch(0.68 0.16 285 / 16%)` | `oklch(0.55 0.2 285 / 10%)` | selected item bg, slash/active line |
-| `--primary` | = `--brand` | = `--brand` | primary button |
-| `--ring` | = `--brand` | = `--brand` | 2px focus ring |
+| `--border` | `oklch(1 0 0 / 8%)` | `oklch(0.91 0.004 0)` | every 1px line |
+| `--border-strong` (new) | `oklch(1 0 0 / 14%)` | `oklch(0.86 0.005 0)` | input, focus-less outlines |
+| `--foreground` | `oklch(0.94 0.004 0)` | `oklch(0.2 0.01 0)` | primary text |
+| `--text-2` (new) | `oklch(0.78 0.008 0)` | `oklch(0.38 0.01 0)` | secondary text |
+| `--muted-foreground` | `oklch(0.62 0.01 0)` | `oklch(0.53 0.012 0)` | meta, placeholders |
+| `--text-4` (new) | `oklch(0.48 0.01 0)` | `oklch(0.68 0.01 0)` | disabled, hints |
+| `--primary` | see doc 6 §4.1 | see doc 6 §4.1 | primary button (neutral) |
+| `--ring` / focus | see doc 6 §4.1 | see doc 6 §4.1 | 2px focus ring (neutral) |
 | `--destructive` | `oklch(0.68 0.19 25)` | `oklch(0.58 0.21 25)` | errors, delete |
 | `--ok --warn --bad --idle` | from Dispatch dark/monitor (`index.css:60-63,153-156`) | from Dispatch light (`index.css:30-33`) | session status |
 | `--role-*` | Dispatch dark (`index.css:65-70`) | Dispatch light (`index.css:35-40`) | agent role lanes |
-| `--dot` | `oklch(1 0 0 / 7%)` | `oklch(0.86 0.004 280)` | canvas grid |
+| `--dot` | `oklch(1 0 0 / 7%)` | `oklch(0.86 0.004 0)` | canvas grid |
 
-Note the deliberate split: shadcn's `--accent` is a neutral hover colour, so our violet gets its own name
-(`--brand`). Today's `--accent` *is* the violet (`web/src/index.css:12`); section 8 explains why that matters.
+`--accent` is shadcn's neutral hover colour. There is no accent hue (2026-11-13); section 8 covers migrating today's `--accent` call sites.
 
 ### 3.2 Type
 
@@ -153,7 +150,7 @@ x-height is close to Inter's, so mixing should hold.
  220px panel     doc column max 720px, 15px body          Excalidraw, our toolbar skin
 ```
 
-Sidebar rows 28px, section labels 12px `--muted-foreground`, active row `--brand-soft` + `--foreground`.
+Sidebar rows 28px, section labels 12px `--muted-foreground`, active row `--accent` + `--foreground`.
 Status in the top bar is a 6px dot + 12px text (the WIP already did this, `748f6a4:web/src/TopBar.tsx`).
 
 ### 4.2 Command menu (`Ctrl/Cmd+K`)
@@ -207,7 +204,7 @@ files or code (except the MIT `eraser-diagrams` code with its notice). Matching 
 our own renderer, Lucide/Simple Icons and OFL fonts. The work to close the gaps is its own ticket
 (`dispatch-integration.md`, "Eraser 다이어그램 스타일 맞추기").
 
-So no chrome token (`--brand`, the grey ramp, 6px radius, Inter 13px) leaks into `shared/render/`. The renderer
+So no chrome token (the grey ramp, 6px radius, Inter 13px) leaks into `shared/render/`. The renderer
 keeps its own theme table (`shared/render/theme.ts`), tuned against Eraser screenshots.
 
 ### Where the two looks meet (recommendation)
@@ -220,9 +217,8 @@ only frames it"**:
    small value difference between the two greys reads as a deliberate edge, not a mismatch. The dot grid stays
    low-contrast and is drawn by the canvas (`04-visual-design.md` §8).
 2. **Selection colour:** selection inside the canvas (Excalidraw selection, layout-edit handles, the run overlay's
-   focus) uses one canvas selection colour defined next to the diagram theme. Its default is the same hue as
-   `--brand`, so a selected block and the focused sidebar row still look related, but it is owned by the canvas
-   theme and can be moved to an Eraser-like value without touching the chrome.
+   focus) uses one canvas selection colour defined next to the diagram theme. It is owned by the canvas
+   theme (Eraser rules) and does not borrow a chrome colour; the chrome has no accent hue.
 3. **Dark/light switch:** one switch drives both (`data-theme`, OS by default, manual override kept). Diagrams do
    not get a filter: the renderer draws each palette for the theme from colour *names* (`color: green`), as
    Eraser does (dark mode is a viewer setting, not a file setting, `04-visual-design.md:59-60`). The current
@@ -297,9 +293,9 @@ Change before merging:
    `CommandPalette.tsx`, `DocPane.tsx`, `HistoryDialog.tsx`, `Sidebar.tsx` and `TrashDialog.tsx` still use them
    (`git grep 'var(--(text|elevated|accent-soft|danger|dot))' 748f6a4 -- web/src`). Example:
    `BlockEditor.tsx:15-22` (code editor colours) would lose its background and active line.
-2. **`--accent` changes meaning.** Today it is the violet (`web/src/index.css:12`); in shadcn it is a neutral
-   hover grey. `App.tsx:656` (same line in the WIP) paints a button with `var(--accent)`, which would turn grey. Use `--brand` for the
-   violet (section 3.1) and migrate call sites.
+2. **`--accent` changes meaning.** Today it is the app's accent colour (`web/src/index.css:12`); in shadcn it is a neutral
+   hover grey. `App.tsx:656` (same line in the WIP) paints a button with `var(--accent)`. Decision (2026-11-13): no accent
+   hue; migrate such call sites to `--primary` / `--ring` / `--accent` (doc 6 §9 ⑤).
 3. **Zinc palette → our tokens.** Replace the stock Zinc block with section 3, add `--panel`, text steps,
    status and role tokens from Dispatch.
 4. **Radix imports:** switch the four `@radix-ui/react-*` deps to `radix-ui` (section 6).
@@ -308,7 +304,7 @@ Change before merging:
 ## 9. Rollout (small PRs, each with a headless screenshot)
 
 1. Tokens + fonts + `dark:` variant, with legacy aliases (`--text`→`--foreground`, `--elevated`→`--panel`,
-   `--accent`→`--brand`, `--accent-soft`→`--brand-soft`, `--danger`→`--destructive`) so nothing breaks.
+   `--accent-soft`→`--accent`, `--danger`→`--destructive`) so nothing breaks.
 2. `ui/*` from the WIP on `radix-ui`; TopBar and Sidebar on them.
 3. Command menu on `cmdk`, with a command registry other features (export, views, Dispatch) register into.
 4. Dialogs (History, Trash, Export) and the Excalidraw skin block.
@@ -317,8 +313,7 @@ Change before merging:
 ## 10. Open questions
 
 1. Default theme: follow the OS (as both apps now), or force dark for everyone with light as an option?
-2. Keep violet as the one accent, or go neutral (white/near-black primary, as the WIP's Zinc did) and use violet only
-   for focus and selection?
+2. ~~Accent hue?~~ Decided 2026-11-13: neutral primary, focus and selection (shadcn stock), colour only for status.
 3. Sidebar 220px and 28px rows: OK for Korean file names, or keep today's 240px/32px?
 4. Dispatch's "monitor" theme: fold into dark (proposed) or keep as a fourth choice for wall screens?
 5. Should the WIP owner continue `feat/shadcn-ui` with the changes in section 8, or start a fresh branch from step 1 of
