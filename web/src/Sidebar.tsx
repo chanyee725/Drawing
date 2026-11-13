@@ -64,7 +64,7 @@ function RenameInput({ initial, onDone }: { initial: string; onDone: (name: stri
       }}
       onBlur={() => finish(value)}
       className="h-6 min-w-0 flex-1 rounded border px-1 text-sm outline-none"
-      style={{ background: 'var(--surface)', borderColor: 'var(--accent)', color: 'var(--text)' }}
+      style={{ background: 'var(--surface)', borderColor: 'var(--brand)', color: 'var(--text)' }}
     />
   );
 }
@@ -162,8 +162,8 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
             e.preventDefault();
             p.onMove(d, node.path);
           }}
-          className="group flex h-8 cursor-pointer items-center gap-1 pr-2 text-sm"
-          style={{ ...pad, background: over ? 'var(--accent-soft)' : undefined }}
+          className="group flex h-(--h-row) cursor-pointer items-center gap-1 pr-2 text-sm"
+          style={{ ...pad, background: over ? 'var(--brand-soft)' : undefined }}
         >
           <span aria-hidden>{open ? '▾' : '▸'}</span>
           {nameEl}
@@ -189,8 +189,8 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
         dragging = null;
       }}
       aria-current={active ? 'page' : undefined}
-      className="group flex h-8 cursor-pointer items-center gap-1 pr-2 text-sm"
-      style={{ ...pad, background: active ? 'var(--accent-soft)' : undefined, color: active ? 'var(--accent)' : undefined }}
+      className="group flex h-(--h-row) cursor-pointer items-center gap-1 pr-2 text-sm"
+      style={{ ...pad, background: active ? 'var(--brand-soft)' : undefined, color: active ? 'var(--brand)' : undefined }}
     >
       <span aria-hidden>▤</span>
       {nameEl}
@@ -203,9 +203,9 @@ export function Sidebar(p: Props) {
   const [query, setQuery] = useState('');
   const shown = useMemo(() => filterTree(p.tree, query.trim().toLowerCase()), [p.tree, query]);
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r" style={{ background: 'var(--elevated)', borderColor: 'var(--border)' }}>
+    <aside className="flex w-(--w-sidebar) shrink-0 flex-col border-r" style={{ background: 'var(--elevated)', borderColor: 'var(--border)' }}>
       <div className="flex h-12 items-center gap-2 px-4 font-semibold">
-        <span className="inline-block size-5 rounded-md" style={{ background: 'var(--accent)' }} aria-hidden />
+        <span className="inline-block size-5 rounded-md" style={{ background: 'var(--brand)' }} aria-hidden />
         <span className="truncate">{p.workspace ?? 'Drawing'}</span>
       </div>
       <div className="px-3 pb-2">
@@ -215,7 +215,7 @@ export function Sidebar(p: Props) {
           onChange={(e) => setQuery(e.target.value)}
           placeholder="파일 검색"
           aria-label="파일 검색"
-          className="h-8 w-full rounded-md border px-2 text-sm outline-none"
+          className="h-(--h-row) w-full rounded-md border px-2 text-sm outline-none"
           style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text)' }}
         />
       </div>
@@ -250,13 +250,13 @@ export function Sidebar(p: Props) {
           shown.map((n) => <Row key={n.path} node={n} depth={0} p={p} />)
         )}
       </nav>
-      <button type="button" onClick={p.onTrash} className="mx-3 mt-3 h-8 rounded-md border text-sm" style={{ borderColor: 'var(--border)' }}>
+      <button type="button" onClick={p.onTrash} className="mx-3 mt-3 h-(--h-row) rounded-md border text-sm" style={{ borderColor: 'var(--border)' }}>
         최근에 지운 파일
       </button>
       <button
         type="button"
         onClick={p.onToggleTheme}
-        className="m-3 h-8 rounded-md border text-sm"
+        className="m-3 h-(--h-row) rounded-md border text-sm"
         style={{ borderColor: 'var(--border)' }}
       >
         {p.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'}

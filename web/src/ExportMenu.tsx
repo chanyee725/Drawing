@@ -70,7 +70,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <div className="flex items-center gap-1" role="group" aria-label="PNG 크기">
               <span className="mr-auto px-1 text-xs" style={{ color: 'var(--text-muted)' }}>PNG 크기</span>
               {SCALES.map((s) => (
-                <button key={s} type="button" data-export-scale={s} aria-pressed={options.scale === s} onClick={() => onOptions({ ...options, scale: s })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.scale === s ? 'var(--accent)' : 'var(--border)' }}>
+                <button key={s} type="button" data-export-scale={s} aria-pressed={options.scale === s} onClick={() => onOptions({ ...options, scale: s })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.scale === s ? 'var(--brand)' : 'var(--border)' }}>
                   {s}배
                 </button>
               ))}
@@ -78,7 +78,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <div className="flex items-center gap-1" role="group" aria-label="색상">
               <span className="mr-auto px-1 text-xs" style={{ color: 'var(--text-muted)' }}>색상</span>
               {([false, true] as const).map((d) => (
-                <button key={String(d)} type="button" data-export-dark={String(d)} aria-pressed={options.dark === d} onClick={() => onOptions({ ...options, dark: d })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.dark === d ? 'var(--accent)' : 'var(--border)' }}>
+                <button key={String(d)} type="button" data-export-dark={String(d)} aria-pressed={options.dark === d} onClick={() => onOptions({ ...options, dark: d })} className="h-7 rounded-md border px-2 text-xs aria-pressed:font-semibold" style={{ borderColor: options.dark === d ? 'var(--brand)' : 'var(--border)' }}>
                   {d ? '다크' : '라이트'}
                 </button>
               ))}

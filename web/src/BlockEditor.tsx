@@ -13,13 +13,13 @@ type Props = { code: string; type: string; dark: boolean; onChange: (code: strin
 
 const baseTheme = EditorView.theme({
   '&': { fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' },
-  '.cm-content': { fontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace', caretColor: 'var(--accent)' },
+  '.cm-content': { fontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace', caretColor: 'var(--brand)' },
   '.cm-gutters': { background: 'var(--elevated)', color: 'var(--text-muted)', border: 'none' },
-  '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--accent-soft)' },
-  '&.cm-focused': { outline: '2px solid var(--accent)' },
+  '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--brand-soft)' },
+  '&.cm-focused': { outline: '2px solid var(--brand)' },
   '.cm-scroller': { minHeight: '8rem' },
   '.cm-tooltip.cm-tooltip-autocomplete': { background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px' },
-  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--accent-soft)', color: 'var(--text)' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--brand-soft)', color: 'var(--text)' },
   '.cm-completionDetail': { color: 'var(--text-muted)', marginLeft: '0.75em', fontStyle: 'normal' },
 });
 
