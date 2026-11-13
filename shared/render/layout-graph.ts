@@ -25,11 +25,12 @@ const EDGE_LABEL_SIZE = 12;
 const WIDTH_BUCKETS = [160, 200, 260] as const;
 /** Lines a label may wrap to before the node moves up a width bucket. */
 const MAX_LINES = 3;
-/** One-line box height; a second line makes it 56. */
+/** Box height for one line, and the least for two (title + subtitle). More text grows it by NODE_PAD_Y. */
 const NODE_MIN_H = 52;
+const NODE_TWO_LINE_H = 56;
 /** Space a box node keeps around its content: left + right, top + bottom. */
 const NODE_PAD_X = 32;
-const NODE_PAD_Y = 20;
+const NODE_PAD_Y = 12;
 /** Shapes that get width buckets and one size per group. The rest keep shape-specific sizing. */
 const BUCKETED: ReadonlySet<ShapeKind> = new Set(['rectangle', 'cylinder', 'document']);
 const SPACING = {
@@ -37,6 +38,8 @@ const SPACING = {
   neighbour: 40,
   /** Same-layer nodes stacked as a list (horizontal flow). */
   list: 12,
+  /** Siblings in a parent that holds groups (the root included): big blocks. */
+  block: 48,
   /**
    * Between layers. Eraser uses 56, or 76 when the edges carry labels; ELK gives each edge label a layer
    * of its own, so a labelled gap is already 56 + label + 56 and needs no bigger value.
@@ -113,12 +116,6 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
     case 'star':
       w = h = Math.max(cw * 2 + 30, ch * 3 + 30, 100);
       break;
-    case 'cylinder':
-      h += 18;
-      break;
-    case 'document':
-      h += 10;
-      break;
     default:
       break;
   }
@@ -131,35 +128,42 @@ function sizeBox(g: Pick<NodeGeom, 'node' | 'style' | 'shape' | 'iconSize'>, wid
   const iconW = g.iconSize ? g.iconSize + 8 : 0;
   const label = measureLabel(g.node.label, size, g.style.typeface, g.style.wrap, width - NODE_PAD_X - iconW);
   const w = Math.max(width, Math.ceil(label.w + iconW + NODE_PAD_X));
-  let h = Math.max(NODE_MIN_H, Math.ceil(Math.max(label.h, g.iconSize) + NODE_PAD_Y));
+  const least = label.lines.length >= 2 ? NODE_TWO_LINE_H : NODE_MIN_H;
+  let h = Math.max(least, Math.ceil(Math.max(label.h, g.iconSize) + NODE_PAD_Y));
   if (g.shape === 'cylinder') h += 18;
   else if (g.shape === 'document') h += 10;
   return { label, w, h };
 }
 
 /**
- * Box nodes: the smallest width bucket that holds the text on one line; failing that, the smallest whose
- * wrap stays within MAX_LINES lines; failing that, the widest (a long word or unwrapped line widens it).
+ * Box nodes (spec §1.1): the smallest width bucket whose wrap stays within MAX_LINES lines; failing that,
+ * the widest (a long word or unwrapped line widens it).
  */
 function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind, iconSize: number): NodeGeom {
   const base = { node, style, shape, iconSize };
-  const fits = WIDTH_BUCKETS.map((b) => sizeBox(base, b));
-  const pick =
-    fits.find((f, i) => f.w === WIDTH_BUCKETS[i] && f.label.lines.length <= 1) ??
-    fits.find((f, i) => f.w === WIDTH_BUCKETS[i] && f.label.lines.length <= MAX_LINES) ??
-    fits[fits.length - 1]!;
-  return { ...base, ...pick, iconOnly: false };
+  let pick: Pick<NodeGeom, 'label' | 'w' | 'h'> | undefined;
+  for (const b of WIDTH_BUCKETS) {
+    pick = sizeBox(base, b);
+    if (pick.w === b && pick.label.lines.length <= MAX_LINES) break;
+  }
+  return { ...base, ...pick!, iconOnly: false };
 }
 
 /**
- * Box nodes of the same shape that share a parent get one size: the widest bucket among them, labels
- * re-wrapped to that width, then the tallest height.
+ * Box nodes of the same shape in the same group get one size: the widest bucket among them, labels
+ * re-wrapped to that width, then the tallest height. The root is not one group: there only nodes in the
+ * same layer (`rootLayer`) share a size.
  */
-function unifySizes(nodes: Iterable<NodeGeom>, parent: ReadonlyMap<string, string | undefined>): void {
+function unifySizes(
+  nodes: Iterable<NodeGeom>,
+  parent: ReadonlyMap<string, string | undefined>,
+  rootLayer: ReadonlyMap<string, number>,
+): void {
   const sets = new Map<string, NodeGeom[]>();
   for (const g of nodes) {
     if (g.iconOnly || !BUCKETED.has(g.shape)) continue;
-    const key = `${parent.get(g.node.id) ?? ''}\u0000${g.shape}`;
+    const p = parent.get(g.node.id);
+    const key = `${p === undefined ? `layer:${rootLayer.get(g.node.id) ?? 0}` : `group:${p}`}\u0000${g.shape}`;
     const list = sets.get(key) ?? [];
     list.push(g);
     sets.set(key, list);
@@ -170,6 +174,57 @@ function unifySizes(nodes: Iterable<NodeGeom>, parent: ReadonlyMap<string, strin
     const h = Math.max(...list.map((g) => g.h));
     for (const g of list) g.h = h;
   }
+}
+
+/**
+ * Layer of every root-level node: longest path from the sources over the edges between root-level items
+ * (an edge into a group counts for the group). Approximates the layers ELK will make, so root-level box
+ * nodes can share a size per layer (spec §1.1). Edges that close a cycle are ignored.
+ */
+function rootLayers(d: GraphDiagram, parent: ReadonlyMap<string, string | undefined>): Map<string, number> {
+  const top = (id: string): string | undefined => {
+    if (!parent.has(id)) return undefined;
+    let cur = id;
+    for (let p = parent.get(cur); p !== undefined; p = parent.get(cur)) cur = p;
+    return cur;
+  };
+  const out = new Map<string, string[]>();
+  const indeg = new Map<string, number>();
+  for (const c of d.children) indeg.set(c.id, 0);
+  const seen = new Set<string>();
+  for (const e of d.edges) {
+    const a = top(e.from);
+    const b = top(e.to);
+    if (a === undefined || b === undefined || a === b || seen.has(`${a}\u0000${b}`)) continue;
+    seen.add(`${a}\u0000${b}`);
+    out.set(a, [...(out.get(a) ?? []), b]);
+  }
+  // Drop back edges (DFS in model order) so the rest is a DAG.
+  const state = new Map<string, 1 | 2>();
+  const dag = new Map<string, string[]>();
+  const visit = (id: string): void => {
+    state.set(id, 1);
+    for (const n of out.get(id) ?? []) {
+      if (state.get(n) === 1) continue;
+      dag.set(id, [...(dag.get(id) ?? []), n]);
+      indeg.set(n, (indeg.get(n) ?? 0) + 1);
+      if (!state.has(n)) visit(n);
+    }
+    state.set(id, 2);
+  };
+  for (const c of d.children) if (!state.has(c.id)) visit(c.id);
+  const layer = new Map<string, number>();
+  const queue = d.children.map((c) => c.id).filter((id) => indeg.get(id) === 0);
+  for (const id of queue) layer.set(id, 0);
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i]!;
+    for (const n of dag.get(id) ?? []) {
+      layer.set(n, Math.max(layer.get(n) ?? 0, layer.get(id)! + 1));
+      indeg.set(n, indeg.get(n)! - 1);
+      if (indeg.get(n) === 0) queue.push(n);
+    }
+  }
+  return layer;
 }
 
 function measureGroup(d: GraphDiagram, group: GraphGroup): GroupGeom {
@@ -314,19 +369,21 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     for (const c of child.children) measure(c, child.id);
   };
   for (const c of d.children) measure(c, undefined);
-  unifySizes(nodes.values(), parent);
+  unifySizes(nodes.values(), parent, rootLayers(d, parent));
 
-  // ELK reads spacing per parent, so groups get the same values as the root (else ELK's 20 px default).
+  // ELK reads spacing per parent, so every group gets its own values (else ELK's 20 px default).
   const vertical = d.direction === 'down' || d.direction === 'up';
-  const spacing: Record<string, string> = {
-    'elk.spacing.nodeNode': String(vertical ? SPACING.neighbour : SPACING.list),
+  const spacingFor = (kids: readonly GraphChild[]): Record<string, string> => ({
+    'elk.spacing.nodeNode': String(
+      kids.some((c) => c.kind === 'group') ? SPACING.block : vertical ? SPACING.neighbour : SPACING.list,
+    ),
     'elk.layered.spacing.nodeNodeBetweenLayers': String(SPACING.layer),
     'elk.spacing.edgeNode': '24',
     'elk.spacing.edgeEdge': '16',
     'elk.layered.spacing.edgeNodeBetweenLayers': '24',
     'elk.layered.spacing.edgeEdgeBetweenLayers': '14',
     'elk.spacing.edgeLabel': '4',
-  };
+  });
 
   const toElk = (child: GraphChild): ElkNode => {
     if (child.kind === 'node') {
@@ -340,7 +397,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       ...(kids.length === 0 ? { width: g.minW, height: g.header + 40 } : {}),
       children: kids,
       layoutOptions: {
-        ...spacing,
+        ...spacingFor(child.children),
         'elk.padding': `[top=${g.header},left=${GROUP_PAD.side},bottom=${GROUP_PAD.bottom},right=${GROUP_PAD.side}]`,
         'elk.nodeSize.constraints': 'MINIMUM_SIZE',
         'elk.nodeSize.minimum': `(${g.minW},${g.header + 40})`,
@@ -380,7 +437,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-      ...spacing,
+      ...spacingFor(d.children),
       'elk.edgeLabels.inline': 'true',
       'elk.layered.edgeLabels.centerLabelPlacementStrategy': 'MEDIAN_LAYER',
     },
