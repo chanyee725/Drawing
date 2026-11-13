@@ -30,15 +30,10 @@ function send(res, status, data) {
 }
 
 /**
- * Writes need a custom header: a browser can't send it cross-origin without a preflight we never
- * approve. x-drawing: 1 is Drawing's own; x-dispatch: 1 is accepted for the plugin's hook.
- */
-export const writeAllowed = headers => headers["x-drawing"] === "1" || headers["x-dispatch"] === "1";
-
-/**
  * Wraps a Dispatch table entry [method, RegExp, fn(params, body)] as a Drawing route. Errors are
  * answered as { error } with e.status || 400, like the standalone server; a thrown error never
- * reaches the app's 500 handler, so one failing Dispatch call can't affect drawing routes.
+ * reaches the app's 500 handler, so one failing Dispatch call can't affect drawing routes. The
+ * x-drawing header on writes is checked by server/app.js for every /api route.
  */
 export function adapt([method, path, fn]) {
   return {
@@ -46,7 +41,6 @@ export function adapt([method, path, fn]) {
     path,
     async handler(req, res, _ctx, match) {
       try {
-        if (method !== "GET" && !writeAllowed(req.headers)) return send(res, 403, { error: "forbidden" });
         const body = method === "GET" ? {} : await readBody(req);
         send(res, 200, await fn(match.slice(1), body ?? {}));
       } catch (e) {

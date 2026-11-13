@@ -37,7 +37,7 @@
 - 쓰기 요청은 `x-dispatch: 1` 헤더가 있어야 해요 (`index.js:300-301`).
 - 프로젝트 루트는 git 최상위 (`git.js:10`). worktree는 `<root>/.dispatch/wt/<slug>`, 브랜치 `dispatch/<slug>` (`git.js:35-58`). `node_modules`를 하드링크로 복사해요 (`git.js:60-72`).
 - 저장: `<root>/.dispatch/state.json` (`store.js:8`), transcript `<root>/.dispatch/transcripts/<id>.jsonl` (`sessions.js:87-89`).
-- 홈 폴더에도 써요: `~/.dispatch/servers/<port>.json` 서버 등록 (`index.js:88-103`), `~/.dispatch/prefs.json` 테마 (`index.js:132-147`), `~/.dispatch/limits.json` 계정 한도 공유 (`limits.js:78`, `:108`). `~/.codex/sessions`를 읽어요 (`limits.js:10`).
+- 홈 폴더에도 써요: `~/.dispatch/servers/<port>.json` 서버 등록 (`index.js:88-103`), `~/.dispatch/prefs.json` 테마 (`index.js:132-147`), `~/.dispatch/limits.json` 계정 한도 공유 (`limits.js:78`, `:108`). `~/.codex/sessions`를 읽어요 (`limits.js:10`). Drawing에서는 OpenAI를 연결했을 때만 읽고(server/dispatch/hub.js:303), 길이 가드 훅의 표식 파일은 시스템 임시 폴더 대신 `~/.dispatch/hooks/`에 둬요(plugin/hooks/long-session.mjs:13). `state.json`에는 메타데이터만 남겨요: 세션 `prompt`·`error`, 작업 `note`, 티켓 `items[].note`는 메모리에만 두고, 재시작 뒤 역할 프롬프트는 역할에서 다시 읽어요(server/dispatch/dispatch-store.js:8-32, hub.js:885-886).
 - 웹은 React + Tailwind 4 + shadcn, `web/src` 40개 tsx(약 370KB). 상태 계산 일부는 `web/src/lib/`(attention, order, steps, turn 등)에 있어요.
 - 플러그인: `.claude-plugin/plugin.json`, 스킬 `dispatch`·`dispatch-team`·`dispatch-update`, 훅 `hooks/long-session.mjs`(PostToolUse, `hooks/hooks.json`).
 
