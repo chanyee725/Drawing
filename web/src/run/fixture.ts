@@ -12,5 +12,5 @@ export const FIXTURE_STEPS: readonly RunStep[] = [
   { id: 'merge', title: 'Merge', view: 'pending' },
 ];
 
-/** The same run with the test step blocked (a failed session): no animation on it, red ring and ⚠. */
-export const FIXTURE_BLOCKED: readonly RunStep[] = FIXTURE_STEPS.map((s) => (s.id === 'test' ? { ...s, view: 'blocked' as const } : s));
+/** The same run with the test step blocked (a failed session): no animation on it, red ring and ⚠; it keeps its progress weight. */
+export const FIXTURE_BLOCKED: readonly RunStep[] = FIXTURE_STEPS.map((s) => (s.id === 'test' ? { ...s, view: 'blocked' as const, before: 'active' as const } : s));

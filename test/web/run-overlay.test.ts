@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { parse } from '../../shared/dsl/index.ts';
 import { edgeKey, layoutDiagram, nodeRects } from '../../shared/render/index.ts';
 import type { Scene } from '../../shared/render/index.ts';
-import { agentColors, overlayModel, pathData, roleColor } from '../../web/src/run/overlayModel.ts';
+import { agentColors, legendOf, overlayModel, pathData, roleColor, runProgress } from '../../web/src/run/overlayModel.ts';
 import { FIXTURE_BLOCKED, FIXTURE_CODE, FIXTURE_STEPS } from '../../web/src/run/fixture.ts';
 
 async function scene(code: string): Promise<Scene> {
@@ -109,4 +109,31 @@ test('step.node links to a differently named node', async () => {
 
 test('pathData', () => {
   assert.equal(pathData([{ x: 0, y: 0 }, { x: 10.04, y: 5 }, { x: 10, y: 20.55 }]), 'M0 0L10 5L10 20.6');
+});
+
+test('progress and legend: weighted progress, only the agents and states present', async () => {
+  const m = overlayModel(await scene(FIXTURE_CODE), FIXTURE_STEPS);
+  // plan 1 + impl 1 + review 0.8 + test 0.5 + merge 0 = 3.3 of 5 → 66%.
+  assert.deepEqual(m.progress, { total: 5, done: 2, blocked: 0, remaining: 3, percent: 66 });
+  assert.deepEqual(m.legend.agents.map((a) => [a.name, a.roleName]), [
+    ['Mira', '관리자'],
+    ['Juno', '구현자'],
+    ['Tali', '구현자'],
+    ['Oren', '리뷰어'],
+    ['Pell', '테스터'],
+  ]);
+  assert.equal(m.legend.agents[2]!.color, roleColor('impl', 1));
+  assert.deepEqual(m.legend.states.map((s) => `${s.glyph} ${s.label}`), ['◌ 대기', '● 진행', '◐ 리뷰', '✓ 완료']);
+  const b = legendOf(FIXTURE_BLOCKED);
+  assert.deepEqual(b.states.map((s) => s.view), ['pending', 'review', 'done', 'blocked']);
+  assert.equal(b.states.at(-1)!.color, 'var(--bad)');
+});
+
+test('progress: a blocked step keeps its weight, a skipped step leaves the count', () => {
+  const blocked = FIXTURE_STEPS.map((s) => (s.id === 'test' ? { ...s, view: 'blocked' as const, before: 'active' as const } : s));
+  assert.equal(runProgress(blocked).percent, runProgress(FIXTURE_STEPS).percent);
+  assert.equal(runProgress(blocked).blocked, 1);
+  const skipped = FIXTURE_STEPS.map((s) => (s.id === 'merge' ? { ...s, skipped: true } : s));
+  assert.deepEqual(runProgress(skipped), { total: 4, done: 2, blocked: 0, remaining: 2, percent: 82 });
+  assert.equal(legendOf(skipped).states.some((s) => s.view === 'pending'), false);
 });

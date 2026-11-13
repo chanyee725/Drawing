@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyRunEvent,
+  beforeBlocked,
   fmtDur,
   historyLines,
   nodeLabels,
@@ -118,11 +119,11 @@ test('stripModel: the one-line summary and who needs a look', () => {
   const rows = stepRows(r, live, now);
   const sm = stripModel(r, rows, sessionRows(r, live, now), 0.68, now);
   assert.equal(sm.glyph, '●');
-  assert.deepEqual(sm.parts, ['실행 중', '0/4 단계', '24분째', '$1.70', '5시간 68%']);
+  assert.deepEqual(sm.parts, ['실행 중', '4단계 중 0 완료 · 32% · 남은 4 (막힘 1)', '24분째', '$1.70', '5시간 68%']);
   assert.deepEqual(sm.attention, [{ sid: 's2', text: 'Juno(구현자)가 답을 기다려요', since: null }]);
   const ended = record({ state: 'done', endedAt: T0 + 67 * MIN });
   const em = stripModel(ended, stepRows(ended), sessionRows(ended), 0.68, now);
-  assert.deepEqual(em.parts, ['완료', '2/4 단계', '1시간 7분', '$1.70']);
+  assert.deepEqual(em.parts, ['완료', '4단계 중 2 완료 · 50% · 남은 2 (막힘 1)', '1시간 7분', '$1.70']);
   assert.deepEqual(em.attention, []);
 });
 
@@ -150,4 +151,35 @@ test('fmtDur and nodeLabels', () => {
   assert.equal(fmtDur(10e3), '1분');
   assert.equal(fmtDur(60 * MIN), '1시간');
   assert.deepEqual([...nodeLabels('a [label: "A b"]\nb\nc [color: red, label: "C"]\na > b').entries()], [['a', 'A b'], ['c', 'C']]);
+});
+
+test('beforeBlocked: a blocked step keeps the weight of its newest non-blocking state', () => {
+  const tl: RunRecord['timeline'] = [
+    [T0, 'impl', 'working'],
+    [T0 + MIN, 'test', 'working'],
+    [T0 + 2 * MIN, 'impl', 'done'],
+    [T0 + 3 * MIN, 'impl', 'failed'],
+    [T0 + 4 * MIN, 'impl', 'blocked'],
+  ];
+  assert.equal(beforeBlocked(tl, 'impl'), 'review');
+  assert.equal(beforeBlocked(tl, 'test'), 'active');
+  assert.equal(beforeBlocked(tl, 'merge'), undefined);
+});
+
+test('stripModel: blocking never makes the bar go backwards; skipped steps leave the count', () => {
+  const now = T0 + 24 * MIN;
+  const before = record({ steps: { ...record().steps, test: { state: 'working', startedAt: T0 + 13 * MIN, endedAt: null, sessions: [{ sid: 's4', name: 'Pell', state: 'working' }] } } });
+  const p0 = stripModel(before, stepRows(before, new Map(), now), [], null, now).progress;
+  const blocked = record({
+    steps: { ...record().steps, test: { state: 'failed', startedAt: T0 + 13 * MIN, endedAt: null, sessions: [{ sid: 's4', name: 'Pell', state: 'failed' }] } },
+    timeline: [...record().timeline, [T0 + 13 * MIN, 'test', 'working'], [T0 + 20 * MIN, 'test', 'failed']],
+  });
+  const rows = stepRows(blocked, new Map(), now);
+  assert.equal(rows[3]!.view, 'blocked');
+  assert.equal(rows[3]!.before, 'active');
+  const p1 = stripModel(blocked, rows, [], null, now).progress;
+  assert.equal(p1.percent, p0.percent);
+  assert.deepEqual({ total: p1.total, done: p1.done, blocked: p1.blocked, remaining: p1.remaining }, { total: 4, done: 0, blocked: 1, remaining: 4 });
+  assert.deepEqual(overlaySteps(rows)[3]!.before, 'active');
+  assert.equal(overlaySteps(rows)[4]!.skipped, true);
 });

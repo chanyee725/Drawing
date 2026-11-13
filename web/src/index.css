@@ -407,6 +407,34 @@ body {
 .run-layer[data-motion-inside] .run-motion { bottom: auto; top: 4px; right: 4px; margin: 0; }
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
+/* Legend (E26): weighted progress, then the agents and states present. HTML in CSS px, so it stays readable at any
+   zoom. On the canvas it sits just outside the picture's top-right corner; in the document it flows under the picture.
+   Either way it never covers a node. */
+.run-legend {
+  position: absolute; top: 0; left: calc(100% + 12px); pointer-events: auto; inline-size: max-content; min-inline-size: 168px; max-inline-size: 280px;
+  padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
+  color: var(--foreground); font: 400 12px/16px var(--font-sans);
+}
+.doc-diagram > .run-legend { position: static; align-self: center; }
+.run-legend-progress { margin: 0 0 4px; font-weight: 500; }
+.run-legend-dim { color: var(--muted-foreground); }
+.run-legend details { margin-top: 4px; }
+.run-legend summary { cursor: pointer; color: var(--muted-foreground); }
+.run-legend summary:hover { color: var(--foreground); }
+.run-legend summary:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.run-legend ul { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
+.run-legend li { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.run-legend ul + ul { border-top: 1px solid var(--border); padding-top: 4px; }
+.run-swatch { inline-size: 10px; block-size: 10px; border-radius: 3px; flex: none; }
+.run-legend-glyph { inline-size: 10px; text-align: center; font-weight: 600; }
+/* Native <progress>, fully custom (appearance: none): track on the element, fill on each engine's pseudo-element. */
+.run-progress {
+  appearance: none; border: 0 solid; overflow: clip; display: block; inline-size: 100%; block-size: 4px;
+  border-radius: 1e5px; background: var(--border);
+}
+.run-progress::-webkit-progress-bar { background: transparent; }
+.run-progress::-webkit-progress-value { background: var(--ok); border-radius: 1e5px; }
+.run-progress::-moz-progress-bar { background: var(--ok); border-radius: 1e5px; }
 
 /* Live agent cursor (E56): pointer + name tag in the session's role colour. Placed with `translate` from JS (one
    animation-frame loop, web/src/canvas/AgentCursors.tsx); fading is an opacity transition, kept under reduced motion. */

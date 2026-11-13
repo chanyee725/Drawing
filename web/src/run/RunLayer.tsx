@@ -2,10 +2,11 @@
 // coordinates, so it scales with the picture. Draws rings, a glyph corner badge and a "state · agent" label per step
 // and traces active edges. Never touches the picture, the canvas elements or the file.
 // The same component draws on the canvas (RunOverlay) and in the document's diagram embed (DiagramView).
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
+import { progressLabel } from '../../../shared/dispatch/step-view.ts';
 import type { Scene } from '../../../shared/render/index.ts';
 import { badgeRect } from '../../../shared/render/badge.ts';
-import { overlayModel, pathData, type OverlayNode, type RunStep } from './overlayModel';
+import { legendOf, overlayModel, pathData, runProgress, type OverlayNode, type RunStep } from './overlayModel';
 import { setStill, useStill } from './runStore';
 
 type Props = {
@@ -18,6 +19,8 @@ type Props = {
   scale: number;
   /** No room above the picture (it touches the top of a clipped view): the motion switch sits inside its corner. */
   motionInside?: boolean;
+  /** Draw the legend beside the picture (canvas). The document puts `RunLegend` under the picture itself. */
+  legend?: boolean;
 };
 
 /** Below this scale the labels are too small to read and hidden (§5 "hidden below 40 % zoom"). */
@@ -32,7 +35,7 @@ export function textWidth(s: string, size = LABEL_FONT): number {
   return Math.ceil(w);
 }
 
-export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props) {
+export function RunLayer({ scene, steps, left, top, scale, motionInside, legend = true }: Props) {
   const model = useMemo(() => overlayModel(scene, steps), [scene, steps]);
   const still = useStill();
   if (!model.nodes.length) return null;
@@ -48,6 +51,7 @@ export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props
           <Step key={n.node} n={n} labels={labels} />
         ))}
       </svg>
+      {legend && <RunLegend steps={steps} />}
       {moving && (
         <button type="button" className="run-motion" onClick={() => setStill(!still)}>
           {still ? '움직임 켜기' : '움직임 멈추기'}
@@ -83,5 +87,49 @@ function Step({ n, labels }: { n: OverlayNode; labels: boolean }) {
         </g>
       )}
     </g>
+  );
+}
+
+/**
+ * The board's legend (§5.1): the weighted progress bar and text, then a collapsible list of the agents and states in
+ * the run. Beside the picture's top-right corner on the canvas and under the picture in the document, so it never
+ * covers a node.
+ */
+export function RunLegend({ steps }: { steps: readonly RunStep[] }) {
+  const id = useId();
+  const p = useMemo(() => runProgress(steps), [steps]);
+  const legend = useMemo(() => legendOf(steps), [steps]);
+  return (
+    <div className="run-legend" data-run-legend="">
+      <p id={id} className="run-legend-progress">
+        {progressLabel(p)}
+      </p>
+      <progress className="run-progress" value={p.percent} max={100} aria-labelledby={id} />
+      <details open>
+        <summary>범례</summary>
+        <ul aria-label="에이전트">
+          {legend.agents.map((a) => (
+            <li key={a.name}>
+              <span className="run-swatch" aria-hidden="true" style={{ background: a.color }} />
+              <span>{a.name}</span>
+              <span className="run-legend-dim">
+                {a.roleName}
+                {a.model ? ` · ${a.model}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <ul aria-label="상태">
+          {legend.states.map((s) => (
+            <li key={s.view}>
+              <span className="run-legend-glyph" aria-hidden="true" style={{ color: s.color }}>
+                {s.glyph}
+              </span>
+              <span>{s.label}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
   );
 }

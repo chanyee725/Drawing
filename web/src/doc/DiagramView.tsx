@@ -7,7 +7,7 @@ import type { ImageKind } from '../export/actions';
 import { layoutSig } from '../canvas/sync';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
-import { RunLayer } from '../run/RunLayer';
+import { RunLayer, RunLegend } from '../run/RunLayer';
 import { useRunSteps } from '../run/runStore';
 import { DiagramEmbed } from './extensions';
 import type { CanvasEl } from './model';
@@ -79,11 +79,12 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
           <button type="button" className="doc-diagram-pic" title="캔버스에서 보기" aria-label={`${label}, 캔버스에서 보기`} onClick={() => onShow(id)}>
             {pic ? <img ref={img} src={pic.dataURL} alt={label} width={pic.width} height={pic.height} draggable={false} /> : <span className="doc-diagram-wait">그리는 중이에요…</span>}
           </button>
-          {steps && scene && box && <RunLayer scene={scene} steps={steps} left={box.left} top={box.top} scale={box.scale} />}
+          {steps && scene && box && <RunLayer scene={scene} steps={steps} left={box.left} top={box.top} scale={box.scale} legend={false} />}
         </div>
       ) : (
         <p className="doc-diagram-gone">캔버스에서 지운 다이어그램이에요. 이 줄을 지워도 돼요.</p>
       )}
+      {block && steps && scene && box && <RunLegend steps={steps} />}
       <figcaption>{block ? `${label} · 누르면 캔버스로 가요` : label}</figcaption>
       {block && (
         <div className="doc-diagram-actions" role="group" aria-label="다이어그램 내보내기">
