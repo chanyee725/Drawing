@@ -4,6 +4,7 @@ import {
   boundsOf,
   hitHandle,
   imageReason,
+  imageReasonCode,
   layoutFrame,
   layoutHandles,
   leavesOf,
@@ -95,6 +96,32 @@ test('imageReason refuses locked and rotated images', () => {
   assert.equal(imageReason({ angle: 0, locked: false }), null);
   assert.match(imageReason({ locked: true })!, /잠긴/);
   assert.match(imageReason({ angle: 0.3 })!, /돌린/);
+});
+
+test('converting refuses locked, rotated and cropped images, each with its own reason', () => {
+  assert.equal(imageReasonCode({ angle: 0, locked: false, crop: null }, 'freeform'), null);
+  assert.equal(imageReasonCode({ locked: true }, 'freeform'), 'locked');
+  assert.equal(imageReasonCode({ angle: Math.PI / 2 }, 'freeform'), 'rotated');
+  const crop = { x: 0, y: 0, width: 10, height: 10, naturalWidth: 20, naturalHeight: 20 };
+  assert.equal(imageReasonCode({ crop }, 'freeform'), 'cropped');
+  assert.equal(imageReason({ crop }), null, 'layout edit keeps working on a cropped block, as before');
+  assert.equal(imageReason({ angle: 1 }, 'freeform'), '돌린 블록은 자유 도형으로 바꿀 수 없어요. 회전을 풀고 다시 해 주세요');
+  assert.match(imageReason({ crop }, 'freeform')!, /^자른 블록은 자유 도형으로/);
+});
+
+test('no freeform message says 옮길 (moving), every one says what cannot be converted', async () => {
+  const crop = { x: 0, y: 0, width: 1, height: 1 };
+  const texts = [
+    ...(['kind', 'errors', 'version', 'empty'] as const).map((c) => reasonText(c, 'freeform')),
+    ...[{ locked: true }, { angle: 1 }, { crop }].map((img) => imageReason(img, 'freeform')!),
+    (await openLayoutSession({ type: 'flowchart', code: '' }, 'freeform') as { reason: string }).reason,
+    editReason({ type: 'bpmn', code: '' }, 'freeform')!,
+  ];
+  for (const text of texts) {
+    assert.ok(text, 'a message');
+    assert.doesNotMatch(text, /옮길|옮기/, text);
+    assert.match(text, /바꿀|바꿔/, text);
+  }
 });
 
 const ARCH = 'VPC {\n  API [icon: server]\n  Worker\n}\nDB [icon: database]\nAPI > DB\nWorker > DB';

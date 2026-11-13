@@ -466,6 +466,22 @@ test('fs errors become 4xx, and neither response nor server log contains absolut
   });
 });
 
+test('createFile and move onto a path whose parent is a file answer 409', async () => {
+  await withApp(async ({ ws, call }) => {
+    await writeFile(join(ws, 'blocker.txt'), 'x'); // a plain file where a folder would have to be
+    await call('POST', '/api/file', { path: 'other' });
+    const make = await call('POST', '/api/file', { path: 'blocker.txt/child' });
+    assert.equal(make.status, 409);
+    const deep = await call('POST', '/api/file', { path: 'blocker.txt/a/child' });
+    assert.equal(deep.status, 409);
+    const mv = await call('POST', '/api/move', { from: 'other', to: 'blocker.txt/x', type: 'file' });
+    assert.equal(mv.status, 409);
+    await call('POST', '/api/folder', { path: 'dir' });
+    const mvDir = await call('POST', '/api/move', { from: 'dir', to: 'blocker.txt/dir', type: 'folder' });
+    assert.equal(mvDir.status, 409);
+  });
+});
+
 test('app logs only the error kind for unexpected 500s', async () => {
   const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
   const boom = { name: 'boom', setup: async () => ({ routes: [{ method: 'GET', path: '/api/boom', handler: () => { throw Object.assign(new Error(`lstat '${ws}/x'`), { code: 'EBOOM' }); } }] }) };
@@ -706,9 +722,11 @@ test('after an async fs.watch error the watcher is closed and started again, and
     watchers.push(w);
     return w;
   };
-  const store = createStore(ws, { watchFn, watchRestartMs: 10 });
+  const changes = [];
+  const store = createStore(ws, { watchFn, watchRestartMs: 10, watchDebounceMs: 0, onExternalChange: (c) => changes.push(c) });
   const warn = t.mock.method(console, 'warn', () => {});
   try {
+    await store.createFile('x');
     await store.startWatching();
     assert.equal(watchers.length, 1);
     watchers[0].emit('error', Object.assign(new Error('x'), { code: 'ENOSPC' }));
@@ -716,6 +734,12 @@ test('after an async fs.watch error the watcher is closed and started again, and
     for (let i = 0; i < 100 && watchers.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
     assert.equal(watchers.length, 2, 'a new watcher was started');
     assert.equal(warn.mock.callCount(), 1);
+    // An edit made outside the app after the restart is seen through the new watcher.
+    const cur = JSON.parse(await readFile(join(ws, 'x.dpx.json'), 'utf8'));
+    await writeFile(join(ws, 'x.dpx.json'), JSON.stringify({ ...cur, title: 'edited outside', revision: cur.revision + 1 }));
+    watchers[1].cb('change', 'x.dpx.json');
+    for (let i = 0; i < 100 && !changes.length; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.ok(changes.some((c) => c.path === 'x.dpx.json'), 'outside edit after the restart was reported');
   } finally {
     warn.mock.restore();
     await store.close();

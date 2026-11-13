@@ -398,3 +398,21 @@ test('editing in the 409 state keeps the conflict notice, saves nothing, and ove
   assert.equal(s.getState().status, '저장했어요');
   assert.equal(s.hasUnsaved(), false);
 });
+
+test('hold: an edit during a slow move is saved to the new path, not the old one', async (t) => {
+  const { s, server } = setup(t);
+  const release = s.hold();
+  s.edit({ title: 'during the move' });
+  t.mock.timers.tick(SAVE_DELAY + 10);
+  await settle();
+  assert.equal(server.calls.length, 0, 'nothing is sent while held');
+  s.rename('b.dpx', 5);
+  release();
+  release(); // releasing twice changes nothing
+  t.mock.timers.tick(1);
+  await settle();
+  assert.equal(server.calls.length, 1);
+  assert.equal(server.calls[0].path, 'b.dpx');
+  assert.equal(server.calls[0].file.revision, 5);
+  assert.equal(server.calls[0].file.title, 'during the move');
+});
