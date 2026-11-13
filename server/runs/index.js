@@ -7,6 +7,7 @@ export async function setup(ctx) {
   const store = ctx.modules.workspace?.store;
   if (!store) return {};
   const recorder = createRecorder({ runs: store.runs, hub: ctx.hub });
+  store.runs.setTreeMark?.((rel) => recorder.markOf(rel));
 
   const send = (res, status, body) => {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -29,7 +30,10 @@ export async function setup(ctx) {
 
   return {
     recorder,
-    close: () => recorder.close(),
+    close: () => {
+      store.runs.setTreeMark?.(null);
+      return recorder.close();
+    },
     routes: [
       route('GET', '/api/runs', (p) => recorder.list(p)),
       route('GET', '/api/runs/run', (p, q) => recorder.read(p, q.get('id'))),

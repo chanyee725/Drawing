@@ -298,6 +298,24 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return r;
   }
 
+  /**
+   * The tree mark of a pipeline file from its runs: running while a run is in memory, else from the newest record
+   * (done -> done; failed, stopped or a run left `running` by a server stop -> paused). Null when it has no runs.
+   */
+  async function markOf(rel) {
+    for (const run of active.values()) if (!run.loc.trashId && run.loc.path === rel) return { state: 'running' };
+    const dir = await runs.dirOf(rel);
+    const ids = (await readdir(dir).catch(() => []))
+      .filter((n) => n.endsWith('.json') && RUN_ID.test(n.slice(0, -5)))
+      .sort()
+      .reverse();
+    for (const n of ids) {
+      const r = await readRecord(join(dir, n));
+      if (r) return { state: r.state === 'done' ? 'done' : 'paused' };
+    }
+    return null;
+  }
+
   /** Write every dirty run now (server shutdown). Running runs stay `running` on disk. */
   async function close() {
     unsubscribe();
@@ -306,5 +324,5 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     for (const run of active.values()) if (run.dirty || run.writeTimer) await writeQuietly(run);
   }
 
-  return { startRun, updateSession, setStepState, endRun, list, read, close, get active() { return [...active.keys()]; } };
+  return { startRun, updateSession, setStepState, endRun, list, read, markOf, close, get active() { return [...active.keys()]; } };
 }

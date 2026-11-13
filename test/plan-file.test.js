@@ -22,7 +22,7 @@ async function withApp(fn) {
     return { status: res.status, body: await res.json() };
   };
   try {
-    await fn({ ws, base, call });
+    await fn({ ws, base, call, app });
   } finally {
     await app.close();
     await rm(ws, { recursive: true, force: true });
@@ -91,6 +91,28 @@ test('create with a template, and the tree marks pipeline files', async () => {
     const files = r.body.tree.flatMap((n) => (n.type === 'folder' ? n.children : [n]));
     assert.deepEqual(files.find((n) => n.path === 'pipelines/new.dpx.json').pipeline, { state: 'plan' });
     assert.equal('pipeline' in files.find((n) => n.path === 'plain.dpx.json'), false);
+  });
+});
+
+test('the tree mark follows runs: running while one is live, then done or paused from the newest record', async () => {
+  await withApp(async ({ call, app }) => {
+    const recorder = app.ctx.modules.runs.recorder;
+    await call('POST', '/api/file', { path: 'p', blocks: [block], plan });
+    const mark = async () => (await call('GET', '/api/tree')).body.tree.find((n) => n.path === 'p.dpx.json').pipeline;
+    assert.deepEqual(await mark(), { state: 'plan' });
+    const a = await recorder.startRun({ file: 'p', plan, revision: 1 });
+    assert.deepEqual(await mark(), { state: 'running' });
+    await recorder.endRun(a.id, 'done');
+    assert.deepEqual(await mark(), { state: 'done' });
+    const b = await recorder.startRun({ file: 'p', plan, revision: 1 });
+    await recorder.endRun(b.id, 'stopped');
+    assert.deepEqual(await mark(), { state: 'paused' });
+    const c = await recorder.startRun({ file: 'p', plan, revision: 1 });
+    await recorder.endRun(c.id, 'failed');
+    assert.deepEqual(await mark(), { state: 'paused' });
+    // The projects view carries the same mark.
+    const projects = await call('GET', '/api/workspace/projects');
+    assert.ok(JSON.stringify(projects.body).includes('"pipeline":{"state":"paused"}'));
   });
 });
 
