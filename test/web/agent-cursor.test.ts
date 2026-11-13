@@ -74,3 +74,74 @@ test('toScreen follows Excalidraw scroll, zoom and offset', () => {
   const st = { scrollX: 10, scrollY: -20, zoom: { value: 2 }, offsetLeft: 100, offsetTop: 50 };
   assert.deepEqual(toScreen({ x: 0, y: 20 }, st, { left: 100, top: 40 }), { x: 20, y: 10 });
 });
+
+test('the session colour rides on the cursor; only #rrggbb is taken, and a later event without one keeps it (#249)', () => {
+  let m = applyCursor(new Map(), ev(0, 0, { color: '#0f766e' }), 0, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  m = applyCursor(m, ev(10, 0), 10, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  m = applyCursor(m, ev(undefined, undefined), 20, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  for (const bad of ['red', '#fff', 'url(x)', '#0f766e; x: y', 7]) {
+    assert.equal(applyCursor(new Map(), ev(0, 0, { color: bad }), 0, false).get('s1')!.color, '', String(bad));
+  }
+});
+
+test('the glide clock starts at the first frame the cursor is drawn, and a stalled frame does not use it up', async () => {
+  const { shownCursor, lastDrawn, MAX_FRAME_MS } = await import('../../web/src/canvas/agentCursor.ts');
+  let m = applyCursor(new Map(), ev(0, 0), 0, false);
+  m = applyCursor(m, ev(0, 300), 1000, false);
+  const c = m.get('s1')!;
+  const clocks = new Map();
+  // The canvas remounts: no frame for 500 ms, then hidden while it loads. The first visible frame is at 1600,
+  // long after the event's own 220 ms: it still draws the start, not the target.
+  assert.ok(1600 - 1000 > MOVE_MS);
+  assert.deepEqual(positionAt(shownCursor(clocks, c, 1600), 1600, false), { x: 0, y: 0 });
+  assert.equal(moving(shownCursor(clocks, c, 1600), 1600, false), true);
+  // Normal frames after that glide through the middle.
+  const mid = positionAt(shownCursor(clocks, c, 1616), 1616, false);
+  assert.ok(mid.y > 0 && mid.y < 300, `mid-glide: ${mid.y}`);
+  // A 400 ms stall counts as one MAX_FRAME_MS step: still in the middle.
+  const after = positionAt(shownCursor(clocks, c, 2016), 2016, false);
+  assert.ok(after.y > mid.y && after.y < 300, `slowed, not skipped: ${after.y}`);
+  // A new place glides on from where it was last drawn, not from the event clock's end.
+  assert.ok(Math.abs(positionAt(lastDrawn(clocks, c, 2020), 2020, false).y - after.y) < 1e-9);
+  // Enough frames finish it.
+  let t = 2016;
+  let k = shownCursor(clocks, c, t);
+  while (moving(k, t, false)) k = shownCursor(clocks, c, (t += 16));
+  assert.deepEqual(positionAt(k, t, false), { x: 0, y: 300 });
+  assert.ok(t - 2016 <= MOVE_MS - 16 - MAX_FRAME_MS + 16, `the rest of the glide in normal frames: ${t - 2016}`);
+});
+
+test('a glide first drawn long after it started (file not open then) is not replayed', async () => {
+  const { shownCursor, STALE_GLIDE_MS } = await import('../../web/src/canvas/agentCursor.ts');
+  let m = applyCursor(new Map(), ev(0, 0), 0, false);
+  m = applyCursor(m, ev(0, 300), 1000, false);
+  const t = 1000 + STALE_GLIDE_MS + 1;
+  const k = shownCursor(new Map(), m.get('s1')!, t);
+  assert.deepEqual(positionAt(k, t, false), { x: 0, y: 300 });
+  assert.equal(moving(k, t, false), false);
+});
+
+test('an event without a place after a landed glide does not restart the glide (#254)', async () => {
+  const { applyCursorDrawn, shownCursor } = await import('../../web/src/canvas/agentCursor.ts');
+  const clocks = new Map();
+  let m = applyCursorDrawn(new Map(), clocks, ev(0, 0), 0, false);
+  m = applyCursorDrawn(m, clocks, ev(0, 300), 1000, false);
+  // Frames draw the glide until it lands at (0,300).
+  let t = 1000;
+  let k = shownCursor(clocks, m.get('s1')!, t);
+  while (moving(k, t, false)) k = shownCursor(clocks, m.get('s1')!, (t += 16));
+  assert.deepEqual(positionAt(k, t, false), { x: 0, y: 300 });
+  // "Still editing", no place: the cursor stays, and the next frame does not jump back to the glide's start.
+  const before = m.get('s1')!;
+  m = applyCursorDrawn(m, clocks, ev(), t + 10, false);
+  assert.equal(m.get('s1')!.moveAt, before.moveAt);
+  assert.equal(m.get('s1')!.editAt, t + 10);
+  const next = shownCursor(clocks, m.get('s1')!, t + 16);
+  assert.deepEqual(positionAt(next, t + 16, false), { x: 0, y: 300 });
+  // A new place still glides on from where it was drawn.
+  m = applyCursorDrawn(m, clocks, ev(0, 600), t + 20, false);
+  assert.deepEqual(m.get('s1')!.from, { x: 0, y: 300 });
+});
