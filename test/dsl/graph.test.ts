@@ -212,3 +212,11 @@ test("a '}' glued into a name warns how to keep it; quoted braces and spaced bra
   const { ast } = parseFlowchart('G {\n  "a}b" > C\n}');
   assert.ok(JSON.stringify(ast).includes('"label":"a}b"'));
 });
+
+test("an edge label and a node label in quotes keep their '}' (the unquoted form warns instead of cutting silently)", () => {
+  const { ast, diagnostics } = parseFlowchart('A [label: "x}y"]\nA > B: "ok } fine"');
+  assert.deepEqual(fmt(diagnostics), []);
+  const json = JSON.stringify(ast);
+  assert.ok(json.includes('x}y') && json.includes('ok } fine'));
+  assert.ok(fmt(parseFlowchart('A [label: x}y]').diagnostics).some((d) => d.includes("put the text in quotes")));
+});

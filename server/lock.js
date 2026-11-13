@@ -70,8 +70,8 @@ async function removeIfUnchanged(file, raw) {
       await rm(tmp, { force: true });
     }
     if (!got) {
-      const { holder } = await readLock(brk);
-      if (holder && !pidAlive(holder.pid)) await rm(brk, { force: true });
+      const { raw: brkRaw, holder } = await readLock(brk);
+      if (holder && !pidAlive(holder.pid)) await clearDeadBreak(brk, brkRaw);
       else await sleep(10);
       continue;
     }
@@ -82,7 +82,30 @@ async function removeIfUnchanged(file, raw) {
       await rm(brk, { force: true });
     }
   }
-  throw new Error('lock break timed out');
+  throw new LockBreakTimeoutError('lock break timed out');
+}
+
+export class LockBreakTimeoutError extends Error {
+  name = 'LockBreakTimeoutError';
+}
+
+/**
+ * Clears a `.break` file whose holder died. A plain rm could delete a `.break` that another waiter
+ * took between our read and the rm, so move it aside first (rename is atomic: one waiter wins the
+ * old file) and put it back when what we moved is not the dead holder's content.
+ */
+async function clearDeadBreak(brk, deadRaw) {
+  const aside = `${brk}.${process.pid}.stale`;
+  try {
+    await rename(brk, aside);
+  } catch {
+    return; // someone else cleared or took it
+  }
+  try {
+    if ((await readLock(aside)).raw !== deadRaw) await link(aside, brk).catch(() => {});
+  } finally {
+    await rm(aside, { force: true });
+  }
 }
 
 export class LockPathError extends Error {
