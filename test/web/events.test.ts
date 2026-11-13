@@ -88,3 +88,69 @@ test('without EventSource nothing opens and subscribing is harmless', () => {
   client.onConnection(() => {})();
   off();
 });
+
+test('a stream the browser closed for good (404, 502) is reopened after a growing delay', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const sources: FakeSource[] = [];
+  const client = createEventsClient(() => {
+    const s = new FakeSource();
+    sources.push(s);
+    return s;
+  }, { baseMs: 100, maxMs: 300 });
+  const got: string[] = [];
+  const online: boolean[] = [];
+  client.subscribe('run', (d) => got.push(d));
+  const offConn = client.onConnection((o) => online.push(o));
+  const fail = (s: FakeSource) => {
+    (s as FakeSource & { readyState: number }).readyState = 2;
+    s.onerror?.({} as Event);
+  };
+
+  // A transient error the browser retries itself does not open a second stream.
+  sources[0].onerror?.({} as Event);
+  t.mock.timers.tick(1000);
+  assert.equal(sources.length, 1);
+
+  fail(sources[0]);
+  assert.equal(sources[0].closed, true);
+  t.mock.timers.tick(99);
+  assert.equal(sources.length, 1);
+  t.mock.timers.tick(1);
+  assert.equal(sources.length, 2, 'reopened after 100 ms');
+  sources[1].emit('run', 'a');
+  assert.deepEqual(got, ['a'], 'handlers are wired to the new stream');
+
+  fail(sources[1]);
+  t.mock.timers.tick(199);
+  assert.equal(sources.length, 2);
+  t.mock.timers.tick(1);
+  assert.equal(sources.length, 3, 'second try waits 200 ms');
+  fail(sources[2]);
+  t.mock.timers.tick(300);
+  assert.equal(sources.length, 4, 'capped at maxMs');
+
+  sources[3].onopen?.({} as Event);
+  fail(sources[3]);
+  t.mock.timers.tick(100);
+  assert.equal(sources.length, 5, 'a successful open resets the delay');
+  sources[0].onopen?.({} as Event); // a stale source must not report online
+  assert.deepEqual(online, [false, false, false, false, true, false]);
+
+  fail(sources[4]);
+  offConn();
+  client.subscribe('x', () => {})(); // still one 'run' subscriber: retry stays scheduled, no extra stream
+  assert.equal(sources.length, 5);
+  t.mock.timers.tick(200);
+  assert.equal(sources.length, 6);
+});
+
+test('the last subscriber leaving cancels a pending reopen', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { sources, client } = setup();
+  const off = client.subscribe('run', () => {});
+  (sources[0] as FakeSource & { readyState: number }).readyState = 2;
+  sources[0].onerror?.({} as Event);
+  off();
+  t.mock.timers.tick(60000);
+  assert.equal(sources.length, 1);
+});

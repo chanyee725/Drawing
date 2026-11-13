@@ -1,12 +1,23 @@
 // One shared /api/events connection. It opens when the first subscriber arrives and closes when the last one leaves.
-// Reconnecting after a drop is the browser's own EventSource behaviour; nothing here retries.
+// A plain network drop is retried by the browser's own EventSource. A non-200 answer (404, 502 from a restarting
+// server) closes the EventSource for good, so then this client opens a new one after a growing delay.
 
 type Source = {
   addEventListener(type: string, fn: (e: Event) => void): void;
   close(): void;
   onopen: ((e: Event) => void) | null;
   onerror: ((e: Event) => void) | null;
+  /** 2 (CLOSED) means the browser gave up and will not retry by itself. */
+  readyState?: number;
 };
+
+export interface RetryOptions {
+  /** First delay before reopening a closed stream, doubled each failed try up to `maxMs`. */
+  baseMs?: number;
+  maxMs?: number;
+}
+
+const CLOSED = 2;
 
 export interface EventsClient {
   /** Calls `fn` with the raw `data` of each event of `type`. Returns the unsubscribe function. */
@@ -20,9 +31,13 @@ export interface EventsClient {
   onConnection(fn: (online: boolean) => void): () => void;
 }
 
-export function createEventsClient(open: () => Source | null): EventsClient {
+export function createEventsClient(open: () => Source | null, retry: RetryOptions = {}): EventsClient {
+  const baseMs = retry.baseMs ?? 1000;
+  const maxMs = retry.maxMs ?? 30000;
   let es: Source | null = null;
   let isOpen = false;
+  let attempt = 0;
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const handlers = new Map<string, Set<(data: string) => void>>();
   const watchers = new Set<(online: boolean) => void>();
   const wired = new Set<string>();
@@ -38,27 +53,46 @@ export function createEventsClient(open: () => Source | null): EventsClient {
     });
   };
 
+  const drop = () => {
+    es?.close();
+    es = null;
+    isOpen = false;
+    wired.clear();
+  };
+
   const ensure = () => {
-    if (es) return;
-    es = open();
-    if (!es) return;
-    es.onopen = () => {
+    if (es || timer) return;
+    const src = open();
+    if (!src) return;
+    es = src;
+    src.onopen = () => {
+      if (es !== src) return;
+      attempt = 0;
       isOpen = true;
       for (const fn of [...watchers]) fn(true);
     };
-    es.onerror = () => {
+    src.onerror = () => {
+      if (es !== src) return;
       isOpen = false;
       for (const fn of [...watchers]) fn(false);
+      if (src.readyState !== CLOSED) return;
+      drop();
+      const delay = Math.min(baseMs * 2 ** attempt, maxMs);
+      attempt++;
+      timer = setTimeout(() => {
+        timer = null;
+        if (count() > 0) ensure();
+      }, delay);
     };
     for (const type of handlers.keys()) wire(type);
   };
 
   const release = () => {
-    if (count() > 0 || !es) return;
-    es.close();
-    es = null;
-    isOpen = false;
-    wired.clear();
+    if (count() > 0) return;
+    if (timer) clearTimeout(timer);
+    timer = null;
+    attempt = 0;
+    drop();
   };
 
   const subscribe = (type: string, fn: (data: string) => void) => {
