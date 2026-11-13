@@ -198,6 +198,8 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
       await page.locator(sel).click();
     };
     const open = async () => {
+      // The previous menu may still be playing its close animation; reopening now would race it (#218).
+      await page.getByRole('menu', { name: '내보내기' }).waitFor({ state: 'detached' });
       await page.keyboard.press('Control+e');
       await page.getByRole('menu', { name: '내보내기' }).waitFor();
     };
