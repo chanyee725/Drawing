@@ -41,10 +41,14 @@ test("static: no shell option is ever turned on", () => {
   assert.deepEqual(hits(/\bexecSync\b|(?<![.\w])exec\(/), []);
 });
 
-test("static: no other network modules, fetch only in mcp.js and the hook", () => {
+test("static: no other network modules, fetch only in mcp.js, the hook and the lock probe", () => {
   assert.deepEqual(hits(/["'](node:)?(https|net|tls|dgram|http2)["']/), []);
   assert.deepEqual(hits(/\b(http|https)\.(request|get)\(|new WebSocket\(|XMLHttpRequest/), []);
-  assert.deepEqual(hits(/\bfetch(Fn)?\(/), ["plugin/hooks/long-session.mjs", "server/dispatch/mcp.js"]);
+  assert.deepEqual(hits(/\bfetch(Fn)?\(/), ["plugin/hooks/long-session.mjs", "server/dispatch/mcp.js", "server/lock.js"]);
+  // The lock probe (E13) only ever asks 127.0.0.1: a fixed host, and one fetch built from it.
+  const lock = CODE.find(f => f.rel === "server/lock.js").text;
+  assert.match(lock, /^const HOST = '127\.0\.0\.1';$/m);
+  assert.deepEqual(lock.match(/\bfetch\([^,]*/g), ["fetch(`http://${HOST}:${port}${path}`"]);
   // Both refuse a DISPATCH_URL that is not this machine's loopback.
   for (const rel of ["plugin/hooks/long-session.mjs", "server/dispatch/mcp.js"]) {
     const text = CODE.find(f => f.rel === rel).text;
