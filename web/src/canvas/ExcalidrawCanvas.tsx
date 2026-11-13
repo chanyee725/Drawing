@@ -21,6 +21,7 @@ import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
 import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, liveFrames, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
+import { RunOverlay } from './RunOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE } from './cleanStyle';
@@ -86,6 +87,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // The picture each block shows, so a block whose code did not change is not rendered again.
   const picCache = useRef<PictureCache<BlockPicture>>(new Map());
   const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
+  // The run overlay reads pictures by the image's file id (a sharpened variant maps back to its base picture).
+  const pictureOf = useCallback((fileId: string) => sizes.current.get(baseFileId(fileId)), []);
   const wrap = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   const canvasRef = useRef(canvas);
@@ -746,6 +749,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           setEditing(b.id);
         }}
       />
+      {api && wrap.current && <RunOverlay api={api} wrap={wrap.current} pictureOf={pictureOf} hide={edit?.blockId ?? null} />}
       {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
         <LayoutEditOverlay
           layout={editBlock.layout}
