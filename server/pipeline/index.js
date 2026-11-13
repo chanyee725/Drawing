@@ -6,7 +6,7 @@
 //   store.data.pipelines[path] = { lead, state: 'plan' | 'running' | 'paused' | 'done', draftRevision,
 //                                  approvedRevision, approvedAt, runId, steps, links, pause?, carry?, doneAt? }
 // `steps` is the approved step ids and `links` maps a session id to its step. E27: `pause` is { by: 'limit' |
-// 'stop', at, resetAt? } while paused; `carry` is { from: runId, steps: [ids] } after 계획 다시 열기, the steps the
+// 'stop', at, resetAt? } while paused; `carry` is { from: runId, steps: [ids], results? } after 계획 다시 열기, the steps the
 // stopped run finished, so the next 시작하기 marks them done instead of running them again. The lead's draft plan (for the
 // "바뀐 점" list) is kept in memory only, so after a restart the list is empty.
 // E28: once the board closes every step the run ends `done`, the server writes the 완료 summary block into the
@@ -472,11 +472,13 @@ export async function setup(ctx) {
     if (!file) throw new StoreError(404, 'not found');
     const d = dispatch();
     const done = (e.steps ?? []).filter((id) => !openSteps(e).includes(id));
+    // How the board closed them, kept now: the next run only counts tasks closed after its own 시작하기.
+    const results = resultsOf(e);
     const runId = e.runId;
     if (runId) await quietly(recorder.endPaused(path, runId, 'stopped'));
     Object.assign(e, { state: 'plan', draftRevision: file.revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} });
     delete e.pause;
-    if (runId && done.length) e.carry = { from: runId, steps: done };
+    if (runId && done.length) e.carry = { from: runId, steps: done, results };
     else delete e.carry;
     drafts.set(path, file.plan);
     save();
@@ -500,7 +502,11 @@ export async function setup(ctx) {
     const old = await recorder.read(path, e.carry.from).catch(() => null);
     if (!old) return null;
     const steps = {};
-    for (const id of e.carry.steps) if (old.steps?.[id]) steps[id] = old.steps[id];
+    for (const id of e.carry.steps) {
+      if (!old.steps?.[id]) continue;
+      const result = e.carry.results?.[id];
+      steps[id] = result ? { ...old.steps[id], result } : old.steps[id];
+    }
     return { from: e.carry.from, steps };
   }
 

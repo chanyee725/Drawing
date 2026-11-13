@@ -143,7 +143,8 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
       for (const [id, old] of Object.entries(carry.steps ?? {})) {
         if (!record.steps[id] || !old || typeof old !== 'object') continue;
         const sessions = (Array.isArray(old.sessions) ? old.sessions : []).map(pickSession).filter((s) => s.sid);
-        record.steps[id] = { state: 'done', startedAt: old.startedAt ?? null, endedAt: old.endedAt ?? t, sessions, carried: carry.from };
+        const result = pickResult(old.result);
+        record.steps[id] = { state: 'done', startedAt: old.startedAt ?? null, endedAt: old.endedAt ?? t, sessions, carried: carry.from, ...(result && { result }) };
       }
       record.totals = totalsOf(record);
     }

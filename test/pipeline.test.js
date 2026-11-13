@@ -333,12 +333,14 @@ test('the limit guard pauses a running plan and resumes it after the reset; 이�
 test('계획 다시 열기 ends the stopped run and the next 시작하기 carries the finished steps over', { timeout: 60_000 }, async () => {
   const t = await start();
   try {
-    const { call, d, lead } = t;
+    const { call, d, lead, root } = t;
     const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     assert.equal((await call('POST', '/api/pipeline/reopen', { path })).status, 409); // running: stop first
     const mate = (await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: lead.id })).body.sessions[0];
-    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, stage: 'done' });
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, commit: head, stage: 'done' });
     await until(() => d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
+    await until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api')?.mergeCheck?.ok === true, 10_000);
     assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
 
     const re = await call('POST', '/api/pipeline/reopen', { path });
@@ -364,6 +366,16 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     assert.equal(next.steps.ui.state, 'pending');
     assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api/);
     assert.equal(d.store.data.pipelines[path].carry, undefined);
+
+    // The rest closes: the run ends done and the carried step keeps how the earlier run merged it.
+    for (const [step, title] of [['ui', '로그인 화면'], ['review', '리뷰']]) {
+      await call('POST', '/api/tasks', { lead: lead.id, title, step, commit: head, stage: 'done' });
+    }
+    await until(async () => (await statusOf(call, path)).state === 'done', 10_000);
+    const fin = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(fin.state, 'done');
+    assert.equal(fin.steps.api.result?.commit, head);
+    await until(() => JSON.parse(readFileSync(join(t.ws, path), 'utf8')).document.content[0]?.attrs?.id === 'run-summary', 10_000);
   } finally {
     await t.stop();
   }
