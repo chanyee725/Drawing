@@ -300,7 +300,7 @@ export function App() {
       const old = await api.historyVersion(p, id);
       await api.historySnapshot(p);
       const cur = await api.readFile(p);
-      await api.saveFile(p, { revision: cur.revision, title: old.title, document: old.document, canvas: old.canvas, blocks: old.blocks });
+      await api.saveFile(p, { revision: cur.revision, title: old.title, document: old.document, canvas: old.canvas, blocks: old.blocks, plan: old.plan });
       load(p, await api.readFile(p));
       void refreshTree();
       setStatus('이전 버전으로 되돌렸어요');

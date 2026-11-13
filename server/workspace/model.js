@@ -4,6 +4,8 @@
 
 // Block `layout` rules are shared with the web (a higher sub-format `v` is kept verbatim).
 import { cleanLayout, layoutProblem } from '../../shared/render/block-layout.ts';
+// Pipeline `plan` rules are shared with the web (a higher `plan.v` is kept verbatim).
+import { cleanPlan, planProblem } from '../../shared/dispatch/plan.ts';
 
 export const FILE_EXT = '.dpx.json';
 // 1: before the document editor (E6). 2: `document` is the editor's own content. Every write stores
@@ -11,7 +13,8 @@ export const FILE_EXT = '.dpx.json';
 // a file it has never opened with the document editor (and fill its document once).
 // 3: blocks may carry `layout` (node position overrides); an older server would drop it, so it must
 // treat v3 files as read-only.
-export const FORMAT_VERSION = 3;
+// 4: an optional top-level `plan` (pipeline steps, docs/design/dispatch-integration/2-file-format-and-live-overlay.md §3).
+export const FORMAT_VERSION = 4;
 
 export const emptyDocument = () => ({ type: 'doc', content: [] });
 export const emptyCanvas = () => ({ elements: [], appState: {} });
@@ -57,6 +60,13 @@ function normalizeBlock(b, i, lenient) {
   return out;
 }
 
+/** Validate a `plan` section; throws ValidationError. */
+export function normalizePlan(p, at = 'plan') {
+  const problem = planProblem(p, at);
+  if (problem) throw new ValidationError(problem);
+  return cleanPlan(p);
+}
+
 /** Validate client content (everything except `revision`, which the store owns). Missing sections get defaults. */
 export function normalizeContent(input, { lenient = false } = {}) {
   if (!isObj(input)) throw new ValidationError('body must be a JSON object');
@@ -79,7 +89,16 @@ export function normalizeContent(input, { lenient = false } = {}) {
     seen.add(nb.id);
     return nb;
   });
-  return { version: FORMAT_VERSION, title, document, canvas: { elements, appState }, blocks: outBlocks };
+  const out = { version: FORMAT_VERSION, title, document, canvas: { elements, appState }, blocks: outBlocks };
+  if (input.plan !== undefined && input.plan !== null) {
+    try {
+      out.plan = normalizePlan(input.plan);
+    } catch (e) {
+      // On read, a broken plan (hand-edited file) is left out so the drawing still opens.
+      if (!lenient || !(e instanceof ValidationError)) throw e;
+    }
+  }
+  return out;
 }
 
 /** Parse a file from disk; throws ValidationError when it is not a usable dpx file. */

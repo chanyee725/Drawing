@@ -75,6 +75,13 @@ export async function setup(ctx) {
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
       route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
+      // Step-level plan edit (agents): re-read under the store lock, then announced like an outside change so an
+      // open, clean tab reloads and a dirty one gets the 409 choice on its next save.
+      route('PATCH', '/api/file/plan', async (p, b) => {
+        const r = await store.patchPlan(need(p, 'path'), b);
+        ctx.hub.broadcast('workspace', { kind: 'change', path: r.path, revision: r.revision });
+        return r;
+      }),
       route('DELETE', '/api/file', (p) => store.removeFile(need(p, 'path'))),
       route('POST', '/api/folder', (_p, b) => store.createFolder(need(b?.path, 'path')), 201),
       route('DELETE', '/api/folder', (p) => store.removeFolder(need(p, 'path'))),

@@ -3,7 +3,10 @@
 export type { BlockLayout } from '../../shared/render/block-layout.ts';
 import type { BlockLayout } from '../../shared/render/block-layout.ts';
 // Newest file format this web build understands; a 422 on a file above it means a newer app wrote it.
-export const FILE_FORMAT_VERSION = 3;
+export const FILE_FORMAT_VERSION = 4;
+// Pipeline steps (format v4). The web only carries it through saves for now; docs/workspace-api.md "Pipeline `plan`".
+export type { Plan, PlanStep } from '../../shared/dispatch/plan.ts';
+import type { Plan } from '../../shared/dispatch/plan.ts';
 export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout };
 export type DpxFile = {
   version: number;
@@ -11,11 +14,15 @@ export type DpxFile = {
   document: unknown;
   canvas: unknown;
   blocks: Block[];
+  /** Present only in pipeline files. Saves send it back unchanged. */
+  plan?: Plan;
   revision: number;
 };
 export type TreeNode =
   | { type: 'folder'; name: string; path: string; children: TreeNode[] }
-  | { type: 'file'; name: string; path: string; title: string; revision: number | null };
+  | { type: 'file'; name: string; path: string; title: string; revision: number | null; pipeline?: PipelineMark };
+/** Tree mark of a pipeline file. Only `plan` (draft) exists until runs are recorded (E21). */
+export type PipelineMark = { state: 'plan' };
 
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
 export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
@@ -53,8 +60,10 @@ export const api = {
   info: () => call<{ workspace: string }>('GET', '/api/info'),
   tree: () => call<{ tree: TreeNode[] }>('GET', '/api/tree').then((r) => r.tree),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
-  createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
-  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>
+  /** `content`: starting document, canvas, blocks and plan (a template); defaults to an empty file. */
+  createFile: (path: string, title: string, content?: Partial<Pick<DpxFile, 'document' | 'canvas' | 'blocks' | 'plan'>>) =>
+    call<DpxFile>('POST', '/api/file', { ...content, path, title }),
+  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks' | 'plan'>, keepalive = false) =>
     call<DpxFile>('PUT', `/api/file${q(path)}`, f, keepalive),
   removeFile: (path: string) => call<unknown>('DELETE', `/api/file${q(path)}`),
   createFolder: (path: string) => call<unknown>('POST', '/api/folder', { path }),
