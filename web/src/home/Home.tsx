@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input';
 import { Kbd } from '../components/ui/kbd';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { DocList } from './DocList';
-import { CHORD_MS, ROW_HEIGHT, allDocs, chord, filterDocs, flattenRows, matchesQuery, relativeTime, type DashTab } from './model';
+import { CHORD_MS, ROW_HEIGHT, allDocs, chord, recentFiles, filterDocs, flattenRows, matchesQuery, relativeTime, type DashTab } from './model';
 
 export type CreateKind = 'doc' | 'canvas' | 'plan' | 'template';
 export type HomeProps = {
@@ -25,15 +25,14 @@ export type HomeProps = {
 
 function useProjects(version: unknown) {
   const [data, setData] = useState<ProjectsResponse | null>(null);
-  const [recent, setRecent] = useState<RecentFile[]>([]);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     let live = true;
-    Promise.all([projectsApi.projects(), projectsApi.recent(20)])
-      .then(([d, r]) => {
+    projectsApi
+      .projects()
+      .then((d) => {
         if (!live) return;
         setData(d);
-        setRecent(r);
         setFailed(false);
       })
       .catch(() => live && setFailed(true));
@@ -41,6 +40,7 @@ function useProjects(version: unknown) {
       live = false;
     };
   }, [version]);
+  const recent = useMemo<RecentFile[]>(() => (data ? recentFiles(data.projects, data.unfiled) : []), [data]);
   return { data, recent, failed };
 }
 

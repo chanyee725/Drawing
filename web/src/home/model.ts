@@ -1,5 +1,5 @@
 // Pure data helpers for the dashboard and project home (no React).
-import type { ProjectDoc, ProjectInfo } from '../api';
+import type { ProjectDoc, ProjectInfo, RecentFile } from '../api';
 
 export type DashTab = 'all' | 'recent' | 'projects' | 'unfiled';
 export type Row = { doc: ProjectDoc; depth: number; /** Number of sub-docs below (all levels). */ subs: number; expandable: boolean; expanded: boolean };
@@ -58,3 +58,11 @@ export const CHORD_MS = 1000;
 /** Spec: rows are 41px tall, sub-docs indent 24px per level. */
 export const ROW_HEIGHT = 41;
 export const INDENT = 24;
+
+/** Newest-edited documents first (computed here: the server has no recent-files route). */
+export function recentFiles(projects: ProjectInfo[], unfiled: ProjectDoc[], limit = 20): RecentFile[] {
+  return allDocs(projects, unfiled)
+    .map(({ doc, project }) => ({ path: doc.path, title: doc.title, project: project?.name ?? null, parent: null, createdAt: doc.createdAt, modifiedAt: doc.modifiedAt }))
+    .sort((a, b) => b.modifiedAt - a.modifiedAt)
+    .slice(0, limit);
+}
