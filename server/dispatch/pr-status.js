@@ -4,6 +4,7 @@
 // Per-workspace switch: <workspace>/.drawing/settings.json { "prStatus": false } turns it off
 // (default on). Off, or a missing gh, never throws: the result says why.
 import { lstat, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { runCli } from "./cli.js";
 import { ensureDirInside } from "../lock.js";
@@ -37,6 +38,11 @@ export async function prTrackingEnabled(workspaceDir) {
   try { return (await readSettings(workspaceDir)).prStatus !== false; } catch { return true; }
 }
 
+/** Like prTrackingEnabled, but throws (code ESETTINGS) when settings.json is not a valid JSON object. */
+export async function readPrTracking(workspaceDir) {
+  return (await readSettings(workspaceDir)).prStatus !== false;
+}
+
 /**
  * Turns PR tracking on or off for a workspace folder; other settings in the file stay.
  * Refuses (throws, code ESETTINGS) when settings.json is not a valid JSON object, instead of overwriting it.
@@ -51,7 +57,7 @@ export async function setPrTracking(workspaceDir, on) {
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = `${file}.${randomUUID()}.tmp`;
   try {
     await writeFile(tmp, JSON.stringify({ ...cur, prStatus: !!on }, null, 2) + "\n", { flag: "wx" });
     await rename(tmp, file);
