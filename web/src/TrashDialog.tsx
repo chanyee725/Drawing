@@ -1,6 +1,8 @@
 // Recently deleted files (kept 30 days) with a "restore" button each. The server puts a file back at its old path.
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError, type TrashItem } from './api';
+import { Button } from './components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './components/ui/dialog';
 
 type Props = {
   onClose: () => void;
@@ -35,12 +37,6 @@ export function TrashDialog({ onClose, onRestored }: Props) {
     void load();
     closeRef.current?.focus();
   }, []);
-  // Esc closes from anywhere: after a restore the clicked button is gone and focus would fall to the page.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !e.defaultPrevented && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const restore = async (item: TrashItem) => {
     if (busy) return;
@@ -59,62 +55,43 @@ export function TrashDialog({ onClose, onRestored }: Props) {
     }
   };
 
+  const hint = 'px-4 py-2 text-sm text-muted-foreground';
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgb(0 0 0 / 0.3)' }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="최근에 지운 파일"
-        className="flex h-[min(32rem,calc(100%-2rem))] w-[min(36rem,100%)] flex-col overflow-hidden rounded-lg border shadow-xl"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-      >
-        <div className="flex items-center gap-2 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
-          <h2 className="mr-auto font-medium">최근에 지운 파일</h2>
-          <button ref={closeRef} type="button" className="h-7 rounded-md border px-3 text-sm" style={{ borderColor: 'var(--border)' }} onClick={onClose}>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent aria-label="최근에 지운 파일" aria-describedby="trash-note" className="h-[min(32rem,calc(100%-2rem))] w-[min(36rem,calc(100%-2rem))] max-w-none">
+        <DialogHeader>
+          <DialogTitle className="mr-auto">최근에 지운 파일</DialogTitle>
+          <Button ref={closeRef} variant="outline" size="sm" onClick={onClose}>
             닫기
-          </button>
-        </div>
-        <p className="px-4 py-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+          </Button>
+        </DialogHeader>
+        <DialogDescription id="trash-note" className="px-4 py-2">
           지운 파일은 30일 동안 보관해요. 버전 기록도 함께 돌아와요.
-        </p>
+        </DialogDescription>
         {message && (
-          <p role="alert" className="px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+          <p role="alert" className="bg-brand-soft px-4 py-2 text-sm">
             {message}
           </p>
         )}
-        <ul className="min-h-0 flex-1 overflow-auto" aria-label="지운 파일">
-          {items === null && (
-            <li className="px-4 py-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-              불러오는 중이에요…
-            </li>
-          )}
-          {items?.length === 0 && (
-            <li className="px-4 py-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-              최근에 지운 파일이 없어요
-            </li>
-          )}
+        <ul className="min-h-0 flex-1 overflow-auto border-t p-1.5" aria-label="지운 파일">
+          {items === null && <li className={hint}>불러오는 중이에요…</li>}
+          {items?.length === 0 && <li className={hint}>최근에 지운 파일이 없어요</li>}
           {items?.map((i) => (
-            <li key={i.id} className="flex items-center gap-2 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+            <li key={i.id} className="flex items-center gap-2 rounded-md px-2.5 py-1.5 hover:bg-accent">
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm" title={label(i.path)}>
                   {label(i.path)}
                 </div>
-                <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {when(i.deletedAt)}에 지웠어요
-                </div>
-                {i.fromSnapshot && (
-                  <div className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                    앱 밖에서 지워서 마지막 버전 기록으로 돌아와요. 마지막으로 저장한 내용보다 오래됐을 수 있어요
-                  </div>
-                )}
+                <div className="text-xs text-muted-foreground tabular-nums">{when(i.deletedAt)}에 지웠어요</div>
+                {i.fromSnapshot && <div className="text-xs text-muted-foreground">앱 밖에서 지워서 마지막 버전 기록으로 돌아와요. 마지막으로 저장한 내용보다 오래됐을 수 있어요</div>}
               </div>
-              <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-brand-foreground disabled:opacity-50" style={{ background: 'var(--brand)' }}>
+              <Button size="sm" className="shrink-0" disabled={busy !== null} onClick={() => void restore(i)}>
                 {busy === i.id ? '되살리는 중이에요…' : '되살리기'}
-              </button>
+              </Button>
             </li>
           ))}
         </ul>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

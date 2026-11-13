@@ -1,7 +1,9 @@
 // Server-Sent Events hub shared by all modules: hub.broadcast(event, data).
+// hub.onAttach(fn) runs fn(sendTo) for each new client, so a module can send it a first snapshot.
 
 export function createHub() {
   const clients = new Set();
+  const attachers = [];
 
   function attach(req, res) {
     res.writeHead(200, {
@@ -11,6 +13,15 @@ export function createHub() {
     });
     res.write(': connected\n\n');
     clients.add(res);
+    const sendTo = (event, data) => {
+      if (clients.has(res)) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+    for (const fn of attachers) {
+      // One module's failing snapshot must not drop the stream or the other modules' snapshots.
+      Promise.resolve()
+        .then(() => fn(sendTo))
+        .catch((err) => console.error('sse attach failed:', err?.code ?? err?.name));
+    }
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     req.on('close', () => {
       clearInterval(ping);
@@ -28,5 +39,9 @@ export function createHub() {
     clients.clear();
   }
 
-  return { attach, broadcast, closeAll, get size() { return clients.size; } };
+  function onAttach(fn) {
+    attachers.push(fn);
+  }
+
+  return { attach, broadcast, closeAll, onAttach, get size() { return clients.size; } };
 }

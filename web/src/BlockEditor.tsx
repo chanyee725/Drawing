@@ -12,15 +12,16 @@ import { dslCompletionSource } from './dsl/completion';
 type Props = { code: string; type: string; dark: boolean; onChange: (code: string) => void };
 
 const baseTheme = EditorView.theme({
-  '&': { fontSize: '13px', background: 'var(--surface)', color: 'var(--text)' },
-  '.cm-content': { fontFamily: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace', caretColor: 'var(--brand)' },
-  '.cm-gutters': { background: 'var(--elevated)', color: 'var(--text-muted)', border: 'none' },
+  '&': { fontSize: '12.5px', background: 'var(--muted)', color: 'var(--foreground)' },
+  '.cm-content': { fontFamily: 'var(--font-mono)', caretColor: 'var(--brand)', padding: '6px 0' },
+  '.cm-gutters': { background: 'transparent', color: 'var(--text-4)', border: 'none' },
   '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--brand-soft)' },
-  '&.cm-focused': { outline: '2px solid var(--brand)' },
+  '&.cm-focused': { outline: 'none' },
   '.cm-scroller': { minHeight: '8rem' },
-  '.cm-tooltip.cm-tooltip-autocomplete': { background: 'var(--elevated)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px' },
-  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--brand-soft)', color: 'var(--text)' },
-  '.cm-completionDetail': { color: 'var(--text-muted)', marginLeft: '0.75em', fontStyle: 'normal' },
+  '.cm-tooltip.cm-tooltip-autocomplete': { background: 'var(--popover)', color: 'var(--popover-foreground)', border: 'none', borderRadius: '8px', boxShadow: 'var(--shadow-pop)', padding: '4px' },
+  '.cm-tooltip-autocomplete ul li': { borderRadius: '4px', padding: '2px 6px' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { background: 'var(--brand-soft)', color: 'var(--foreground)' },
+  '.cm-completionDetail': { color: 'var(--muted-foreground)', marginLeft: '0.75em', fontStyle: 'normal' },
 });
 
 export function BlockEditor({ code, type, dark, onChange }: Props) {
@@ -90,5 +91,5 @@ export function BlockEditor({ code, type, dark, onChange }: Props) {
     if (v && v.state.doc.toString() !== code) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: code } });
   }, [code]);
 
-  return <div ref={host} className="overflow-hidden rounded-md border" style={{ borderColor: 'var(--border)' }} />;
+  return <div ref={host} className="overflow-hidden rounded-md border border-input transition-[border-color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50" />;
 }

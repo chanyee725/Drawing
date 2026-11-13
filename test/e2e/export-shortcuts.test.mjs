@@ -177,6 +177,7 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     const menu = page.getByRole('menu', { name: '내보내기' });
     await menu.waitFor();
     assert.match(await menu.innerText(), /캔버스 전체/);
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-export')), 'svg', 'Ctrl+E focuses the first export action, not an option pill');
     const svg = await downloadVia('svg');
     assert.equal(svg.name, 'E7 내보내기.svg');
     const text = svg.data.toString('utf8');

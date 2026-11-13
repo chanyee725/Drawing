@@ -1,0 +1,252 @@
+// The Dispatch module inside Drawing (E11): routes adapter, one SSE stream, write header, isolation.
+// Runs against a scratch git repo with one commit in a temp dir; no agent CLI is started.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from '../../server/app.js';
+import * as workspace from '../../server/workspace/index.js';
+import * as dispatch from '../../server/dispatch/index.js';
+
+function scratchRepo() {
+  const root = mkdtempSync(join(tmpdir(), 'drawing-e11-'));
+  const git = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'develop');
+  git('config', 'user.name', 'test');
+  git('config', 'user.email', 'test@example.invalid');
+  writeFileSync(join(root, 'README.md'), 'scratch\n');
+  git('add', '.');
+  git('commit', '-qm', 'init');
+  const ws = join(root, 'pipelines');
+  mkdirSync(ws);
+  return { root, ws };
+}
+
+function fakeDeps(dir) {
+  const calls = { providerStatus: 0, codexModels: 0, login: 0 };
+  return {
+    calls,
+    deps: {
+      limitsFile: join(dir, 'limits.json'),
+      providerStatus: async () => {
+        calls.providerStatus++;
+        const p = { installed: true, connected: true, busy: false, url: null, error: null };
+        return { claude: { ...p }, openai: { ...p }, gemini: { ...p } };
+      },
+      codexModels: async () => { calls.codexModels++; return []; },
+      login: () => { calls.login++; },
+      logout: async () => {},
+      cancelLogin: () => {},
+    },
+  };
+}
+
+async function start(ws, deps) {
+  const moduleList = [
+    { name: 'workspace', setup: workspace.setup },
+    { name: 'dispatch', setup: (ctx) => dispatch.setup(ctx, deps) },
+  ];
+  const pub = mkdtempSync(join(tmpdir(), 'drawing-e11-pub-'));
+  writeFileSync(join(pub, 'index.html'), '<!doctype html>');
+  const app = await createApp({ workspaceDir: ws }, { publicDir: pub, moduleList });
+  await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${app.server.address().port}`;
+  const stop = async () => { await app.close(); rmSync(pub, { recursive: true, force: true }); };
+  return { app, base, stop };
+}
+
+const W = { 'content-type': 'application/json', 'x-drawing': '1' };
+
+/** Reads SSE events from /api/events until `until(events)` is true. */
+async function sse(base, until, timeout = 5000) {
+  const ctrl = new AbortController();
+  const res = await fetch(`${base}/api/events`, { signal: ctrl.signal });
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  const events = [];
+  let buf = '';
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  const done = (async () => {
+    try {
+      while (!until(events)) {
+        const { value, done: end } = await reader.read();
+        if (end) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const chunk = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          const ev = /^event: (.*)$/m.exec(chunk)?.[1];
+          const data = /^data: (.*)$/m.exec(chunk)?.[1];
+          if (ev) events.push({ event: ev, data: JSON.parse(data) });
+        }
+      }
+    } catch { /* aborted */ }
+    clearTimeout(timer);
+    ctrl.abort();
+    return events;
+  })();
+  return { done };
+}
+
+test('dispatch module: state, one SSE stream with a first snapshot, task events, no CLI started', async () => {
+  const { root, ws } = scratchRepo();
+  const { calls, deps } = fakeDeps(root);
+  const { app, base, stop } = await start(ws, deps);
+  try {
+    const state = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(state.project.branch, 'develop');
+    assert.equal(state.providers.claude.connected, false);
+    assert.equal(state.providers.claude.installed, null, 'not checked before the user connects a provider');
+    assert.ok(state.models.some((m) => m.id === 'claude-haiku-5-5'));
+
+    // Hub gets the real port through the getter.
+    assert.equal(app.ctx.modules.dispatch.hub.port, app.server.address().port);
+
+    const stream = await sse(base, (evs) => evs.some((e) => e.event === 'tasks'));
+    await new Promise((r) => setTimeout(r, 100));
+    const created = await fetch(`${base}/api/tasks`, { method: 'POST', headers: W, body: JSON.stringify({ title: 'first step' }) });
+    assert.equal(created.status, 200);
+    const events = await stream.done;
+    assert.equal(events[0].event, 'snapshot', 'the snapshot comes first');
+    assert.equal(events[0].data.project.branch, 'develop');
+    assert.ok(events.find((e) => e.event === 'tasks').data.some((t) => t.title === 'first step'));
+
+    // Drawing's own routes still answer next to Dispatch's.
+    assert.equal((await fetch(`${base}/api/tree`)).status, 200);
+    assert.equal(calls.providerStatus, 0, 'no provider status check before connect');
+    assert.equal(calls.codexModels, 0);
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('dispatch writes need x-drawing: 1 or x-dispatch: 1', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { base, stop } = await start(ws, deps);
+  try {
+    const body = JSON.stringify({ title: 't' });
+    const json = { 'content-type': 'application/json' };
+    assert.equal((await fetch(`${base}/api/tasks`, { method: 'POST', headers: json, body })).status, 403);
+    assert.equal((await fetch(`${base}/api/tasks`, { method: 'POST', headers: { ...json, 'x-drawing': '1' }, body })).status, 200);
+    assert.equal((await fetch(`${base}/api/tasks`, { method: 'POST', headers: { ...json, 'x-dispatch': '1' }, body })).status, 200);
+    assert.equal((await fetch(`${base}/api/tasks`, { method: 'POST', headers: { ...json, 'x-drawing': '0' }, body })).status, 403);
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('removed routes: no API-key login, no cross-project probing', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { base, stop } = await start(ws, deps);
+  try {
+    const key = await fetch(`${base}/api/providers/openai/key`, { method: 'POST', headers: W, body: JSON.stringify({ key: 'x' }) });
+    assert.equal(key.status, 404);
+    const { projects } = await (await fetch(`${base}/api/projects`)).json();
+    assert.equal(projects.length, 1);
+    assert.equal(projects[0].current, true);
+    const all = await (await fetch(`${base}/api/usage/all`)).json();
+    assert.equal(all.projects.length, 1);
+    assert.equal(all.projects[0].days.length, 14);
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a failing dispatch call answers { error } and leaves drawing routes working', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { app, base, stop } = await start(ws, deps);
+  try {
+    const miss = await fetch(`${base}/api/sessions/nope/diff`);
+    assert.equal(miss.status, 404);
+    assert.equal((await miss.json()).error, '세션이 없어요');
+    const empty = await fetch(`${base}/api/sessions/nope/message`, { method: 'POST', headers: W, body: JSON.stringify({ text: ' ' }) });
+    assert.equal(empty.status, 400);
+    const bad = await fetch(`${base}/api/tasks`, { method: 'POST', headers: W, body: '{' });
+    assert.equal(bad.status, 400);
+    // A Hub method that throws something unexpected is still a JSON error, not a dead server.
+    app.ctx.modules.dispatch.hub.timeline = () => { throw new Error('boom'); };
+    assert.equal((await fetch(`${base}/api/timeline`)).status, 400);
+
+    const put = await fetch(`${base}/api/file`, { method: 'POST', headers: W, body: JSON.stringify({ path: 'a.dpx.json' }) });
+    assert.equal(put.status, 201);
+    assert.equal((await fetch(`${base}/api/file?path=a.dpx.json`)).status, 200);
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('connecting a provider checks the CLI only then; it stays off until the user connects', async () => {
+  const { root, ws } = scratchRepo();
+  const { calls, deps } = fakeDeps(root);
+  const { base, stop } = await start(ws, deps);
+  try {
+    const res = await (await fetch(`${base}/api/providers/claude/login`, { method: 'POST', headers: W, body: '{}' })).json();
+    assert.deepEqual(res, { ok: true, connected: true });
+    assert.ok(calls.providerStatus >= 1);
+    const state = await (await fetch(`${base}/api/state`)).json();
+    assert.equal(state.providers.claude.connected, true);
+    assert.equal(state.providers.openai.connected, false, 'logged in on the machine is not connected here');
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('state goes to <project>/.dispatch/state.json only: nothing in the workspace, no transcripts', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { base, stop } = await start(ws, deps);
+  await fetch(`${base}/api/prefs`, { method: 'POST', headers: W, body: JSON.stringify({ theme: 'dark' }) });
+  await stop();
+  try {
+    assert.deepEqual(readdirSync(join(root, '.dispatch')).sort(), ['state.json']);
+    assert.equal(existsSync(join(ws, '.dispatch')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('outside a git project the dispatch module is off and drawing still works', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e11-nogit-'));
+  const { deps } = fakeDeps(dir);
+  const { app, base, stop } = await start(dir, deps);
+  try {
+    assert.deepEqual(app.ctx.modules.dispatch, {});
+    assert.equal((await fetch(`${base}/api/state`)).status, 404);
+    assert.equal((await fetch(`${base}/api/tree`)).status, 200);
+    assert.equal(existsSync(join(dir, '.dispatch')), false);
+  } finally {
+    await stop();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('the only path both modules answer is none: Dispatch paths do not shadow drawing paths', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { app, stop } = await start(ws, deps);
+  try {
+    const drawing = app.ctx.modules.workspace.routes;
+    const disp = app.ctx.modules.dispatch.routes;
+    for (const d of drawing) {
+      for (const x of disp) {
+        const hit = x.method === d.method && (x.path instanceof RegExp ? x.path.test(d.path) : x.path === d.path);
+        assert.equal(hit, false, `${d.method} ${d.path}`);
+      }
+    }
+    assert.ok(!disp.some((x) => x.path instanceof RegExp && x.path.test('/api/events')), '/api/events is the shared stream');
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
