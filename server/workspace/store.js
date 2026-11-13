@@ -707,10 +707,14 @@ export function createStore(
    * `type` is 'file' | 'folder'. Without it a file wins: `from` is tried as a file
    * (extension optional) first, then as a folder.
    */
-  async function move(from, to, type) {
+  async function move(from, to, type, { withSubdocs = false } = {}) {
     parseOrThrow(from);
     parseOrThrow(to);
     if (type !== undefined && type !== 'file' && type !== 'folder') throw new StoreError(400, 'type must be "file" or "folder"');
+    if (withSubdocs) {
+      if (type !== 'file') throw new StoreError(400, 'withSubdocs needs type "file"');
+      return serial(() => moveWithSubdocs(from, to));
+    }
     return serial(async () => {
       if (type !== 'folder') {
         const fileFrom = checkedFileRel(from);
@@ -724,6 +728,37 @@ export function createStore(
       if (!st?.isDirectory()) throw new StoreError(404, 'not found');
       return moved(from, await moveFolder(from, fromAbs, to));
     });
+  }
+
+  // A document and its sub-documents folder (`X/` next to `X.dpx.json`) move as one: both targets are checked
+  // before anything moves, and the file goes back if the folder move still fails.
+  async function moveWithSubdocs(from, to) {
+    const fileFrom = checkedFileRel(from);
+    const fileTo = checkedFileRel(to);
+    const fromAbs = await wrapPath(fileFrom);
+    if (!(await statOrNull(fromAbs))?.isFile()) throw new StoreError(404, 'not found');
+    const subFrom = fileFrom.slice(0, -FILE_EXT.length);
+    const subTo = fileTo.slice(0, -FILE_EXT.length);
+    const subAbs = await wrapPath(subFrom);
+    const hasSub = (await statOrNull(subAbs))?.isDirectory();
+    if (hasSub && (subTo === subFrom || subTo.startsWith(subFrom + '/'))) throw new StoreError(400, 'cannot move a folder into itself');
+    // A folder already named like the new document would become its sub-documents (an unrelated group taken over),
+    // so the move is refused even when the document has no sub-documents of its own.
+    const subToAbs = await wrapPath(subTo).catch((err) => {
+      throw asParentClash(err);
+    });
+    if (await statOrNull(subToAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    if (!hasSub) return moved(from, await moveFile(fileFrom, fromAbs, fileTo));
+    checkFolderNames(subTo.split('/'));
+    const result = await moveFile(fileFrom, fromAbs, fileTo);
+    try {
+      await moveFolder(subFrom, subAbs, subTo);
+    } catch (err) {
+      await moveFile(fileTo, await wrapPath(fileTo), fileFrom).catch(() => {});
+      throw err;
+    }
+    moved(subFrom, { path: subTo });
+    return moved(from, result);
   }
 
   // A move or rename through the API tells other tabs where the thing went; `from` is the path as the caller wrote it.
@@ -786,17 +821,47 @@ export function createStore(
     tombstones.delete(rel);
   }
 
-  async function removeFile(rel) {
+  // Remove the empty folders under (and including) absDir, deepest first; anything still holding a file stays.
+  // Returns the rel paths of the folders it removed. Symlinks are never followed.
+  async function pruneEmptyDirs(absDir, relDir) {
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const removed = [];
+    for (const e of entries) if (e.isDirectory()) removed.push(...(await pruneEmptyDirs(join(absDir, e.name), `${relDir}/${e.name}`)));
+    if (await rmdir(absDir).then(() => true, () => false)) removed.push(relDir); // fails (ENOTEMPTY) when something stays
+    return removed;
+  }
+
+  // withSubdocs: the document's sub-documents (`.dpx.json` files under `X/`, next to `X.dpx.json`) go to the trash
+  // with it. Only those files are removed: anything else under X/ (notes, images, hidden files) cannot be kept in
+  // the trash, so it stays where it is, with the folders that hold it. Folders left empty are removed.
+  async function removeFile(rel, { withSubdocs = false } = {}) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
+    const subRel = rel.slice(0, -FILE_EXT.length);
+    const subAbs = withSubdocs ? await wrapPath(subRel) : null;
     return serial(async () => {
       const st = await statOrNull(abs);
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
       const text = await readFile(abs, 'utf8').catch(() => null);
+      const sub = subAbs && (await statOrNull(subAbs))?.isDirectory() ? await collectFiles(subAbs, subRel) : null;
       await unlink(abs);
       forget(rel, false);
-      await trashQuietly(rel, text);
+      if (sub) {
+        for (const f of sub) {
+          await unlink(join(subAbs, f.rel.slice(subRel.length + 1)));
+          forget(f.rel, false);
+        }
+        for (const d of await pruneEmptyDirs(subAbs, subRel)) knownDirs.delete(d);
+        await trashMany([[rel, text], ...sub.map((f) => [f.rel, f.text])]);
+        for (const f of sub) await dropHistory(f.rel);
+      } else await trashQuietly(rel, text);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
+      if (sub) onExternalChange?.({ kind: 'tree', path: subRel, from: subRel });
       return { path: rel };
     });
   }

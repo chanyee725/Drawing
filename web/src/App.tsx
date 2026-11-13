@@ -8,6 +8,7 @@ import { Home, type CreateKind } from './home/Home';
 import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
 import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
+import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -418,10 +419,12 @@ export function App() {
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
   const ownMoves = useRef(new Set<string>());
   // `title`: a renamed file takes the new name as its title too, because the sidebar shows the title.
-  const move = async (n: TreeNode, to: string, title?: string): Promise<boolean> => {
+  // `sub`: a document's sub-documents folder that moves along in the same request (sidebar drag, 옮기기 menu).
+  const move = async (n: TreeNode, to: string, title?: string, sub?: { from: string; to: string }): Promise<boolean> => {
     const from = n.path;
-    ownMoves.current.add(from);
-    setTimeout(() => ownMoves.current.delete(from), 5000);
+    const echoes = sub ? [from, sub.from] : [from];
+    for (const x of echoes) ownMoves.current.add(x);
+    setTimeout(() => echoes.forEach((x) => ownMoves.current.delete(x)), 5000);
     let readFailed = false;
     let release = () => {};
     try {
@@ -429,9 +432,11 @@ export function App() {
       // An edit made while the (possibly slow) move runs must not be saved to the old path. Only the open
       // file (or the folder holding it) needs this: holding for an unrelated move would also skip the save on tab close.
       const open = session.getState().path;
-      if (open && (open === from || (n.type === 'folder' && open.startsWith(`${from}/`)))) release = session.hold();
-      const r = await api.move(from, to, n.type);
-      const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
+      const under = (dir: string) => !!open && open.startsWith(`${dir}/`);
+      if (open && (open === from || (n.type === 'folder' && under(from)) || (sub && under(sub.from)))) release = session.hold();
+      const r = await api.move(from, to, n.type, !!sub);
+      const now = session.getState().path;
+      const next = pathAfterMove(now, from, (r as { path?: string }).path ?? to, n.type) ?? (sub ? pathAfterMove(now, sub.from, sub.to, 'folder') : null);
       if (next) {
         // The revision is re-read: a name that was deleted before makes the server raise it.
         const fresh = await api.readFile(next).catch(() => null);
@@ -452,7 +457,7 @@ export function App() {
       if (readFailed) setError('옮겼어요. 다만 파일을 다시 읽지 못했어요. 저장이 안 되면 화면을 새로 고쳐 주세요');
       return true;
     } catch (e) {
-      ownMoves.current.delete(from);
+      for (const x of echoes) ownMoves.current.delete(x);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
       return false;
     } finally {
@@ -469,24 +474,39 @@ export function App() {
     if (problem) return setError(problem);
     const to = renameTarget(n, name);
     if (!to) return;
-    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined);
-    if (ok && n.type === 'file' && 'children' in entry && entry.children.length) {
-      const sub = subFolderOf(n.path);
-      await move({ type: 'folder', name: sub.split('/').pop() ?? sub, path: sub, children: [] }, subFolderOf(to));
-    }
+    // One request for a document: the server checks both targets first, so a taken sub-documents name refuses
+    // the whole rename instead of leaving the sub-documents behind. An empty `X/` moves along too.
+    const sub = n.type === 'file' ? { from: subFolderOf(n.path), to: subFolderOf(to) } : undefined;
+    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined, sub);
     if (ok && section.kind === 'project' && section.path === n.path) setSection({ kind: 'project', path: to });
+  };
+
+  // Drag or 옮기기 menu in the sidebar: a document or group into a project or group. Resolves true when it moved.
+  const moveEntry = async (item: MoveItem, dir: string): Promise<boolean> => {
+    const to = moveTarget(item, dir);
+    if (!to) return false;
+    const n: TreeNode = item.kind === 'doc' ? { type: 'file', name: item.path.split('/').pop() ?? item.path, path: item.path, title: '', revision: null } : { type: 'folder', name: item.label, path: item.path, children: [] };
+    return move(n, to, undefined, subdocsMove(item, to) ?? undefined);
   };
 
   const remove = async (entry: DocNode | Project) => {
     const n = asTreeNode(entry);
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
+    const subdocs = n.type === 'file' && 'children' in entry && entry.children.length > 0;
+    const keep =
+      n.type === 'folder'
+        ? "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요."
+        : subdocs
+          ? "하위 문서도 함께 지워져요. 30일 동안은 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요."
+          : "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.";
     if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
     removing.current = n.path;
     try {
-      if (n.type === 'file') await api.removeFile(n.path);
+      // A document's sub-documents folder (`X/`, even an empty one) goes with it, so it never lingers as a group.
+      if (n.type === 'file') await api.removeFile(n.path, true);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
+      const gone = n.type === 'file' ? subFolderOf(n.path) : n.path;
+      if (path && (path === n.path || path.startsWith(`${gone}/`))) closeOpenFile();
       if (section.kind === 'project' && section.path === n.path) setSection({ kind: 'all' });
       await refreshTree();
     } catch (e) {
@@ -743,6 +763,7 @@ export function App() {
       onNewProject={() => void newProject()}
       onRename={(n) => void renameEntry(n)}
       onDelete={(n) => void remove(n)}
+      onMove={moveEntry}
       onArchive={() => setTrashOpen(true)}
       onCommands={() => {
         setExportOpen(false);

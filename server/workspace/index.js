@@ -78,7 +78,8 @@ export async function setup(ctx) {
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
       route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
-      route('DELETE', '/api/file', (p) => store.removeFile(need(p, 'path'))),
+      // withSubdocs=1: the document's sub-documents folder goes to the trash with it.
+      route('DELETE', '/api/file', (p, _b, sp) => store.removeFile(need(p, 'path'), { withSubdocs: sp.get('withSubdocs') === '1' })),
       route('POST', '/api/folder', (_p, b) => store.createFolder(need(b?.path, 'path')), 201),
       route('DELETE', '/api/folder', (p) => store.removeFolder(need(p, 'path'))),
       // Deleted files stay here for 30 days; restore puts one back at its old path (409 if the path is taken).
@@ -88,8 +89,9 @@ export async function setup(ctx) {
       route('GET', '/api/history/version', (p, _b, q) => store.historyVersion(need(p, 'path'), q.get('id'))),
       // Snapshot the file as it is on disk now (before a restore); ignores the 5-minute interval.
       route('POST', '/api/history', (p) => store.historySnapshotNow(need(p, 'path'))),
-      // body: {from, to, type?: 'file'|'folder'}; without type a file wins over a same-named folder
-      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type)),
+      // body: {from, to, type?: 'file'|'folder', withSubdocs?: true}; without type a file wins over a same-named folder.
+      // withSubdocs (type 'file' only): the document's sub-documents folder (`X/` next to `X.dpx.json`) moves along.
+      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type, { withSubdocs: b?.withSubdocs === true })),
     ],
   };
 }

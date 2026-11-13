@@ -10,7 +10,7 @@ Paths are relative to the workspace, `/`-separated. No `..`, absolute paths, hid
 | `PUT /api/file?path=` `{revision,title,document,canvas,blocks}` | whole-file save; 409 `{revision}` when `revision` is not the current one |
 | `DELETE /api/file?path=` | files only. `?path=sub` never touches a folder `sub/` |
 | `POST /api/folder {path}` / `DELETE /api/folder?path=` | folders only; delete is recursive |
-| `POST /api/move {from,to,type?}` | rename = move |
+| `POST /api/move {from,to,type?,withSubdocs?}` | rename = move |
 
 ## Projects view
 
@@ -26,6 +26,7 @@ Paths are relative to the workspace, `/`-separated. No `..`, absolute paths, hid
 - `DELETE /api/file` always normalizes to `<path>.dpx.json` and removes that file only. `DELETE /api/folder` removes a directory only. Neither falls back to the other kind (404).
 - `move` without `type`: a **file wins**. `from` is tried as a file (`<from>.dpx.json`) first, then as a folder. Send `type: "folder"` (or `"file"`) to be explicit when a file and a folder share a name.
 - Moves never overwrite (409), and a folder cannot move into itself (400).
+- `withSubdocs: true` (with `type: "file"` only) moves a document's sub-documents folder (`X/` next to `X.dpx.json`) along with it. Both targets are checked before anything moves (409 / 400 into its own sub-documents), and the file goes back if the folder move fails. Two `tree` events are sent, one per path.
 
 ## Revisions and outside edits
 

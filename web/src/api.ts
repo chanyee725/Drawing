@@ -86,7 +86,8 @@ export const api = {
   createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
   saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>
     call<DpxFile>('PUT', `/api/file${q(path)}`, f, keepalive),
-  removeFile: (path: string) => call<unknown>('DELETE', `/api/file${q(path)}`),
+  /** `withSubdocs`: the document's sub-documents folder (`X/` next to `X.dpx.json`) goes to the trash with it. */
+  removeFile: (path: string, withSubdocs = false) => call<unknown>('DELETE', `/api/file${q(path)}${withSubdocs ? '&withSubdocs=1' : ''}`),
   createFolder: (path: string) => call<unknown>('POST', '/api/folder', { path }),
   removeFolder: (path: string) => call<unknown>('DELETE', `/api/folder${q(path)}`),
   history: (path: string) => call<{ versions: HistoryEntry[] }>('GET', `/api/history${q(path)}`).then((r) => r.versions),
@@ -95,7 +96,9 @@ export const api = {
   historySnapshot: (path: string) => call<{ id: string | null }>('POST', `/api/history${q(path)}`, {}),
   trash: () => call<{ items: TrashItem[] }>('GET', '/api/trash').then((r) => r.items),
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
-  move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
+  /** `withSubdocs`: a document's sub-documents folder (`X/` next to `X.dpx.json`) moves along (type 'file' only). */
+  move: (from: string, to: string, type: 'file' | 'folder', withSubdocs = false) =>
+    call<unknown>('POST', '/api/move', withSubdocs ? { from, to, type, withSubdocs } : { from, to, type }),
 };
 
 // Project view: GET /api/workspace/projects (docs/workspace-api.md "Projects view"), mapped to the shapes the screens use.
