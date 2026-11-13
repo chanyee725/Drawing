@@ -202,6 +202,31 @@ test('runs: move, rename, delete and restore carry run records, also a running o
   });
 });
 
+test('runs: runningFiles follows a moved file, drops a trashed one and brings it back on restore', async () => {
+  await withRecorder({}, async ({ store, recorder }) => {
+    await store.createFile('f/a');
+    await store.createFile('other');
+    const live = await recorder.startRun({ file: 'f/a', plan: PLAN });
+    assert.deepEqual(recorder.runningFiles(), ['f/a.dpx.json']);
+
+    await store.move('f/a.dpx.json', 'f/b.dpx.json');
+    assert.deepEqual(recorder.runningFiles(), ['f/b.dpx.json']);
+    assert.deepEqual(await recorder.markOf('f/b.dpx.json'), { state: 'running' });
+    await store.move('f', 'g');
+    assert.deepEqual(recorder.runningFiles(), ['g/b.dpx.json']);
+
+    // In the trash: no longer running anywhere, and the tree mark agrees.
+    await store.removeFile('g/b');
+    assert.deepEqual(recorder.runningFiles(), []);
+    const { items } = await store.trash();
+    await store.restoreTrash(items[0].id);
+    assert.deepEqual(recorder.runningFiles(), ['g/b.dpx.json']);
+
+    await recorder.endRun(live.id);
+    assert.deepEqual(recorder.runningFiles(), []);
+  });
+});
+
 test('runs: a file deleted with a folder keeps its runs in the trash', async () => {
   await withRecorder({}, async ({ store, recorder }) => {
     await store.createFile('f/a');
