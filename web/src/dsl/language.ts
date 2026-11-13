@@ -71,23 +71,23 @@ export const dslLanguage = StreamLanguage.define<State>({
 });
 
 const light = HighlightStyle.define([
-  { tag: t.keyword, color: '#6d4aff', fontWeight: '600' },
+  { tag: t.keyword, color: '#18181b', fontWeight: '600' },
   { tag: t.comment, color: '#8b8b95', fontStyle: 'italic' },
   { tag: t.string, color: '#0f7b4f' },
   { tag: t.number, color: '#b45309' },
   { tag: t.operator, color: '#e11d48', fontWeight: '600' },
   { tag: t.propertyName, color: '#0369a1' },
-  { tag: t.atom, color: '#9333ea' },
+  { tag: t.atom, color: '#0e7490' },
   { tag: [t.bracket, t.brace, t.punctuation], color: '#71717a' },
 ]);
 const dark = HighlightStyle.define([
-  { tag: t.keyword, color: '#b3a1ff', fontWeight: '600' },
+  { tag: t.keyword, color: '#fafafa', fontWeight: '600' },
   { tag: t.comment, color: '#7c7c88', fontStyle: 'italic' },
   { tag: t.string, color: '#6ee7b0' },
   { tag: t.number, color: '#fbbf6a' },
   { tag: t.operator, color: '#fb7185', fontWeight: '600' },
   { tag: t.propertyName, color: '#7dd3fc' },
-  { tag: t.atom, color: '#d8b4fe' },
+  { tag: t.atom, color: '#67e8f9' },
   { tag: [t.bracket, t.brace, t.punctuation], color: '#a1a1aa' },
 ]);
 
