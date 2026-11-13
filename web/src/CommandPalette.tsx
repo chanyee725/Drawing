@@ -1,22 +1,29 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Dialog as DialogPrimitive } from 'radix-ui';
+import { Command as CommandPrimitive } from 'cmdk';
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList, CommandShortcut } from './components/ui/command';
+import { DialogContent } from './components/ui/dialog';
+import { Kbd } from './components/ui/kbd';
+import { filterCommands, groupCommands, type Command as Cmd } from './commands';
 
-export type Command = { id: string; title: string; keys?: string; hint?: string; disabled?: boolean; keywords?: string[]; run: () => void };
+export { filterCommands } from './commands';
+export type { Command } from './commands';
 
-/** Commands whose title or keyword contains the query (case-insensitive); an empty query keeps all. */
-export function filterCommands(items: readonly Command[], query: string): Command[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return [...items];
-  return items.filter((c) => c.title.toLowerCase().includes(q) || (c.keywords ?? []).some((k) => k.toLowerCase().includes(q)));
-}
+type Props = { commands: Cmd[]; onClose: () => void };
 
-type Props = { commands: Command[]; onClose: () => void };
-
+/** The Ctrl/Cmd+K menu: one search box over every registered command, in sections, keyboard first. */
 export function CommandPalette({ commands, onClose }: Props) {
   const [query, setQuery] = useState('');
-  const [index, setIndex] = useState(0);
-  const input = useRef<HTMLInputElement>(null);
   const list = useMemo(() => filterCommands(commands, query), [commands, query]);
-  // Focus returns to where it was before the palette opened (unless a command moves it itself).
+  const groups = useMemo(() => groupCommands(list), [list]);
+  // Sections reorder the list, so the first row on screen is the first enabled one in section order.
+  const first = useMemo(() => groups.flatMap((g) => g.items).find((c) => !c.disabled)?.id ?? '', [groups]);
+  const [selected, setSelected] = useState(first);
+  // Only a new search resets the selection; the list itself is rebuilt on every app render.
+  useEffect(() => setSelected(first), [query]);
+  const input = useRef<HTMLInputElement>(null);
+
+  // Focus returns to where it was before the menu opened (unless a command moves it itself).
   const opener = useRef<Element | null>(document.activeElement);
   // focus() alone puts the caret back at the document start in an editor, so keep the range too.
   const [saved] = useState<Range | null>(() => {
@@ -24,10 +31,9 @@ export function CommandPalette({ commands, onClose }: Props) {
     return sel && sel.rangeCount > 0 ? sel.getRangeAt(0).cloneRange() : null;
   });
   useEffect(() => {
-    input.current?.focus();
     const back = opener.current;
     return () => {
-      // Skip when focus already moved on to something real (not the palette's own input or body).
+      // Skip when focus already moved on to something real (not the menu's own input or body).
       const now = document.activeElement;
       if (back instanceof HTMLElement && back.isConnected && (!now || now === document.body || now === input.current)) {
         back.focus();
@@ -39,87 +45,83 @@ export function CommandPalette({ commands, onClose }: Props) {
       }
     };
   }, []);
-  useEffect(() => setIndex(0), [query]);
-  useEffect(() => {
-    document.querySelector(`[data-cmd-index="${index}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [index]);
 
-  const run = (c: Command | undefined) => {
-    if (!c || c.disabled) return;
+  const run = (c: Cmd) => {
+    if (c.disabled) return;
     onClose();
-    // After the palette closes, so a canvas command sees the canvas focused again.
+    // After the menu closes, so a canvas command sees the canvas focused again.
     setTimeout(c.run, 0);
-  };
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.nativeEvent.isComposing) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      onClose();
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setIndex((i) => Math.min(list.length - 1, i + 1));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setIndex((i) => Math.max(0, i - 1));
-    } else if (e.key === 'Enter') {
-      e.preventDefault();
-      run(list[index]);
-    }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" style={{ background: 'rgb(0 0 0 / 0.3)' }} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div role="dialog" aria-modal="true" aria-label="명령 팔레트" className="w-[min(32rem,calc(100%-2rem))] overflow-hidden rounded-lg border shadow-xl" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }} onKeyDown={onKey}>
-        <input
-          ref={input}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          role="combobox"
-          aria-expanded="true"
-          aria-controls="cmd-list"
-          aria-activedescendant={list[index] ? `cmd-${list[index].id}` : undefined}
-          placeholder="무엇을 할까요?"
-          aria-label="명령 찾기"
-          className="h-11 w-full border-b bg-transparent px-3 outline-none"
-          style={{ borderColor: 'var(--border)' }}
-        />
-        <ul id="cmd-list" role="listbox" className="max-h-80 overflow-auto p-1">
-          {list.length === 0 && (
-            <li className="px-3 py-2 text-sm" style={{ color: 'var(--text-muted)' }}>
-              맞는 명령이 없어요
-            </li>
-          )}
-          {list.map((c, i) => (
-            <li
-              key={c.id}
-              id={`cmd-${c.id}`}
-              role="option"
-              aria-selected={i === index}
-              aria-disabled={c.disabled || undefined}
-              data-cmd-index={i}
-              data-cmd={c.id}
-              onMouseEnter={() => setIndex(i)}
-              onClick={() => run(c)}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-3 py-1.5 text-sm"
-              style={{ background: i === index ? 'var(--brand-soft)' : undefined, opacity: c.disabled ? 0.5 : 1 }}
-            >
-              <span className="flex-1">
-                {c.title}
-                {c.hint && (
-                  <span className="ml-2 text-xs" style={{ color: 'var(--text-muted)' }}>
-                    {c.hint}
-                  </span>
-                )}
-              </span>
-              {c.keys && (
-                <kbd className="text-xs" style={{ color: 'var(--text-muted)' }}>
-                  {c.keys}
-                </kbd>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+    <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="top-[15vh] w-[min(560px,calc(100%-2rem))] translate-y-0 rounded-lg bg-popover shadow-pop"
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          input.current?.focus();
+        }}
+        // The unmount effect above restores focus and the editor selection; Radix would only restore focus.
+        onCloseAutoFocus={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => {
+          if (e.isComposing) e.preventDefault();
+        }}
+      >
+        <DialogPrimitive.Title className="sr-only">명령 팔레트</DialogPrimitive.Title>
+        <Command shouldFilter={false} loop value={selected} onValueChange={setSelected} label="명령 찾기" className="rounded-lg bg-transparent">
+          <CommandInput
+            ref={input}
+            value={query}
+            onValueChange={setQuery}
+            placeholder="명령이나 파일 이름을 입력해요"
+            className="h-11"
+          />
+          <CommandList className="max-h-[min(400px,60vh)]">
+            <CommandEmpty>맞는 명령이 없어요</CommandEmpty>
+            {groups.map((g) => (
+              <CommandPrimitive.Group
+                key={g.id}
+                heading={g.label}
+                className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+              >
+                {g.items.map((c) => {
+                  const Icon = c.icon;
+                  return (
+                    <CommandItem
+                      key={c.id}
+                      value={c.id}
+                      disabled={c.disabled}
+                      onSelect={() => run(c)}
+                      data-cmd={c.id}
+                      className="h-8 cursor-pointer rounded-md py-0 data-[selected=true]:bg-brand-soft"
+                    >
+                      {Icon && <Icon className="size-4 text-muted-foreground" />}
+                      <span className="min-w-0 flex-1 truncate">
+                        {c.title}
+                        {c.hint && <span className="ml-2 text-xs text-muted-foreground">{c.hint}</span>}
+                      </span>
+                      {c.keys && <CommandShortcut className="tracking-normal">{c.keys}</CommandShortcut>}
+                    </CommandItem>
+                  );
+                })}
+              </CommandPrimitive.Group>
+            ))}
+          </CommandList>
+        </Command>
+        <div className="flex h-8 items-center gap-3 border-t px-3 text-xs text-muted-foreground" aria-hidden>
+          <span className="flex items-center gap-1">
+            <Kbd>↑</Kbd>
+            <Kbd>↓</Kbd> 이동
+          </span>
+          <span className="flex items-center gap-1">
+            <Kbd>↵</Kbd> 실행
+          </span>
+          <span className="flex items-center gap-1">
+            <Kbd>esc</Kbd> 닫기
+          </span>
+        </div>
+      </DialogContent>
+    </DialogPrimitive.Root>
   );
 }
