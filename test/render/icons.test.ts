@@ -127,7 +127,8 @@ test('rendered diagrams with icons reference nothing outside the SVG', async () 
   for (const theme of ['light', 'dark'] as const) {
     const { svg } = await renderDiagram(code, { type: 'cloud-architecture', theme });
     assert.equal(svg.match(/https?:/g)?.length, 1, 'only the xmlns URI'); // xmlns="http://www.w3.org/2000/svg"
-    assert.ok(!/href|url\(|<image|<use/.test(svg));
+    // The bundled font travels as a data URL (E59); anything else that points somewhere is not allowed.
+    assert.ok(!/href|url\((?!data:font\/woff2;base64,)|<image|<use/.test(svg));
     assert.equal(svg.match(/data-icon=/g)?.length, 5);
   }
 });

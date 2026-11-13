@@ -1,12 +1,20 @@
-// Deterministic text measurement without a DOM. Widths are em-based estimates close to Inter /
-// JetBrains Mono / Shantell Sans, so layout is identical in Node and in every browser.
+// Deterministic text measurement without a DOM. Widths are em-based estimates close to Drawing Sans (the bundled
+// Latin subset of Pretendard, Inter-like) / JetBrains Mono / Shantell Sans, so layout is identical in Node and in
+// every browser.
 
 import type { TextSize, Typeface } from './scene.ts';
 
+/** Family name of the bundled clean face (font-clean.ts); `sceneToSvg` embeds it in every picture that uses it. */
+export const CLEAN_FONT_NAME = 'Drawing Sans';
+
+// The embedded face has Latin only. Hangul comes from the next installed family: named Korean fonts first, because
+// `system-ui` alone can pick another CJK locale's font.
+const HANGUL_FALLBACK = "'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Noto Sans CJK KR', 'Apple SD Gothic Neo', 'Malgun Gothic'";
+
 export const FONT_FAMILY: Record<Typeface, string> = {
-  clean: "Inter, 'Inter var', system-ui, -apple-system, 'Segoe UI', 'Noto Sans KR', sans-serif",
+  clean: `'${CLEAN_FONT_NAME}', ${HANGUL_FALLBACK}, system-ui, -apple-system, 'Segoe UI', sans-serif`,
   mono: "'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace",
-  rough: "'Shantell Sans', Inter, system-ui, 'Noto Sans KR', sans-serif",
+  rough: `'Shantell Sans', ${HANGUL_FALLBACK}, system-ui, sans-serif`,
 };
 
 export const FONT_SIZE: Record<TextSize, number> = { small: 13, medium: 16, large: 20 };
