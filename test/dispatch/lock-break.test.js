@@ -2,7 +2,9 @@
 // servers starting on a dead .break used to let two of them into the critical section: a waiter
 // that judged the dead holder, then resumed after someone else had cleared it and taken the break,
 // moved or removed the live holder's .break. These tests drive that interleaving in one process with
-// owner names instead of pids, so the order is fixed and the test fails on the old behaviour.
+// owner names instead of pids, so the order is fixed. They pin the new design (a holder is cleared by
+// its own file name, a late release or clear touches nothing); against #161's move-aside logic ported
+// to this API the first one does not fail, so they do not prove the old race by themselves.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -158,6 +160,21 @@ test('acquireBreak: an old-style file replaced by a folder mid-clear does not th
     mkdirSync(brk);
     const release2 = await acquireBreak(brk, { owner: 'live-B', isDead });
     await release2();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquireBreak: a staging folder left by a dead process is swept, one from a live process stays', async () => {
+  const { dir, brk } = scratch();
+  try {
+    const deadStage = `${brk}.2147483646-00000000-0000-0000-0000-000000000000.tmp`;
+    const liveStage = `${brk}.${process.pid}-11111111-1111-1111-1111-111111111111.tmp`;
+    for (const s of [deadStage, liveStage]) mkdirSync(s);
+    const release = await acquireBreak(brk);
+    await release();
+    assert.equal(existsSync(deadStage), false);
+    assert.equal(existsSync(liveStage), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

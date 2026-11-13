@@ -580,13 +580,13 @@ function onOtherLine(c: Point, others: readonly Point[][]): boolean {
 /**
  * Label centre for an edge: the middle of its longest segment, or, when that plate would overlap a label
  * already placed or a node, or sits on another edge's line (a run shared with a sibling, a split point), moved along the
- * line towards the end node in LABEL_SHIFT steps (first clear spot wins; none clear keeps the middle). Records the chosen plate in `placed`.
+ * line towards the end node in LABEL_SHIFT steps (first clear spot wins; if every spot is near another line, the first one clear of labels and nodes; none clear keeps the middle). Records the chosen plate in `placed`.
  */
 function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[], others: Point[][] = []): Point {
   const start = labelAnchor(points, route);
-  const clear = (c: Point): boolean => {
+  const clear = (c: Point, ignoreLines = false): boolean => {
     const r = labelRect(c, label);
-    return !placed.some((o) => overlaps(r, o)) && !nodeRects.some((o) => overlaps(r, o)) && !onOtherLine(c, others);
+    return !placed.some((o) => overlaps(r, o)) && !nodeRects.some((o) => overlaps(r, o)) && (ignoreLines || !onOtherLine(c, others));
   };
   let best = start;
   if (!clear(start)) {
@@ -614,9 +614,13 @@ function placeLabel(points: Point[], route: string, label: Label, placed: Rect[]
       }
       return path[path.length - 1]!;
     };
-    for (let d = LABEL_SHIFT; d <= total; d += LABEL_SHIFT) {
-      const c = at(d);
-      if (clear(c)) { best = { x: round(c.x), y: round(c.y) }; break; }
+    // Second pass (staggered tracks sit 6 px apart, so every spot can be near another line): the first spot
+    // clear of labels and nodes, as before the line check existed.
+    search: for (const ignoreLines of [false, true]) {
+      for (let d = LABEL_SHIFT; d <= total; d += LABEL_SHIFT) {
+        const c = at(d);
+        if (clear(c, ignoreLines)) { best = { x: round(c.x), y: round(c.y) }; break search; }
+      }
     }
   }
   placed.push(labelRect(best, label));
@@ -1075,8 +1079,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   for (const g of nodes.values()) {
     const r = rects.get(g.node.id)!;
     handle(g.node.id, 'node');
-    const { style, label } = g;
-    const { sub } = g;
+    const { style, label, sub } = g;
     // The subtitle is muted, kept readable on the node's fill (svg.ts); on a bold fill it takes the contrast colour.
     const subItem = (x: number, y: number, anchor: 'start' | 'middle', on?: ElementStyle['paint']): SceneItem =>
       textItem(sub!.lines, x, y, { size: sub!.size, font: style.typeface, anchor, tone: 'muted', ...(on ? { on } : {}) });

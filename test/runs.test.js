@@ -31,6 +31,18 @@ async function withRecorder(opts, fn) {
   }
 }
 const runFile = (ws, rel, id) => join(ws, '.drawing', 'runs', ...rel.split('/'), `${id}.json`);
+/** Poll until `check()` returns without throwing (a debounced write or event landed); rethrows its last error after `ms`. */
+async function eventually(check, ms = 5000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    try {
+      return await check();
+    } catch (err) {
+      if (Date.now() >= end) throw err;
+      await sleep(5);
+    }
+  }
+}
 const readJson = async (p) => JSON.parse(await readFile(p, 'utf8'));
 
 test('runs: start writes a record with the plan snapshot and pending steps', async () => {
@@ -105,8 +117,7 @@ test('runs: writes are debounced; events carry only changed fields', async () =>
     recorder.updateSession(id, 'impl', { sid: 's1', state: 'working', cost: 2 }); // no change, no event
     const p = runFile(ws, 'a.dpx.json', id);
     assert.equal((await readJson(p)).steps.impl.sessions.length, 0); // not yet
-    await sleep(80);
-    assert.equal((await readJson(p)).steps.impl.sessions[0].cost, 2);
+    await eventually(async () => assert.equal((await readJson(p)).steps.impl.sessions[0].cost, 2));
     const runEvents = events.filter(([e, d]) => e === 'run' && d.session).map(([, d]) => d);
     assert.equal(runEvents.length, 2);
     assert.deepEqual(runEvents[0], { file: 'a.dpx.json', runId: id, step: 'impl', session: { sid: 's1', state: 'working', cost: 1 }, state: 'working' });
@@ -123,8 +134,7 @@ test('runs: events per session are coalesced to the gap', async () => {
     recorder.updateSession(id, 'impl', { sid: 's1', ctxPct: 5 });
     const sessionEvents = () => events.filter(([, d]) => d.session).map(([, d]) => d.session);
     assert.equal(sessionEvents().length, 1);
-    await sleep(100);
-    assert.deepEqual(sessionEvents()[1], { sid: 's1', cost: 1, ctxPct: 5 });
+    await eventually(() => assert.deepEqual(sessionEvents()[1], { sid: 's1', cost: 1, ctxPct: 5 }));
   });
 });
 
@@ -179,8 +189,7 @@ test('runs: move, rename, delete and restore carry run records, also a running o
     assert.deepEqual((await recorder.list('f/b')).runs.length, 2);
     assert.deepEqual((await recorder.list('f/a')).runs, []);
     recorder.updateSession(live.id, 'impl', { sid: 's1', state: 'working' });
-    await sleep(50);
-    assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).file, 'f/b.dpx.json');
+    await eventually(async () => assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).file, 'f/b.dpx.json'));
 
     await store.move('f', 'g');
     assert.equal((await recorder.list('g/b')).runs.length, 2);
@@ -188,10 +197,9 @@ test('runs: move, rename, delete and restore carry run records, also a running o
     await store.removeFile('g/b');
     assert.deepEqual((await recorder.list('g/b')).runs, []);
     recorder.updateSession(live.id, 'impl', { sid: 's1', cost: 3 });
-    await sleep(50);
     const { items } = await store.trash();
     const trashRuns = join(ws, '.drawing', 'trash', items[0].id, 'runs');
-    assert.equal((await readJson(join(trashRuns, `${live.id}.json`))).steps.impl.sessions[0].cost, 3);
+    await eventually(async () => assert.equal((await readJson(join(trashRuns, `${live.id}.json`))).steps.impl.sessions[0].cost, 3));
 
     await store.restoreTrash(items[0].id);
     assert.equal((await recorder.list('g/b')).runs.length, 2);
@@ -270,9 +278,11 @@ test('runs: endRun overlapping a move leaves one record, done, at the new path',
     await store.createFile('f/a');
     const live = await recorder.startRun({ file: 'f/a', plan: PLAN });
     await Promise.all([store.move('f/a.dpx.json', 'f/b.dpx.json'), recorder.endRun(live.id)]);
-    await sleep(80);
-    assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).state, 'done');
-    assert.equal((await readJson(runFile(ws, 'f/b.dpx.json', live.id))).file, 'f/b.dpx.json');
+    await eventually(async () => {
+      const rec = await readJson(runFile(ws, 'f/b.dpx.json', live.id));
+      assert.equal(rec.state, 'done');
+      assert.equal(rec.file, 'f/b.dpx.json');
+    });
     await assert.rejects(readFile(runFile(ws, 'f/a.dpx.json', live.id)));
     assert.deepEqual(recorder.active, []);
   });

@@ -61,6 +61,8 @@
   color: var(--primary-foreground);
 }
 /* Hover and press on --primary fills (text-to-diagram button, toggled Switch) reuse the 90% and 70% steps above.
+   Hover is 90% (--color-primary-hover) on purpose, not the 80% step #203 named: 90% is Excalidraw's own hover
+   step and the value the code had before, so it keeps the stock feel and leaves a clear gap to press (70%).
    Without these the stock hover and press colours looked identical to rest on near-white dark primary. */
 .excalidraw.excalidraw .ttd-dialog-panel-button.excalidraw-button:hover:not(:disabled),
 .excalidraw.excalidraw .Switch.toggled:hover {
