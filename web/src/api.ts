@@ -15,7 +15,33 @@ export type DpxFile = {
 };
 export type TreeNode =
   | { type: 'folder'; name: string; path: string; children: TreeNode[] }
-  | { type: 'file'; name: string; path: string; title: string; revision: number | null };
+  | { type: 'file'; name: string; path: string; title: string; revision: number | null; mtime?: string; created?: string };
+
+/** Projects view (GET /api/workspace/projects, docs/workspace-api.md). Times are ISO strings. */
+export type DocNode = {
+  type: 'doc' | 'group';
+  path: string;
+  name: string;
+  title?: string;
+  revision?: number | null;
+  created: string | null;
+  modified: string | null;
+  /** Documents below this one. */
+  count: number;
+  children: DocNode[];
+};
+export type Project = { path: string; name: string; icon: string | null; description: string; created: string | null; modified: string | null; count: number; docs: DocNode[] };
+export type ProjectsView = { projects: Project[]; loose: DocNode[] };
+
+/** Model connection summary for the sidebar (Dispatch routes; GET only, nothing here starts a CLI). */
+export type DispatchStatus = { enabled: boolean; reason?: string; message?: string };
+export type ProviderState = { installed: boolean | null; connected: boolean };
+export type LimitWindow = { label: string; used: number | null; reset: number | null };
+export type ProviderLimits = {
+  claude?: { windows: LimitWindow[] } | null;
+  openai?: { windows: LimitWindow[] } | null;
+  gemini?: { reached: boolean; reset: number | null } | null;
+};
 
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
 export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
@@ -52,6 +78,10 @@ const q = (p: string) => `?path=${encodeURIComponent(p)}`;
 export const api = {
   info: () => call<{ workspace: string }>('GET', '/api/info'),
   tree: () => call<{ tree: TreeNode[] }>('GET', '/api/tree').then((r) => r.tree),
+  projects: () => call<ProjectsView>('GET', '/api/workspace/projects'),
+  dispatch: () => call<DispatchStatus>('GET', '/api/dispatch'),
+  providers: () => call<{ providers: Record<string, ProviderState> }>('GET', '/api/state').then((r) => r.providers ?? {}),
+  limits: () => call<ProviderLimits>('GET', '/api/limits'),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
   createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
   saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>

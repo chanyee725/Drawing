@@ -1,0 +1,73 @@
+// App shell navigation (design doc 6 §2.1, §5): which screen is shown, which sidebar rows are open, and the
+// one-letter shortcuts. Pure, so it is tested without a browser.
+import type { DocNode, Project, ProjectsView, TreeNode } from './api';
+
+/** The main panel: a sidebar view, a project home, or the open document. 보관함 opens the trash dialog. */
+export type Section = { kind: 'all' } | { kind: 'recent' } | { kind: 'project'; path: string } | { kind: 'doc' };
+
+/** Project that holds `path` (a file path), or null for loose files. */
+export function projectOf(view: ProjectsView | null, path: string | null): Project | null {
+  if (!view || !path) return null;
+  const top = path.split('/')[0];
+  return path.includes('/') ? (view.projects.find((p) => p.path === top) ?? null) : null;
+}
+
+/** Rows to open so `path` is visible: its project and every document or group above it. */
+export function openPathsFor(view: ProjectsView | null, path: string | null): string[] {
+  const project = projectOf(view, path);
+  if (!project || !path) return [];
+  const out = [project.path];
+  const walk = (nodes: DocNode[]): boolean => {
+    for (const n of nodes) {
+      if (n.path === path) return true;
+      if (walk(n.children)) {
+        out.push(n.path);
+        return true;
+      }
+    }
+    return false;
+  };
+  walk(project.docs);
+  return out;
+}
+
+const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
+
+/** The tree node the existing move / delete code works with. */
+export function asTreeNode(n: DocNode | Project): TreeNode {
+  if ('docs' in n || n.type === 'group') return { type: 'folder', name: baseName(n.path), path: n.path, children: [] };
+  return { type: 'file', name: baseName(n.path), path: n.path, title: n.title ?? '', revision: n.revision ?? null };
+}
+
+/** Folder that holds a document's sub-documents (`a/X.dpx.json` → `a/X`). */
+export const subFolderOf = (filePath: string) => filePath.replace(/\.dpx\.json$/, '');
+
+/** Folder new files go in: the project shown or the open file's project; '' = workspace root. */
+export function newFileDir(section: Section, view: ProjectsView | null, openPath: string | null): string {
+  if (section.kind === 'project') return section.path;
+  if (section.kind === 'doc') return projectOf(view, openPath)?.path ?? '';
+  return '';
+}
+
+export type ShellKey = 'all' | 'recent' | 'archive' | 'new' | 'settings';
+const KEYS: Record<string, ShellKey> = { KeyA: 'all', KeyR: 'recent', KeyB: 'archive', KeyN: 'new', Comma: 'settings' };
+
+// Where one-letter keys belong to something else: text fields, the editors, the canvas (its tool keys) and dialogs.
+const OWNED = '.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""], .excalidraw, [role="dialog"], [role="menu"], [role="listbox"]';
+
+type KeyLike = { code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isComposing: boolean; repeat: boolean; defaultPrevented: boolean; target: EventTarget | null };
+
+/** The shell action for a key press (A R B N ,), or null when the key is not one or belongs to something else. */
+export function shellKey(e: KeyLike): ShellKey | null {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || e.isComposing || e.repeat || e.defaultPrevented) return null;
+  const k = KEYS[e.code];
+  if (!k) return null;
+  const t = e.target as { closest?: (s: string) => unknown } | null;
+  if (t && typeof t.closest === 'function' && t.closest(OWNED)) return null;
+  return k;
+}
+
+/** "42%" from a 0..1 fraction; null when unknown. */
+export const percent = (used: number | null | undefined) => (used == null || !Number.isFinite(used) ? null : Math.max(0, Math.min(100, Math.round(used * 100))));
+/** Above this a usage figure turns to the warning colour (doc 6 §2.1). */
+export const WARN_PERCENT = 75;

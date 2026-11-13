@@ -1,9 +1,12 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, ApiError, type Block, type DpxFile, type TreeNode } from './api';
+import { api, ApiError, type Block, type DocNode, type DpxFile, type Project, type ProjectsView, type TreeNode } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
 import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
+import { ShellHome } from './ShellHome';
+import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
+import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -16,7 +19,7 @@ import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
 import { fileStem } from './fileName';
-import { dropTarget, moveErrorText, nameProblem, pathAfterMove, renameTarget } from './movePaths';
+import { moveErrorText, nameProblem, pathAfterMove, renameInitial, renameTarget } from './movePaths';
 import { parseHash } from './doc/outline';
 import { ExportMenu } from './ExportMenu';
 import { DEFAULT_EXPORT, type ExportOptions } from './export/options';
@@ -172,6 +175,10 @@ export function App() {
   const [navOpen, setNavOpen] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(null);
   const [tree, setTree] = useState<TreeNode[]>([]);
+  const [projects, setProjects] = useState<ProjectsView | null>(null);
+  // What the main panel shows; opening a file switches to the document screen.
+  const [section, setSection] = useState<Section>({ kind: 'all' });
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [view, setView] = useState<View>('both');
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
@@ -194,7 +201,9 @@ export function App() {
 
   const refreshTree = useCallback(async () => {
     try {
-      setTree(await api.tree());
+      const [t, p] = await Promise.all([api.tree(), api.projects()]);
+      setTree(t);
+      setProjects(p);
     } catch (e) {
       setError(e instanceof Error ? e.message : '목록을 불러오지 못했어요');
     }
@@ -231,6 +240,7 @@ export function App() {
       setError(null);
       try {
         load(p, await api.readFile(p));
+        setSection({ kind: 'doc' });
         if (narrow) setNavOpen(false);
         return true;
       } catch (e) {
@@ -251,6 +261,7 @@ export function App() {
         .readFile(link.path)
         .then((f) => {
           load(link.path, f);
+          setSection({ kind: 'doc' });
           jumpTo(link.heading);
         })
         .catch(() => setHashPath(null));
@@ -327,10 +338,13 @@ export function App() {
     };
   }, [session]);
 
+  // New files go in the project shown (or the open file's project); a typed `a/b` path still works.
   const newFile = async () => {
-    const name = window.prompt('새 파일 이름을 입력해 주세요');
-    const p = name ? fileStem(name) : '';
-    if (!p) return;
+    const dir = newFileDir(section, projects, path);
+    const name = window.prompt(dir ? `새 파일 이름을 입력해 주세요 (${dir} 안에 만들어요)` : '새 파일 이름을 입력해 주세요');
+    const stem = name ? fileStem(name) : '';
+    if (!stem) return;
+    const p = dir ? `${dir}/${stem}` : stem;
     await session.flush();
     try {
       await api.createFile(p, p.split('/').pop() ?? p);
@@ -348,6 +362,20 @@ export function App() {
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '만들지 못했어요');
+    }
+  };
+  // A project is a top-level folder (design doc 6 §1).
+  const newProject = async () => {
+    const name = window.prompt('새 프로젝트 이름을 입력해 주세요')?.trim();
+    if (!name) return;
+    const problem = nameProblem({ type: 'folder' }, name) ?? (name.includes('/') ? '이름에 / 나 \\를 넣을 수 없어요.' : null);
+    if (problem) return setError(problem);
+    try {
+      await api.createFolder(name);
+      await refreshTree();
+      setSection({ kind: 'project', path: name });
+    } catch (e) {
+      setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 프로젝트가 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
   // Path this tab is deleting right now (see the SSE handler below).
@@ -387,7 +415,7 @@ export function App() {
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
   const ownMoves = useRef(new Set<string>());
   // `title`: a renamed file takes the new name as its title too, because the sidebar shows the title.
-  const move = async (n: TreeNode, to: string, title?: string) => {
+  const move = async (n: TreeNode, to: string, title?: string): Promise<boolean> => {
     const from = n.path;
     ownMoves.current.add(from);
     setTimeout(() => ownMoves.current.delete(from), 5000);
@@ -419,25 +447,35 @@ export function App() {
       await refreshTree();
       // The move worked but the new revision is unknown: the next save may ask to choose a version, so say why.
       if (readFailed) setError('옮겼어요. 다만 파일을 다시 읽지 못했어요. 저장이 안 되면 화면을 새로 고쳐 주세요');
+      return true;
     } catch (e) {
       ownMoves.current.delete(from);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
+      return false;
     } finally {
       release();
     }
   };
-  const moveInto = (n: TreeNode, dir: string) => {
-    const to = dropTarget(n, dir);
-    if (to) void move(n, to);
-  };
-  const rename = (n: TreeNode, name: string) => {
+  // Rename from the sidebar. A document's sub-documents folder (`X/` next to `X.dpx.json`) takes the new name too.
+  const renameEntry = async (entry: DocNode | Project) => {
+    const n = asTreeNode(entry);
+    const initial = renameInitial(n);
+    const name = window.prompt('새 이름을 입력해 주세요', initial);
+    if (name == null || name.trim() === initial) return;
     const problem = nameProblem(n, name);
     if (problem) return setError(problem);
     const to = renameTarget(n, name);
-    if (to) void move(n, to, n.type === 'file' ? fileStem(name) : undefined);
+    if (!to) return;
+    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined);
+    if (ok && n.type === 'file' && 'children' in entry && entry.children.length) {
+      const sub = subFolderOf(n.path);
+      await move({ type: 'folder', name: sub.split('/').pop() ?? sub, path: sub, children: [] }, subFolderOf(to));
+    }
+    if (ok && section.kind === 'project' && section.path === n.path) setSection({ kind: 'project', path: to });
   };
 
-  const remove = async (n: TreeNode) => {
+  const remove = async (entry: DocNode | Project) => {
+    const n = asTreeNode(entry);
     const label = n.type === 'file' ? n.title || n.name : n.name;
     const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
     if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
@@ -446,6 +484,7 @@ export function App() {
       if (n.type === 'file') await api.removeFile(n.path);
       else await api.removeFolder(n.path);
       if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
+      if (section.kind === 'project' && section.path === n.path) setSection({ kind: 'all' });
       await refreshTree();
     } catch (e) {
       setError(e instanceof Error ? e.message : '지우지 못했어요');
@@ -620,35 +659,99 @@ export function App() {
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
+  // The document screen sits flush against the sidebar (frame A); everything else is a floating panel (frame B).
+  const docScreen = hasFile && section.kind === 'doc';
+  const homeSection = section.kind === 'doc' ? ({ kind: 'all' } as const) : section;
+  const showSection = useCallback(
+    (s: Section) => {
+      setSection(s);
+      // The file stays loaded (its edits are already in the session); the address no longer names it.
+      setHashPath(null);
+      if (narrow) setNavOpen(false);
+    },
+    [narrow],
+  );
+
+  // Shell shortcuts (doc 6 §5): A 모든 파일, R 최근, B 보관함, N 새 파일, "," 설정. Never inside a text field,
+  // an editor, the canvas (its own tool keys) or a dialog: see shellKey.
+  const newFileRef = useRef(newFile);
+  newFileRef.current = newFile;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = shellKey(e);
+      if (!k) return;
+      e.preventDefault();
+      if (k === 'all') showSection({ kind: 'all' });
+      else if (k === 'recent') showSection({ kind: 'recent' });
+      else if (k === 'archive') setTrashOpen(true);
+      else if (k === 'new') void newFileRef.current();
+      else setSettingsOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showSection]);
+
   const sidebar = (
     <Sidebar
       workspace={workspace}
-      tree={tree}
-      current={path}
-      onOpen={(p) => void open(p)}
+      view={projects}
+      section={docScreen ? section : homeSection}
+      current={docScreen ? path : null}
+      onSection={showSection}
+      onOpen={openFile}
       onNewFile={() => void newFile()}
-      onNewFolder={() => void newFolder()}
+      onNewProject={() => void newProject()}
+      onRename={(n) => void renameEntry(n)}
       onDelete={(n) => void remove(n)}
-      onMove={moveInto}
-      onRename={rename}
+      onArchive={() => setTrashOpen(true)}
+      onCommands={() => {
+        setExportOpen(false);
+        setPaletteOpen(true);
+      }}
       theme={theme}
       onToggleTheme={toggleTheme}
-      onTrash={() => setTrashOpen(true)}
+      settingsOpen={settingsOpen}
+      onSettingsOpen={setSettingsOpen}
     />
   );
 
   return (
     <CommandRegistryContext.Provider value={registry}>
-      <div className="flex h-full">
-        {!narrow
-          ? sidebar
-          : navOpen && (
-              <div className="fixed inset-0 z-20 flex">
-                {sidebar}
-                <button type="button" aria-label="파일 목록 닫기" className="flex-1" style={{ background: 'rgb(0 0 0 / 0.3)' }} onClick={() => setNavOpen(false)} />
-              </div>
-            )}
-        <div className="flex min-w-0 flex-1 flex-col">
+      <SidebarProvider openMobile={navOpen} onOpenMobileChange={setNavOpen}>
+        {sidebar}
+        <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
+          {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
+          {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
+          {conflict && (
+            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
+              <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
+              <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
+                다시 불러오기
+              </button>
+              <button
+                type="button"
+                disabled={conflict.revision === undefined}
+                className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
+                style={{ background: 'var(--primary)' }}
+                onClick={overwrite}
+              >
+                내 것으로 덮어쓰기
+              </button>
+            </div>
+          )}
+          {error && (
+            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
+              <span>{error}</span>
+              <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
+                닫기
+              </button>
+            </div>
+          )}
+          {!docScreen ? (
+            <ShellHome section={homeSection} view={projects} narrow={narrow} onOpen={openFile} onNewFile={() => void newFile()} />
+          ) : (
+            <>
           <TopBar
             title={title}
             hasFile={hasFile}
@@ -679,39 +782,7 @@ export function App() {
               />
             }
           />
-          {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
-          {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
-          {conflict && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
-              <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
-              <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
-                다시 불러오기
-              </button>
-              <button
-                type="button"
-                disabled={conflict.revision === undefined}
-                className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
-                style={{ background: 'var(--primary)' }}
-                onClick={overwrite}
-              >
-                내 것으로 덮어쓰기
-              </button>
-            </div>
-          )}
-          {error && (
-            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
-              <span>{error}</span>
-              <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
-                닫기
-              </button>
-            </div>
-          )}
-          {!hasFile ? (
-            <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--muted-foreground)' }}>
-              <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
-            </main>
-          ) : view === 'both' ? (
+              {view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
@@ -719,8 +790,10 @@ export function App() {
               {showCanvas && canvas}
             </div>
           )}
-        </div>
-      </div>
+            </>
+          )}
+        </SidebarInset>
+      </SidebarProvider>
     </CommandRegistryContext.Provider>
   );
 }
