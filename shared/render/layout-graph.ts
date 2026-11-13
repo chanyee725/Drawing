@@ -12,6 +12,7 @@ import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
 import { routeEdges, straightPorts } from './layout-routes.ts';
+import { ROUTE_GAP, routeAround } from './route-around.ts';
 import type { Point, Scene, SceneBadge, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -80,6 +81,8 @@ const DIVIDER_GAP = 8;
 const DIVIDER_H = 28;
 /** Gap above and below a divider that splits connected siblings into rows. */
 const DIVIDER_ROW_GAP = 24;
+/** Extra room at a group's sides and bottom when dividers split its children: edges run around the rows there. */
+const ROUTE_ROOM = 12;
 /** Group padding around its children; `top` includes the title line. */
 const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
 
@@ -742,14 +745,19 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
 
   /** An unconnected divider: it splits its siblings into rows instead of sitting among them. */
   const isRowDivider = (c: GraphChild): boolean => c.kind === 'node' && !!nodes.get(c.id)?.divider && free(c);
+  /** Siblings that dividerRows splits: a free divider among connected ones (all free: leafGrid does it). */
+  const splitsIntoRows = (top: readonly GraphChild[]): boolean => top.some(isRowDivider) && !top.every((c) => free(c));
+  /** Edges that cross a divider row, by the scope (group id, undefined for the root) whose rows they cross. */
+  const rowCross = new Map<string, string | undefined>();
   /**
    * Dividers among connected siblings (#244): ELK would place a divider like any other node, beside them, and
    * leave a short line fragment. Instead the siblings are cut at each divider in source order, every part is
-   * laid out on its own, and the parts stack top to bottom with the dividers between them. Edges that cross a
-   * divider get an elbow route here; routeEdges redraws them with the rest. Only free siblings: leafGrid.
+   * laid out on its own, and the parts stack with the dividers between them: top to bottom, bottom to top
+   * for `up`. Edges that cross a divider get a placeholder elbow here and their real route, around the
+   * nodes and the divider labels, once alignment is done (routeAcross).
    */
-  const dividerRows = async (top: readonly GraphChild[]): Promise<Piece | undefined> => {
-    if (!top.some(isRowDivider) || top.every((c) => free(c))) return undefined;
+  const dividerRows = async (top: readonly GraphChild[], scope: string | undefined): Promise<Piece | undefined> => {
+    if (!splitsIntoRows(top)) return undefined;
     const pieces: Piece[] = [];
     let run: GraphChild[] = [];
     const flush = async (): Promise<void> => {
@@ -767,18 +775,38 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       pieces.push({ w: g.w, h: g.h, rects: new Map([[c.id, { x: 0, y: 0, w: g.w, h: g.h }]]), edges: new Map() });
     }
     await flush();
+    if (d.direction === 'up') pieces.reverse();
     const out = packGrid(pieces, 1, 0, DIVIDER_ROW_GAP, true);
     for (const e of edges) {
       const a = out.rects.get(e.from);
       const b = out.rects.get(e.to);
-      if (a && b && !out.edges.has(e.id)) out.edges.set(e.id, routeElbow(a, b, 0));
+      if (a && b && !out.edges.has(e.id)) {
+        out.edges.set(e.id, routeElbow(a, b, 0));
+        rowCross.set(e.id, scope);
+      }
     }
     return out;
   };
 
+  /**
+   * A free group whose children dividerRows splits: the rows inside the group's padding, with ROUTE_ROOM
+   * more at the sides and bottom so edges across the rows can run around them inside the group.
+   */
+  const groupRows = async (g: GraphGroup): Promise<Piece> => {
+    const rows = (await dividerRows(g.children, g.id))!;
+    const m = groups.get(g.id)!;
+    const side = GROUP_PAD.side + ROUTE_ROOM;
+    const w = Math.max(m.minW, rows.w + 2 * side);
+    const h = m.header + rows.h + GROUP_PAD.bottom + ROUTE_ROOM;
+    const piece: Piece = { w, h, rects: new Map([[g.id, { x: 0, y: 0, w, h }]]), edges: new Map() };
+    placePiece(piece, rows, (w - rows.w) / 2, m.header);
+    gridGroups.add(g.id);
+    return piece;
+  };
+
   /** Lay out `top` (the diagram's children, or one free group) with ELK; free siblings go in grids. */
   const layoutScope = async (top: readonly GraphChild[]): Promise<Piece> => {
-    const rows = await dividerRows(top);
+    const rows = await dividerRows(top, undefined);
     if (rows) return rows;
     const present = new Set<string>();
     const grids = new Map<string, Piece>();
@@ -809,6 +837,13 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       if (child.kind === 'node') {
         const g = nodes.get(child.id)!;
         return { id: elkId(child.id), width: g.w, height: g.h };
+      }
+      if (free(child) && splitsIntoRows(child.children)) {
+        // No edge crosses the group, so ELK can take it as one box.
+        const block = await groupRows(child);
+        const id = `rows:${child.id}`;
+        grids.set(id, block);
+        return { id, width: block.w, height: block.h };
       }
       const g = groups.get(child.id)!;
       const kids = await build(child.children, child.id);
@@ -941,7 +976,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       style: styleFor(d, e.attrs, e.span.line),
       label: edgeLabels.get(e.id),
       points,
-      forcedElbow: e.from === e.to || isAncestor(e.from, e.to) || isAncestor(e.to, e.from) || (pairCount.get(key) ?? 0) > 1,
+      forcedElbow: e.from === e.to || isAncestor(e.from, e.to) || isAncestor(e.to, e.from) || (pairCount.get(key) ?? 0) > 1 || rowCross.has(e.id),
       pairIndex,
       pairSize: 0,
     });
@@ -967,10 +1002,84 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     vertical,
   );
   for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+  routeAcross(d, nodes, parent, rects, baseEdges.filter((be) => rowCross.has(be.edge.id)), baseEdges, rowCross, (g) => groups.get(g)!.header);
   // Spec §1.8 step 6: even ports, straight lines first, at most two bends, shared buses.
   routeEdges(rects, parent, baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points, keep: be.forcedElbow })));
 
   return { nodes, groups, parent, rects, edges: baseEdges };
+}
+
+/**
+ * Real routes for the edges that cross a divider row (#244): around the other nodes and groups of the
+ * rows' scope and the divider labels, never along a divider line, inside the group when the rows are in
+ * one. Parallel edges between the same two nodes keep their offsets from routeElbow (they would share one
+ * route). An edge with no such route keeps its elbow.
+ */
+function routeAcross(
+  d: GraphDiagram,
+  nodes: ReadonlyMap<string, NodeGeom>,
+  parent: ReadonlyMap<string, string | undefined>,
+  rects: ReadonlyMap<string, Rect>,
+  list: readonly BaseEdge[],
+  others: readonly BaseEdge[],
+  scopeOf: ReadonlyMap<string, string | undefined>,
+  headerOf: (group: string) => number,
+): void {
+  if (!list.length) return;
+  const spans = dividerSpans(d, nodes, parent, rects);
+  const within = (scope: string | undefined, id: string): boolean => {
+    if (scope === undefined) return true;
+    for (let p = parent.get(id); p !== undefined; p = parent.get(p)) if (p === scope) return true;
+    return false;
+  };
+  const chain = (id: string): Set<string> => {
+    const out = new Set([id]);
+    for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.add(p);
+    return out;
+  };
+  const pairs = new Map<string, number>();
+  for (const be of list) {
+    const k = [be.edge.from, be.edge.to].sort().join('\u0000');
+    pairs.set(k, (pairs.get(k) ?? 0) + 1);
+  }
+  for (const be of list) {
+    const { from, to } = be.edge;
+    if (from === to || (pairs.get([from, to].sort().join('\u0000')) ?? 0) > 1) continue;
+    const scope = scopeOf.get(be.edge.id);
+    const skip = new Set([...chain(from), ...chain(to)]);
+    const blocks: Rect[] = [];
+    const bands: Rect[] = [];
+    for (const [id, r] of rects) {
+      if (skip.has(id) || !within(scope, id)) continue;
+      const span = spans.get(id);
+      const g = nodes.get(id);
+      if (!span || !g) {
+        blocks.push(r);
+        continue;
+      }
+      bands.push(span);
+      if (g.label.lines.some((l) => l.trim())) {
+        const half = g.label.w / 2 + DIVIDER_GAP;
+        blocks.push({ x: span.x + span.w / 2 - half, y: span.y + span.h / 2 - g.label.h / 2, w: half * 2, h: g.label.h });
+      }
+    }
+    let bounds: Rect;
+    if (scope !== undefined) {
+      const gr = rects.get(scope)!;
+      const header = headerOf(scope);
+      bounds = { x: gr.x + 4, y: gr.y + header - ROUTE_GAP, w: gr.w - 8, h: gr.h - header + ROUTE_GAP - 4 };
+    } else {
+      const all = [...rects.values()];
+      const x0 = Math.min(...all.map((r) => r.x)) - 2 * ROUTE_GAP;
+      const y0 = Math.min(...all.map((r) => r.y)) - 2 * ROUTE_GAP;
+      const x1 = Math.max(...all.map((r) => r.x + r.w)) + 2 * ROUTE_GAP;
+      const y1 = Math.max(...all.map((r) => r.y + r.h)) + 2 * ROUTE_GAP;
+      bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+    }
+    const lines = others.filter((o) => o !== be).map((o) => o.points);
+    const route = routeAround(rects.get(from)!, rects.get(to)!, blocks, bands, bounds, lines);
+    if (route) be.points = route.map((p) => ({ x: round(p.x), y: round(p.y) }));
+  }
 }
 
 /** Spacing between parallel edges' bends and end points when the router redraws them. */
@@ -1133,7 +1242,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   const edgeItems: SceneEdge[] = [];
   const labelItems: SceneItem[] = [];
   const handles: SceneHandle[] = [];
-  const drawn = dividerSpans(d, base, rects);
+  const drawn = dividerSpans(d, base.nodes, base.parent, rects);
   const handle = (id: string, kind: 'node' | 'group'): void => {
     const r = drawn.get(id) ?? rects.get(id)!;
     handles.push({ id, kind, parent: base.parent.get(id) ?? '', x: r.x, y: r.y, w: r.w, h: r.h, moved: !isZero(deltaOf(id)) });
@@ -1296,15 +1405,20 @@ const EDGE_W = 1.3;
  * beside it) runs the full width of its parent: the group's inside, or the span of the root elements.
  * Otherwise it keeps its own box.
  */
-function dividerSpans(d: GraphDiagram, base: GraphBase, rects: ReadonlyMap<string, Rect>): Map<string, Rect> {
+function dividerSpans(
+  d: GraphDiagram,
+  nodes: ReadonlyMap<string, NodeGeom>,
+  parent: ReadonlyMap<string, string | undefined>,
+  rects: ReadonlyMap<string, Rect>,
+): Map<string, Rect> {
   const out = new Map<string, Rect>();
   const linked = new Set(d.edges.flatMap((e) => [e.from, e.to]));
-  for (const g of base.nodes.values()) {
+  for (const g of nodes.values()) {
     const id = g.node.id;
     const r = rects.get(id);
     if (!g.divider || !r || linked.has(id)) continue;
-    const p = base.parent.get(id);
-    const siblings = [...base.parent.entries()].filter(([o, q]) => q === p && o !== id).map(([o]) => rects.get(o)).filter((s): s is Rect => !!s);
+    const p = parent.get(id);
+    const siblings = [...parent.entries()].filter(([o, q]) => q === p && o !== id).map(([o]) => rects.get(o)).filter((s): s is Rect => !!s);
     if (siblings.some((s) => s.y < r.y + r.h && r.y < s.y + s.h)) continue;
     let x0: number;
     let x1: number;
