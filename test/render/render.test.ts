@@ -419,6 +419,14 @@ test('arrows, dashes and math signs are measured near their real width in the cl
   }
 });
 
+test('every diagram type asks for true glyph advances, so text drawn small has no gaps inside words (E63)', async () => {
+  for (const name of FIXTURES) {
+    const { svg, scene } = await renderDiagram(fixture(name));
+    assert.match(svg.slice(0, svg.indexOf('>')), /\stext-rendering="geometricPrecision"/, name);
+    assert.match(sceneToSvg(scene, { theme: 'dark' }).slice(0, 400), /\stext-rendering="geometricPrecision"/, `${name} dark`);
+  }
+});
+
 test('sequence: a message label cuts the lifelines it crosses; self labels stay short of the next lifeline (E60 follow-up)', async () => {
   const { PLATE_PAD } = await import('../../shared/render/text.ts');
   const { scene, svg } = await renderDiagram('A\nB\nC\nA > C: a long message label that crosses the lifeline of B\nB > B: a long self note next to the lifeline of C', { type: 'sequence' });
