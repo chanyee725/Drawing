@@ -223,3 +223,15 @@ test('routes: a bus member blocked on the bus level leaves the bus instead of ru
   const sharedRun = c.points.slice(1).reduce((n, q, k) => (q.x === c.points[k]!.x && q.x === b.points[0]!.x ? n + Math.abs(q.y - c.points[k]!.y) : n), 0);
   assert.ok(sharedRun <= 30, `${sharedRun} px beside H > B`);
 });
+
+test('routes: when every spot sits near another line, a label keeps the middle if it is clear of labels and nodes', async () => {
+  const { placeLabel } = await import('../../shared/render/layout-graph.ts');
+  const label = { lines: ['x'], w: 10, h: 20, size: 14, lineHeight: 20 };
+  const line = [{ x: 0, y: 0 }, { x: 200, y: 0 }];
+  // A staggered sibling 6 px away along the whole line: no spot passes the line check.
+  const sibling = [{ x: -50, y: 6 }, { x: 250, y: 6 }];
+  assert.deepEqual(placeLabel(line, 'elbow', label, [], [], [sibling]), { x: 100, y: 0 });
+  // A plate already on the middle still pushes the label along the line.
+  const placed: Rect[] = [{ x: 90, y: -12, w: 20, h: 24 }];
+  assert.deepEqual(placeLabel(line, 'elbow', label, placed, [], [sibling]), { x: 124, y: 0 });
+});
