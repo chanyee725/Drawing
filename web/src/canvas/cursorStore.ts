@@ -9,7 +9,8 @@ const set = (next: ReadonlyMap<string, Cursor>) => {
   cursors = next;
   for (const f of subs) f();
 };
-const subscribe = (f: () => void) => {
+/** f() after every change of the cursors; returns an unsubscribe function. */
+export const subscribeCursors = (f: () => void) => {
   subs.add(f);
   return () => subs.delete(f);
 };
@@ -38,4 +39,4 @@ export function clearCursors(file?: string) {
 
 export const cursorsNow = () => cursors;
 
-export const useCursors = () => useSyncExternalStore(subscribe, cursorsNow, cursorsNow);
+export const useCursors = () => useSyncExternalStore(subscribeCursors, cursorsNow, cursorsNow);

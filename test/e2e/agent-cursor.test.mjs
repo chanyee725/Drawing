@@ -102,6 +102,20 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   await page.goto(`${BASE}/#file=demo.dpx.json`);
   await page.locator('.excalidraw').first().waitFor();
 
+  // Every cursor node, when it enters the DOM (each outside edit remounts the canvas and its cursor layer), must
+  // already be placed or hidden (while the canvas loads): a node without `translate` paints at the overlay's
+  // top-left corner (#249).
+  await page.evaluate(() => {
+    const added = (window.__cursorAdds = []);
+    new MutationObserver((records) => {
+      for (const r of records)
+        for (const n of r.addedNodes)
+          if (n instanceof HTMLElement)
+            for (const el of [n, ...n.querySelectorAll('[data-agent-cursor]')])
+              if (el.matches('[data-agent-cursor]')) added.push({ at: el.style.translate, hidden: el.style.visibility === 'hidden' });
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+
   await call('POST', '/api/providers/claude/login');
   const { sessions } = await call('POST', '/api/sessions', { items: [{ role: 'impl', prompt: 'draw two boxes' }], worktree: false });
   assert.equal(sessions.length, 1);
@@ -111,6 +125,17 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   const cursor = page.locator('[data-agent-cursor]');
   await cursor.waitFor({ timeout: 15_000 });
   assert.equal(await cursor.getAttribute('data-role'), 'impl');
+  // The session's own colour, picked when it was created: the same on the pointer and the tag, white text on it.
+  assert.match(sessions[0].color, /^#[0-9a-f]{6}$/);
+  const paint = await cursor.evaluate((el) => {
+    const tag = el.querySelector('.agent-cursor-tag');
+    return { agent: el.style.getPropertyValue('--agent'), pointer: getComputedStyle(el.querySelector('path')).fill, tag: getComputedStyle(tag).backgroundColor, text: getComputedStyle(tag).color };
+  });
+  const hex = (c) => '#' + c.match(/\d+/g).slice(0, 3).map((v) => Number(v).toString(16).padStart(2, '0')).join('');
+  assert.equal(paint.agent, sessions[0].color);
+  assert.equal(hex(paint.pointer), sessions[0].color);
+  assert.equal(hex(paint.tag), sessions[0].color);
+  assert.equal(hex(paint.text), '#ffffff');
   assert.match(await cursor.locator('.agent-cursor-tag').textContent(), new RegExp(name));
   const at = () => cursor.evaluate((el) => el.style.translate.split(' ').map((v) => parseFloat(v)));
   await page.waitForTimeout(400);
@@ -126,7 +151,7 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
     const ys = (window.__cursorYs = []);
     const tick = () => {
       const el = document.querySelector('[data-agent-cursor]');
-      if (el?.style.translate) ys.push(parseFloat(el.style.translate.split(' ')[1]));
+      if (el?.style.translate && el.style.visibility !== 'hidden') ys.push(parseFloat(el.style.translate.split(' ')[1]));
       if (ys.length < 2000) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
@@ -145,6 +170,11 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   // It glided: some frames drew it between the two places, not only at one or the other.
   assert.ok(ys.some((y) => y > first[1] + 5 && y < second[1] - 5), `glided through the middle: ${JSON.stringify(ys.filter((y, i) => y !== ys[i - 1]))}`);
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'agent-cursor-second.png') });
+
+  // No cursor node ever entered the DOM unplaced (one per mount: the first edit and the remount after the second).
+  const adds = await page.evaluate(() => window.__cursorAdds);
+  assert.ok(adds.length >= 2, `cursor mounts seen: ${JSON.stringify(adds)}`);
+  assert.ok(adds.every((a) => a.hidden || (a.at && a.at !== 'none')), `placed or hidden before the first paint: ${JSON.stringify(adds)}`);
 
   // The session stops editing and its turn ends: the cursor goes.
   await cursor.waitFor({ state: 'detached', timeout: 15_000 });
