@@ -91,7 +91,10 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   assert.deepEqual(await tabs.getByRole('tab').allInnerTexts(), ['전체', '최근', '프로젝트별', '미분류']);
   assert.equal(await tabs.getByRole('tab', { name: '프로젝트별' }).getAttribute('aria-selected'), 'true');
   const chips = dash.getByRole('group', { name: '새로 만들기' }).getByRole('button');
-  assert.deepEqual((await chips.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim()), ['문서 D', '캔버스 C', '파이프라인 계획 P', '템플릿 T']);
+  // Chips show the kind only; a visually hidden "새 " keeps names like "새 파이프라인 계획" for assistive tech and e2e.
+  const shown = await chips.evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !(n instanceof Element && n.classList.contains('sr-only'))).map((n) => n.textContent).join('').replace(/\s+/g, ' ').trim()));
+  assert.deepEqual(shown, ['문서 D', '캔버스 C', '파이프라인 계획 P', '템플릿 T']);
+  for (const name of ['새 문서', '새 캔버스', '새 파이프라인 계획', '새 템플릿']) assert.equal(await chips.filter({ hasText: name }).count(), 1, name);
   const heads = dash.locator('[data-slot="group-head"]');
   assert.deepEqual(
     (await heads.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim()),
