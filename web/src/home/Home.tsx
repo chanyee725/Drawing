@@ -126,9 +126,9 @@ export function Home(props: HomeProps) {
 
 type Shared = Omit<HomeProps, "project"> & { data: ProjectsResponse; query: string; onQuery: (q: string) => void; search: React.RefObject<HTMLInputElement | null> };
 
-function SearchBox({ value, onChange, inputRef, placeholder }: { value: string; onChange: (v: string) => void; inputRef: React.RefObject<HTMLInputElement | null>; placeholder: string }) {
+function SearchBox({ value, onChange, inputRef, placeholder, wide }: { value: string; onChange: (v: string) => void; inputRef: React.RefObject<HTMLInputElement | null>; placeholder: string; wide?: boolean }) {
   return (
-    <div role="search" className="relative ml-auto w-52 max-w-full">
+    <div role="search" className={wide ? 'relative w-full' : 'relative ml-auto w-52 max-w-full'}>
       <Search className="pointer-events-none absolute top-2 left-2 size-4 text-muted-foreground" aria-hidden />
       <Input ref={inputRef} type="search" value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} aria-keyshortcuts="/" className="pr-8 pl-8" />
       {!value && <Kbd className="pointer-events-none absolute top-1.5 right-1.5" aria-hidden>/</Kbd>}
@@ -208,7 +208,7 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
       </header>
       {p.narrow && (
         <div className="border-b px-3 py-2">
-          <SearchBox value={query} onChange={onQuery} inputRef={search} placeholder="파일 찾기" />
+          <SearchBox value={query} onChange={onQuery} inputRef={search} placeholder="파일 찾기" wide />
         </div>
       )}
       <div role="group" aria-label="새로 만들기" className="flex items-center gap-1.5 overflow-x-auto border-b px-4 py-2.5 [scrollbar-width:none]">
@@ -296,7 +296,7 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
           <TabsTrigger value="pipelines">파이프라인</TabsTrigger>
           <TabsTrigger value="overview">개요</TabsTrigger>
         </TabsList>
-        <SearchBox value={query} onChange={onQuery} inputRef={search} placeholder="이 프로젝트에서 찾기 ( / )" />
+        <SearchBox value={query} onChange={onQuery} inputRef={search} placeholder="이 프로젝트에서 찾기" />
         <Button size="sm" onClick={() => p.onCreate('doc', project.id)}>
           <Plus /> 새 문서
         </Button>
