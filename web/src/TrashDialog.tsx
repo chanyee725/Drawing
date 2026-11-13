@@ -78,7 +78,7 @@ export function TrashDialog({ onClose, onRestored }: Props) {
           지운 파일은 30일 동안 보관해요. 버전 기록도 함께 돌아와요.
         </p>
         {message && (
-          <p role="alert" className="px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
+          <p role="alert" className="px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
             {message}
           </p>
         )}
@@ -108,7 +108,7 @@ export function TrashDialog({ onClose, onRestored }: Props) {
                   </div>
                 )}
               </div>
-              <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+              <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--brand)' }}>
                 {busy === i.id ? '되살리는 중이에요…' : '되살리기'}
               </button>
             </li>

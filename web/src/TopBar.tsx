@@ -64,7 +64,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
             aria-pressed={view === v.id}
             onClick={() => onView(v.id)}
             className="h-7 whitespace-nowrap rounded px-2 text-sm md:px-3"
-            style={view === v.id ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 600 } : { color: 'var(--text-muted)' }}
+            style={view === v.id ? { background: 'var(--brand-soft)', color: 'var(--brand)', fontWeight: 600 } : { color: 'var(--text-muted)' }}
           >
             {v.label}
           </button>
