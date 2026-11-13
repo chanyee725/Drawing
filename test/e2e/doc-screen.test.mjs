@@ -71,6 +71,28 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
   const title = (page) => page.getByLabel('파일 제목').inputValue();
   const pressed = (page) => page.getByRole('toolbar', { name: '보기 방식' }).getByRole('button').evaluateAll((bs) => bs.map((b) => `${b.textContent}:${b.getAttribute('aria-pressed')}`));
 
+  // Narrow canvas (Excalidraw's mobile layout): the bottom bar is a compact cluster, not the full canvas
+  // width, and the ☰ menu that opens inside it is not clipped to the cluster (E55 #196).
+  const checkNarrowCanvas = async (page, where) => {
+    const bar = page.locator('.excalidraw .App-bottom-bar > .Island').first();
+    await bar.waitFor();
+    const canvas = await page.locator('.excalidraw').first().boundingBox();
+    const cluster = await bar.boundingBox();
+    assert.ok(cluster.width < 200 && cluster.width < canvas.width / 2, `${where}: compact cluster ${cluster.width}px in a ${canvas.width}px canvas`);
+    assert.ok(Math.abs(cluster.x - canvas.x - 16) <= 1, `${where}: cluster 16px from the canvas edge: ${cluster.x - canvas.x}`);
+    await page.locator('.excalidraw [data-testid="main-menu-trigger"]').click();
+    const menu = page.locator('.excalidraw .dropdown-menu').first();
+    await menu.waitFor();
+    const m = await menu.evaluate((n) => {
+      const clipped = [...n.querySelectorAll('*')].filter((c) => c.scrollWidth > c.clientWidth + 1 && getComputedStyle(c).overflow !== 'visible').map((c) => c.className);
+      return { w: n.getBoundingClientRect().width, sw: n.scrollWidth, cw: n.clientWidth, clipped };
+    });
+    assert.ok(m.w > 180 && m.sw <= m.cw + 1 && m.clipped.length === 0, `${where}: ☰ menu not clipped: ${JSON.stringify(m)}`);
+    // ☰ again closes it (Escape doesn't on the mobile layout).
+    await page.locator('.excalidraw [data-testid="main-menu-trigger"]').click();
+    await menu.waitFor({ state: 'detached' });
+  };
+
   for (const theme of ['light', 'dark']) {
     const page = await open(theme, 1440);
     const nav = page.getByRole('navigation', { name: '사이드바' });
@@ -106,6 +128,9 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     const subs = page.getByRole('region', { name: '하위 문서' });
     await subs.getByRole('button', { name: /토큰 갱신/ }).waitFor();
     await page.locator('.excalidraw').first().waitFor();
+    // The doc/canvas seam is a 1px line.
+    assert.equal((await page.getByRole('separator', { name: '문서와 캔버스 사이 분할선' }).boundingBox()).width, 1);
+    await checkNarrowCanvas(page, `${theme} split 1440`);
     await shot(page, `${theme}-doc-1440`);
     if (theme === 'dark') {
       await page.close();
@@ -171,6 +196,7 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     await page.locator('.excalidraw').first().waitFor();
     assert.deepEqual(await pressed(page), ['문서:false', '캔버스:true']);
     await page.waitForTimeout(400);
+    await checkNarrowCanvas(page, `${theme} canvas 390`);
     await shot(page, `${theme}-canvas-390`);
     await page.close();
   }
