@@ -25,7 +25,7 @@ import { RunOverlay } from './RunOverlay';
 import { AgentCursors } from './AgentCursors';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
-import { CLEAN_APP_STATE } from './cleanStyle';
+import { CLEAN_APP_STATE, cleanElements } from './cleanStyle';
 import './clean.css';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
@@ -300,7 +300,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       const pics = await draw(blocks);
       for (const p of pics) sizes.current.set(p.fileId, p);
       for (const b of blocks) seenLayouts.current.set(b.id, layoutSig(b.layout));
-      const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
+      // Shapes saved hand-drawn (older builds, the insert menu before E58) open clean. Versions stay as saved, so
+      // opening alone writes nothing: the clean style reaches the disk with the user's next edit.
+      const tidy = cleanElements(canvas.elements as ExcalidrawElement[]);
+      const free = restoreElements(tidy.elements as ExcalidrawElement[], null, { refreshDimensions: tidy.fonts });
       sigRef.current = freeSignature(free);
       // A block goes back into the frame it was saved in, if that frame is still there (#83).
       const placed = placeBlocks(liveFrames(blocks, free as unknown as SceneEl[]), pics, liveRects(free));
@@ -466,6 +469,12 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     let elements = sceneEls;
     let cur = blocksRef.current;
+    // Hand-drawn shapes that come in by paste, the library or copied styles are made clean on the spot.
+    const tidy = cleanElements(elements, (e, patch) => newElementWith(e, patch as Partial<ExcalidrawElement>));
+    if (tidy.changed && apiRef.current) {
+      elements = tidy.fonts ? restoreElements(tidy.elements, null, { refreshDimensions: true }) : tidy.elements;
+      apiRef.current.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+    }
     // A copied block image (duplicate, paste, alt-drag) becomes a new block with the same code.
     const copies = findCopies(elements as unknown as readonly SceneEl[], owners.current);
     const xapi = apiRef.current;

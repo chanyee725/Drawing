@@ -204,6 +204,16 @@ body {
   display: none !important;
 }
 
+/* The canvas draws clean lines only (E58): the style panel offers neither sloppiness nor the handwriting fonts
+   (the quick button, and Virgil 1 / Excalifont 5 in the font list, which opens in a portal outside .excalidraw).
+   !important: Excalidraw's own rules load later and set display. */
+.excalidraw fieldset:has(input[name="sloppiness"]),
+.excalidraw label:has(> [data-testid="font-family-hand-drawn"]),
+.excalidraw [data-testid="font-family-hand-drawn"],
+.dropdown-menu.fonts .dropdown-menu-item:is([value="1"], [value="5"]) {
+  display: none !important;
+}
+
 /* Document editor (DocPane). Tailwind's preflight resets headings and lists, so they are styled here. */
 .doc-editor {
   min-height: 60vh;
