@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
-import { ChevronRight, FileText, FolderPlus, Moon, Pencil, Plus, Sun, Trash, X } from 'lucide-react';
+import { ChevronRight, FilePlus, FileText, FolderPlus, Moon, Pencil, Plus, Sun, Trash, Workflow, X } from 'lucide-react';
 import type { TreeNode } from './api';
 import { Button } from './components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Input } from './components/ui/input';
 import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
@@ -15,6 +16,7 @@ type Props = {
   current: string | null;
   onOpen: (path: string) => void;
   onNewFile: () => void;
+  onNewPipeline: () => void;
   onNewFolder: () => void;
   onDelete: (node: TreeNode) => void;
   /** Move `node` into folder `dir` ('' = workspace root). */
@@ -200,6 +202,18 @@ function Row({ node, depth, p }: { node: TreeNode; depth: number; p: Props }) {
     >
       <FileText aria-hidden className={cn('size-3.5 shrink-0', active ? 'text-sidebar-accent-foreground' : 'text-muted-foreground')} />
       {nameEl}
+      {!renaming && node.pipeline?.state === 'plan' && (
+        // Pipeline file still in planning (runs come with E21). Hidden while the row's actions show, so they never overlap.
+        <span
+          role="img"
+          aria-label="파이프라인: 계획"
+          title="파이프라인 계획"
+          className="ml-auto flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[11px] leading-4 text-muted-foreground group-focus-within:hidden group-hover:hidden"
+        >
+          <span aria-hidden>◐</span>
+          <span aria-hidden>계획</span>
+        </span>
+      )}
       {!renaming && actions}
     </div>
   );
@@ -222,9 +236,23 @@ export function Sidebar(p: Props) {
         <Button variant="ghost" size="icon-sm" onClick={p.onNewFolder} aria-label="새 폴더" title="새 폴더" className={cn('size-6 text-muted-foreground', FOCUS_RING)}>
           <FolderPlus className="size-3.5" />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={p.onNewFile} aria-label="새 파일" title="새 파일" className={cn('size-6 text-muted-foreground', FOCUS_RING)}>
-          <Plus className="size-3.5" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon-sm" aria-label="새로 만들기" title="새로 만들기" className={cn('size-6 text-muted-foreground', FOCUS_RING)}>
+              <Plus className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={p.onNewFile}>
+              <FilePlus aria-hidden className="size-3.5 text-muted-foreground" />
+              새 파일
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={p.onNewPipeline}>
+              <Workflow aria-hidden className="size-3.5 text-muted-foreground" />
+              새 파이프라인
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       <nav
         className="min-h-0 flex-1 overflow-auto px-2 py-1"
