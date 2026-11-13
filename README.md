@@ -110,6 +110,8 @@ npm start -- <작업 폴더>
 | 문법 | 뜻 |
 |---|---|
 | `Name [icon: aws-ec2, color: blue]` | 노드와 속성. 주요 속성은 `icon`, `color`, `label`, `shape` |
+| `Web [icon: react, subtitle: React SPA]` | 부제(두 번째 줄). 우리 확장 속성이라 Eraser에는 없어요 |
+| `nodeStyle icon` | 아키텍처의 아이콘 노드를 상자 카드 대신 큰 아이콘 + 아래 글자로 그려요. 기본은 `box` |
 | `Group { ... }` | 그룹. 안에 그룹을 또 넣을 수 있어요 |
 | `A > B`, `A < B`, `A <> B`, `A - B`, `A -- B`, `A --> B` | 연결. `A > B > C` 처럼 이어 쓸 수 있어요 |
 | `A > B: 라벨 [color: red]` | 연결 라벨과 속성 |

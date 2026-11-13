@@ -169,6 +169,23 @@ export function resolvePaint(paint: Paint, theme: Theme, soft = false, shadow = 
   return { fill: paint.mode === 'bold' ? mix(stroke, t.background, 0.3) : pastelOf(paint.color, theme), stroke, text: t.text };
 }
 /** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
+/**
+ * Muted text (a subtitle) on `fill`: `muted` itself when it reads at 4.5:1 or better, otherwise moved toward
+ * `text` in 10% steps until it does. Pale tinted fills need a slightly darker grey than white does.
+ */
+export function readableMuted(muted: string, text: string, fill: string): string {
+  if (!/^#[0-9a-f]{6}$/i.test(fill)) return muted;
+  const ratio = (a: string): number => {
+    const [x, y] = [luminance(a), luminance(fill)];
+    return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+  };
+  for (let k = 0; k <= 10; k++) {
+    const c = k === 0 ? muted : mix(text, muted, k / 10);
+    if (ratio(c) >= 4.5) return c;
+  }
+  return text;
+}
+
 function contrastText(fill: string): string {
   const l = luminance(fill);
   const dark = luminance('#1f2329');
