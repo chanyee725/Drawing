@@ -5,7 +5,7 @@
 // owner names instead of pids, so the order is fixed and the test fails on the old behaviour.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquireBreak } from '../../server/lock.js';
@@ -110,6 +110,54 @@ test('acquireBreak: an old-style .break file is cleared when its pid is dead and
     await release();
     writeFileSync(brk, JSON.stringify({ pid: process.pid }));
     await assert.rejects(acquireBreak(brk, { owner: 'live-B', isDead, tries: 5 }), { name: 'LockBreakTimeoutError' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquireBreak: a .break symlink to another folder is removed itself and its target is left alone', async () => {
+  const { dir, brk } = scratch();
+  try {
+    const other = join(dir, 'other');
+    mkdirSync(other);
+    writeFileSync(join(other, 'dead-keep'), 'x');
+    writeFileSync(join(other, 'precious.txt'), 'x');
+    symlinkSync(other, brk);
+    const release = await acquireBreak(brk, { owner: 'live-A', isDead });
+    assert.deepEqual(readdirSync(other).sort(), ['dead-keep', 'precious.txt'], 'target folder untouched');
+    assert.equal(lstatSync(brk).isSymbolicLink(), false, 'the link itself is gone');
+    await release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquireBreak: with the default check, only <pid>-<uuid> names count as owners', async () => {
+  const { dir, brk } = scratch();
+  try {
+    mkdirSync(brk);
+    writeFileSync(join(brk, 'precious.txt'), 'x'); // not an owner name: never judged dead or removed
+    await assert.rejects(acquireBreak(brk, { owner: 'live-A', tries: 5 }), { name: 'LockBreakTimeoutError' });
+    assert.deepEqual(readdirSync(brk), ['precious.txt']);
+    rmSync(join(brk, 'precious.txt'));
+    writeFileSync(join(brk, `${2 ** 22 + 54321}-00000000-0000-4000-8000-000000000000`), '');
+    const release = await acquireBreak(brk, { owner: `${process.pid}-live` });
+    await release();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquireBreak: an old-style file replaced by a folder mid-clear does not throw', async () => {
+  const { dir, brk } = scratch();
+  try {
+    writeFileSync(brk, JSON.stringify({ pid: 2 ** 22 + 54321 }));
+    // Simulate the race: a folder appears where the dead old file was, right as rm runs.
+    const release = await acquireBreak(brk, { owner: 'live-A', isDead });
+    await release();
+    mkdirSync(brk);
+    const release2 = await acquireBreak(brk, { owner: 'live-B', isDead });
+    await release2();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

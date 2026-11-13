@@ -69,6 +69,7 @@ export class LockBreakTimeoutError extends Error {
   name = 'LockBreakTimeoutError';
 }
 
+const OWNER_NAME = /^(\d+)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ownerPid = (name) => Number.parseInt(name, 10);
 
 /**
@@ -84,7 +85,8 @@ const ownerPid = (name) => Number.parseInt(name, 10);
  * `owner`, `isDead` and `tries` are for tests; isDead(name) defaults to "its pid is not running".
  */
 export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()}`, isDead, tries = 200 } = {}) {
-  const dead = isDead ?? (async (name) => !pidAlive(ownerPid(name)));
+  // Only `<pid>-<uuid>` names are owners; any other name is not ours to judge or remove.
+  const dead = isDead ?? (async (name) => OWNER_NAME.test(name) && !pidAlive(ownerPid(name)));
   const stage = `${brk}.${owner}.tmp`;
   for (let i = 0; i < tries; i++) {
     await rm(stage, { recursive: true, force: true });
@@ -107,6 +109,13 @@ export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()
 async function clearDeadBreak(brk, dead) {
   let names;
   try {
+    // A link at `.break` (planted or stray) is never followed: readdir/unlink would act on its target.
+    if ((await lstat(brk)).isSymbolicLink()) {
+      await unlink(brk).catch((err) => {
+        if (err.code !== 'ENOENT') throw err;
+      });
+      return true;
+    }
     names = await readdir(brk);
   } catch (err) {
     if (err.code === 'ENOENT') return true;
@@ -131,7 +140,12 @@ async function clearDeadBreak(brk, dead) {
 async function clearOldBreakFile(brk) {
   const { holder } = await readLock(brk);
   if (holder && pidAlive(holder.pid)) return false;
-  await rm(brk, { force: true });
+  try {
+    await rm(brk, { force: true });
+  } catch (err) {
+    // Another server cleared the file and a third made it a folder meanwhile: retry from the top.
+    if (err.code !== 'ERR_FS_EISDIR' && err.code !== 'EISDIR') throw err;
+  }
   return true;
 }
 
