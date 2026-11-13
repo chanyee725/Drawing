@@ -1359,6 +1359,49 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   const portOf = new Map(straight.map((be, i) => [be, ports[i]!]));
 
   const nodeRects = [...nodes.keys()].map((id) => rects.get(id)!).filter(Boolean);
+  const nodeIds = [...nodes.keys()];
+  /** Each node's obstacles as drawn: its box, or for a divider spanning its row only its label (lazy). */
+  let blocksOf: Map<string, Rect[]> | undefined;
+  /** Whether `points` runs through a node other than `from` and `to` (after a drag, #255). */
+  const cutsOthers = (points: Point[], from: string, to: string): boolean => {
+    blocksOf ??= new Map(nodeIds.map((id) => [id, obstacles([id], nodes, rects, drawn).blocks]));
+    for (const [id, blocks] of blocksOf) {
+      if (id === from || id === to) continue;
+      for (const r of blocks) {
+        for (let k = 1; k < points.length; k++) {
+          const p = points[k - 1]!;
+          const q = points[k]!;
+          if (Math.max(p.x, q.x) > r.x + 0.5 && Math.min(p.x, q.x) < r.x + r.w - 0.5 && Math.max(p.y, q.y) > r.y + 0.5 && Math.min(p.y, q.y) < r.y + r.h - 0.5) return true;
+        }
+      }
+    }
+    return false;
+  };
+  /** Routes found by detour, by unordered pair: a parallel edge keeps off them. */
+  const routedPairs = new Map<string, Point[][]>();
+  /**
+   * A route around the other nodes for an edge whose rerouted elbow cuts one (#255): first near its two
+   * ends, then across the whole picture. Undefined when there is none (the elbow stays).
+   */
+  const detour = (from: string, to: string, lines: Point[][]): Point[] | undefined => {
+    const a = rects.get(from)!;
+    const b = rects.get(to)!;
+    const ids = nodeIds.filter((id) => id !== from && id !== to);
+    const { blocks, bands } = obstacles(ids, nodes, rects, drawn);
+    const span = (rs: Rect[]): Rect => {
+      const x0 = Math.min(...rs.map((r) => r.x));
+      const y0 = Math.min(...rs.map((r) => r.y));
+      return { x: x0, y: y0, w: Math.max(...rs.map((r) => r.x + r.w)) - x0, h: Math.max(...rs.map((r) => r.y + r.h)) - y0 };
+    };
+    const meets = (r: Rect, o: Rect): boolean => r.x < o.x + o.w && o.x < r.x + r.w && r.y < o.y + o.h && o.y < r.y + r.h;
+    const near = growRect(span([a, b]), 4 * ROUTE_GAP);
+    const all = growRect(span([...rects.values()]), 4 * ROUTE_GAP);
+    for (const bounds of [near, all]) {
+      const route = routeAround(a, b, blocks.filter((r) => meets(r, bounds)), bands.filter((r) => meets(r, bounds)), bounds, lines);
+      if (route) return route.map((p) => ({ x: round(p.x), y: round(p.y) }));
+    }
+    return undefined;
+  };
   const placedLabels: Rect[] = [];
   // Labels are placed once every route is known, so none lands on a line that is not its own.
   const pendingLabels: { edge: SceneEdge; label: Label; style: ElementStyle }[] = [];
@@ -1388,7 +1431,15 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
       else if (e.from === e.to || sameShift(da, db)) points = be.points.map((p) => ({ x: round(p.x + da.dx), y: round(p.y + da.dy) }));
       else if (isAncestor(e.from, e.to)) points = routeIntoGroup(a, groups.get(e.from)!.header, b, offset);
       else if (isAncestor(e.to, e.from)) points = routeIntoGroup(b, groups.get(e.to)!.header, a, offset).reverse();
-      else points = routeElbow(a, b, offset);
+      else {
+        points = routeElbow(a, b, offset);
+        const pair = [e.from, e.to].sort().join('\u0000');
+        const around = cutsOthers(points, e.from, e.to) ? detour(e.from, e.to, routedPairs.get(pair) ?? []) : undefined;
+        if (around) {
+          points = around;
+          routedPairs.set(pair, [...(routedPairs.get(pair) ?? []), around]);
+        }
+      }
       if (points.length >= 2 && e.from !== e.to) {
         const sa = nodes.get(e.from)?.shape;
         const sb = nodes.get(e.to)?.shape;

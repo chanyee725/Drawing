@@ -14,7 +14,6 @@ type Dir = 0 | 1 | 2 | 3; // right, down, left, up
 const DX = [1, 0, -1, 0] as const;
 const DY = [0, 1, 0, -1] as const;
 
-const inside = (r: Rect, x: number, y: number): boolean => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
 const grow = (r: Rect, m: number): Rect => ({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
 
 /** Off-centre port tracks, for when another line already leaves the middle of a side. */
@@ -123,10 +122,39 @@ export function routeAround(
   const xi = new Map(xs.map((x, i) => [x, i]));
   const yi = new Map(ys.map((y, i) => [y, i]));
   const W = xs.length;
-  const free = (x: number, y: number): boolean => !walls.some((r) => inside(r, x, y));
+  const wx0 = Float64Array.from(walls, (r) => r.x);
+  const wx1 = Float64Array.from(walls, (r) => r.x + r.w);
+  const wy0 = Float64Array.from(walls, (r) => r.y);
+  const wy1 = Float64Array.from(walls, (r) => r.y + r.h);
+  const free = (x: number, y: number): boolean => {
+    for (let k = 0; k < wx0.length; k++) if (x > wx0[k]! && x < wx1[k]! && y > wy0[k]! && y < wy1[k]!) return false;
+    return true;
+  };
   const key = (i: number, j: number, d: Dir): number => ((j * W + i) << 2) | d;
-  const cost = new Map<number, number>();
-  const prev = new Map<number, number>();
+  // Per grid point and per move (right or down from a point), worked out once: the search reaches each
+  // up to four times (once per heading). 0 unknown, 1 open, 2 shut.
+  const openAt = new Uint8Array(W * ys.length);
+  const openRight = new Uint8Array(W * ys.length);
+  const openDown = new Uint8Array(W * ys.length);
+  const pointOpen = (i: number, j: number): boolean => {
+    const c = j * W + i;
+    if (!openAt[c]) openAt[c] = free(xs[i]!, ys[j]!) ? 1 : 2;
+    return openAt[c] === 1;
+  };
+  const moveOpen = (i: number, j: number, flat: boolean): boolean => {
+    const c = j * W + i;
+    const memo = flat ? openRight : openDown;
+    if (!memo[c]) {
+      const p = { x: xs[i]!, y: ys[j]! };
+      const q = flat ? { x: xs[i + 1]!, y: p.y } : { x: p.x, y: ys[j + 1]! };
+      const mx = (p.x + q.x) / 2;
+      const my = (p.y + q.y) / 2;
+      memo[c] = free(mx, my) && !(flat && inBand(mx, p.y)) && !alongLine(lines, p, q) ? 1 : 2;
+    }
+    return memo[c] === 1;
+  };
+  const cost = new Float64Array(W * ys.length * 4).fill(Infinity);
+  const prev = new Int32Array(W * ys.length * 4);
   // A small binary heap of [cost, state].
   const heap: [number, number][] = [];
   const push = (c: number, s: number): void => {
@@ -156,13 +184,37 @@ export function routeAround(
     }
     return top;
   };
+  // A*: the heap orders by cost so far plus a lower bound on the rest (Manhattan to the nearest goal,
+  // plus the cheapest way into b), so the search heads for b instead of filling the whole grid.
+  const toLeft = new Float64Array(W * ys.length).fill(-1);
+  let goalPoints: { x: number; y: number }[] = [];
+  let entry = 0;
+  const rest = (cell: number): number => {
+    if (toLeft[cell]! < 0) {
+      const x = xs[cell % W]!;
+      const y = ys[Math.floor(cell / W)]!;
+      let m = Infinity;
+      for (const g of goalPoints) m = Math.min(m, Math.abs(x - g.x) + Math.abs(y - g.y));
+      toLeft[cell] = m + entry;
+    }
+    return toLeft[cell]!;
+  };
   const relax = (s: number, c: number, p: number): void => {
-    if (c < (cost.get(s) ?? Infinity)) {
-      cost.set(s, c);
-      prev.set(s, p);
-      push(c, s);
+    if (c < cost[s]!) {
+      cost[s] = c;
+      prev[s] = p;
+      push(c + rest(s >> 2), s);
     }
   };
+  const goals = new Map<number, (typeof to)[number]>();
+  for (const p of to) {
+    const i = xi.get(Math.round(p.out.x * 2) / 2);
+    const j = yi.get(Math.round(p.out.y * 2) / 2);
+    if (i !== undefined && j !== undefined && free(p.out.x, p.out.y) && !alongLine(lines, p.at, p.out)) goals.set(j * W + i, p);
+  }
+  if (!goals.size) return undefined;
+  goalPoints = [...goals.values()].map((p) => p.out);
+  entry = Math.min(...[...goals.values()].map((p) => p.cost));
   // A start state's predecessor is -1 - (index of its port in `from`).
   from.forEach((p, k) => {
     const i = xi.get(Math.round(p.out.x * 2) / 2);
@@ -170,17 +222,12 @@ export function routeAround(
     if (i === undefined || j === undefined || !free(p.out.x, p.out.y) || alongLine(lines, p.at, p.out)) return;
     relax(key(i, j, p.dir), p.cost, -1 - k);
   });
-  const goals = new Map<number, (typeof to)[number]>();
-  for (const p of to) {
-    const i = xi.get(Math.round(p.out.x * 2) / 2);
-    const j = yi.get(Math.round(p.out.y * 2) / 2);
-    if (i !== undefined && j !== undefined && free(p.out.x, p.out.y) && !alongLine(lines, p.at, p.out)) goals.set(j * W + i, p);
-  }
   let best: { state: number; cost: number; port: (typeof to)[number] } | undefined;
   while (heap.length) {
-    const [c, s] = pop();
-    if (c > (cost.get(s) ?? Infinity)) continue;
-    if (best && c >= best.cost) break;
+    const [f, s] = pop();
+    const c = cost[s]!;
+    if (f > c + rest(s >> 2)) continue;
+    if (best && f >= best.cost) break;
     const cell = s >> 2;
     const d = (s & 3) as Dir;
     const i = cell % W;
@@ -196,13 +243,13 @@ export function routeAround(
       const ni = i + DX[nd];
       const nj = j + DY[nd];
       if (ni < 0 || nj < 0 || ni >= W || nj >= ys.length) continue;
+      if (!pointOpen(ni, nj)) continue;
+      // A move left or up is the move right or down from the point it reaches.
+      if (!(nd < 2 ? moveOpen(i, j, nd === 0) : moveOpen(ni, nj, nd === 2))) continue;
       const x0 = xs[i]!;
       const y0 = ys[j]!;
       const x1 = xs[ni]!;
       const y1 = ys[nj]!;
-      if (!free(x1, y1) || !free((x0 + x1) / 2, (y0 + y1) / 2)) continue;
-      if (DY[nd] === 0 && inBand((x0 + x1) / 2, y0)) continue;
-      if (alongLine(lines, { x: x0, y: y0 }, { x: x1, y: y1 })) continue;
       relax(key(ni, nj, nd), c + Math.abs(x1 - x0) + Math.abs(y1 - y0) + (nd === d ? 0 : BEND), s);
     }
   }
@@ -212,7 +259,7 @@ export function routeAround(
   for (;;) {
     const cell = s >> 2;
     path.push({ x: xs[cell % W]!, y: ys[Math.floor(cell / W)]! });
-    const p = prev.get(s)!;
+    const p = prev[s]!;
     if (p < 0) {
       path.push(from[-1 - p]!.at);
       break;
