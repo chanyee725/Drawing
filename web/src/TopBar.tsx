@@ -1,4 +1,10 @@
 import type { ReactNode } from 'react';
+import { Clock, Menu, Search } from 'lucide-react';
+import { Button } from './components/ui/button';
+import { Kbd } from './components/ui/kbd';
+import { Segmented, SegmentedItem } from './components/ui/segmented';
+import { cn } from './lib/utils';
+import { IS_MAC } from './platform';
 
 export type View = 'doc' | 'both' | 'canvas';
 
@@ -23,15 +29,17 @@ type Props = {
   exportMenu?: ReactNode;
   /** Opens the version history of the open file. */
   onHistory?: () => void;
+  /** Opens the command menu (also Ctrl/Cmd+K). */
+  onCommands?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu, onHistory }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
   return (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-2 md:gap-3 md:px-4" style={{ borderColor: 'var(--border)' }}>
+    <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-panel px-2 md:gap-3 md:px-3">
       {onToggleNav && (
-        <button type="button" onClick={onToggleNav} aria-label="파일 목록 열기" className="h-8 shrink-0 rounded-md px-2 text-lg leading-none">
-          ☰
-        </button>
+        <Button variant="ghost" size="icon-sm" onClick={onToggleNav} aria-label="파일 목록 열기">
+          <Menu />
+        </Button>
       )}
       {hasFile ? (
         <input
@@ -39,48 +47,39 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
           onChange={(e) => onTitle(e.target.value)}
           placeholder="제목 없는 파일"
           aria-label="파일 제목"
-          className="h-8 min-w-0 flex-1 rounded-md bg-transparent px-2 font-medium outline-none focus:ring-2 md:w-56 md:flex-none"
+          className="h-(--h-row) min-w-0 flex-1 rounded-md bg-transparent px-2 text-base font-medium outline-none placeholder:text-muted-foreground hover:bg-accent focus-visible:bg-background focus-visible:ring-[3px] focus-visible:ring-ring/50 md:w-56 md:flex-none"
         />
       ) : (
-        <span className="min-w-0 flex-1 truncate px-2 md:flex-none" style={{ color: 'var(--text-muted)' }}>
-          파일을 골라 주세요
-        </span>
+        <span className="min-w-0 flex-1 truncate px-2 text-muted-foreground md:flex-none">파일을 골라 주세요</span>
       )}
       <span
-        className={`min-w-0 shrink-0 truncate text-xs md:shrink md:inline ${statusAlert ? 'inline font-medium' : 'hidden'}`}
-        style={{ color: statusAlert ? 'var(--danger)' : 'var(--text-muted)' }}
+        className={cn('min-w-0 shrink-0 items-center gap-1.5 truncate text-xs md:inline-flex md:shrink', statusAlert ? 'inline-flex font-medium text-destructive' : 'hidden text-muted-foreground')}
         role={statusAlert ? 'alert' : undefined}
         aria-live="polite"
         title={status}
       >
+        {status && <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', statusAlert ? 'bg-destructive' : 'bg-text-4')} />}
         <span className="md:hidden">{statusAlert ? '저장 안 됨' : ''}</span>
-        <span className="hidden md:inline">{status}</span>
+        <span className="hidden truncate md:inline">{status}</span>
       </span>
-      <div className="flex shrink-0 rounded-md border p-0.5 md:mx-auto" style={{ borderColor: 'var(--border)' }} role="group" aria-label="보기 방식">
+      <Segmented className="shrink-0 md:mx-auto" aria-label="보기 방식">
         {VIEWS.map((v) => (
-          <button
-            key={v.id}
-            type="button"
-            aria-pressed={view === v.id}
-            onClick={() => onView(v.id)}
-            className="h-7 whitespace-nowrap rounded px-2 text-sm md:px-3"
-            style={view === v.id ? { background: 'var(--brand-soft)', color: 'var(--brand)', fontWeight: 600 } : { color: 'var(--text-muted)' }}
-          >
+          <SegmentedItem key={v.id} active={view === v.id} onClick={() => onView(v.id)} className="px-2 md:px-3">
             {v.label}
-          </button>
+          </SegmentedItem>
         ))}
-      </div>
+      </Segmented>
+      {onCommands && (
+        <Button variant="ghost" size="sm" onClick={onCommands} aria-label="명령 메뉴 열기" aria-haspopup="dialog" className="hidden text-muted-foreground md:inline-flex">
+          <Search />
+          <Kbd>{IS_MAC ? '⌘K' : 'Ctrl K'}</Kbd>
+        </Button>
+      )}
       {onHistory && (
-        <button
-          type="button"
-          onClick={onHistory}
-          disabled={!hasFile}
-          aria-haspopup="dialog"
-          className="h-8 shrink-0 whitespace-nowrap rounded-md border px-2 text-sm disabled:opacity-50 md:px-3"
-          style={{ borderColor: 'var(--border)' }}
-        >
+        <Button variant="outline" size="sm" onClick={onHistory} disabled={!hasFile} aria-haspopup="dialog" className="shrink-0">
+          <Clock className="hidden md:block" />
           버전 기록
-        </button>
+        </Button>
       )}
       {exportMenu}
     </header>

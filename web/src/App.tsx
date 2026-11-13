@@ -658,6 +658,10 @@ export function App() {
             onView={setView}
             onTitle={(title) => edit({ title })}
             onHistory={() => setHistoryOpen(true)}
+          onCommands={() => {
+            setExportOpen(false);
+            setPaletteOpen(true);
+          }}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
             exportMenu={
               <ExportMenu
