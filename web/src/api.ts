@@ -97,3 +97,61 @@ export const api = {
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
   move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
 };
+
+// Project view: GET /api/workspace/projects (docs/workspace-api.md "Projects view"), mapped to the shapes the screens use.
+type DocNodeDto = { type: 'doc' | 'group'; path: string; name: string; title?: string; created: string | null; modified: string | null; children: DocNodeDto[] };
+type ProjectDto = { path: string; name: string; icon: string | null; description: string; created: string | null; modified: string | null; count: number; docs: DocNodeDto[] };
+export type ProjectDoc = {
+  path: string;
+  name: string;
+  title: string;
+  /** A folder without a same-named file: a parent without a document of its own. */
+  bundle: boolean;
+  /** ms since epoch (0 = unknown) */
+  createdAt: number;
+  modifiedAt: number;
+  children: ProjectDoc[];
+};
+export type ProjectInfo = {
+  /** The project folder's path (its unique id). */
+  id: string;
+  path: string;
+  name: string;
+  icon: string;
+  description: string;
+  docCount: number;
+  createdAt: number;
+  modifiedAt: number;
+  docs: ProjectDoc[];
+};
+export type ProjectsResponse = { projects: ProjectInfo[]; unfiled: ProjectDoc[] };
+export type RecentFile = { path: string; title: string; project: string | null; parent: string | null; createdAt: number; modifiedAt: number };
+const time = (s: string | null) => (s ? Date.parse(s) || 0 : 0);
+const toDoc = (n: DocNodeDto): ProjectDoc => ({
+  path: n.path,
+  name: n.name,
+  title: n.title || n.name,
+  bundle: n.type === 'group',
+  createdAt: time(n.created),
+  modifiedAt: time(n.modified),
+  children: n.children.map(toDoc),
+});
+export const projectsApi = {
+  projects: () =>
+    call<{ projects: ProjectDto[]; loose: DocNodeDto[] }>('GET', '/api/workspace/projects').then(
+      (r): ProjectsResponse => ({
+        projects: r.projects.map((p) => ({
+          id: p.path,
+          path: p.path,
+          name: p.name,
+          icon: p.icon ?? [...p.name][0] ?? '',
+          description: p.description,
+          docCount: p.count,
+          createdAt: time(p.created),
+          modifiedAt: time(p.modified),
+          docs: p.docs.map(toDoc),
+        })),
+        unfiled: r.loose.map(toDoc),
+      }),
+    ),
+};
