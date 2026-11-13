@@ -1,7 +1,10 @@
 // Workspace module: HTTP API over the file store + SSE "workspace" events for outside changes.
 import { createStore, StoreError } from './store.js';
 import { listProjects } from './projects.js';
+// The PR/CI switch lives with the Dispatch PR tracker (it reads the same settings.json), so the route reuses it.
+import { readPrTracking, setPrTracking } from '../dispatch/pr-status.js';
 
+const SETTINGS_BROKEN = '설정 파일을 읽을 수 없어요. 파일을 확인해 주세요.';
 const MAX_BODY = 20 * 1024 * 1024;
 
 async function readJson(req) {
@@ -75,6 +78,25 @@ export async function setup(ctx) {
       route('GET', '/api/tree', async () => ({ tree: await store.tree() })),
       // Projects view (top-level folders, nested sub-documents). Not /api/projects: Dispatch owns that path.
       route('GET', '/api/workspace/projects', () => listProjects(store)),
+      // Per-workspace PR/CI tracking switch (E57 settings dialog); stored in <workspace>/.drawing/settings.json.
+      route('GET', '/api/workspace/pr-tracking', async () => {
+        try {
+          return { on: await readPrTracking(ctx.workspaceDir) };
+        } catch (e) {
+          if (e?.code === 'ESETTINGS') throw new StoreError(409, SETTINGS_BROKEN);
+          throw e;
+        }
+      }),
+      route('POST', '/api/workspace/pr-tracking', async (_p, b) => {
+        if (typeof b?.on !== 'boolean') throw new StoreError(400, 'on must be true or false');
+        try {
+          await setPrTracking(ctx.workspaceDir, b.on);
+        } catch (e) {
+          if (e?.code === 'ESETTINGS') throw new StoreError(409, SETTINGS_BROKEN);
+          throw e;
+        }
+        return { on: b.on };
+      }),
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
       route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
