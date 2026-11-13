@@ -12,16 +12,35 @@ export const PR_DEFAULTS = { timeoutMs: 8000, cacheMs: 30000, minGapMs: 1000 };
 
 const settingsFile = workspaceDir => path.join(workspaceDir, ".drawing", "settings.json");
 
+const isPlainObject = v => v !== null && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype;
+
+/**
+ * Reads settings.json as a plain object. A missing file is {}. Bad JSON or anything that is not a
+ * plain object (array, string, null) throws, so a writer never replaces the user's file with a stub.
+ */
 async function readSettings(workspaceDir) {
-  try { return JSON.parse(await readFile(settingsFile(workspaceDir), "utf8")) || {}; } catch { return {}; }
+  let text;
+  try { text = await readFile(settingsFile(workspaceDir), "utf8"); } catch (err) {
+    if (err.code === "ENOENT") return {};
+    throw err;
+  }
+  let value;
+  try { value = JSON.parse(text); } catch {
+    throw Object.assign(new Error("settings.json is not valid JSON"), { code: "ESETTINGS" });
+  }
+  if (!isPlainObject(value)) throw Object.assign(new Error("settings.json is not a JSON object"), { code: "ESETTINGS" });
+  return value;
 }
 
-/** Whether PR tracking is on for a workspace folder (default true). */
+/** Whether PR tracking is on for a workspace folder (default true; an unreadable file counts as default). */
 export async function prTrackingEnabled(workspaceDir) {
-  return (await readSettings(workspaceDir)).prStatus !== false;
+  try { return (await readSettings(workspaceDir)).prStatus !== false; } catch { return true; }
 }
 
-/** Turns PR tracking on or off for a workspace folder; other settings in the file stay. */
+/**
+ * Turns PR tracking on or off for a workspace folder; other settings in the file stay.
+ * Refuses (throws, code ESETTINGS) when settings.json is not a valid JSON object, instead of overwriting it.
+ */
 export async function setPrTracking(workspaceDir, on) {
   const cur = await readSettings(workspaceDir);
   const file = settingsFile(workspaceDir);
@@ -67,13 +86,19 @@ function classify(err) {
   return "error";
 }
 
+/** A git branch name only: ref characters, no "..", not starting with "-" or "/", not all digits (gh would read a PR number). */
+export function validBranch(branch) {
+  return typeof branch === "string" && branch.length > 0 && branch.length <= 255
+    && /^[A-Za-z0-9._/-]+$/.test(branch) && !/^[-/]/.test(branch) && !branch.includes("..") && !/^\d+$/.test(branch);
+}
+
 /**
  * Makes `prStatus(branch)`. Resolves to one of
  *   { ok: true, pr: { number, state: "open"|"closed"|"merged", ci: "success"|"failure"|"pending"|"none" } }
  *   { ok: false, reason: "disabled"|"gh-missing"|"not-logged-in"|"no-pr"|"timeout"|"invalid-branch"|"error" }
  * and never throws. Answers are cached per branch (cacheMs, `force: true` skips the cache) and gh
  * starts at most once per minGapMs, so a run watching many steps does not hammer GitHub.
- * `cwd` is the git project folder (gh reads the repo from it); `env` is for tests (fake gh on PATH).
+ * `cwd` (required) is the git project folder (gh reads the repo from it); `env` is for tests (fake gh on PATH).
  */
 export function createPrStatus({ workspaceDir, cwd, env, run = runCli, now = Date.now, timeoutMs = PR_DEFAULTS.timeoutMs, cacheMs = PR_DEFAULTS.cacheMs, minGapMs = PR_DEFAULTS.minGapMs } = {}) {
   const cache = new Map(); // branch -> { at, result }
@@ -81,11 +106,13 @@ export function createPrStatus({ workspaceDir, cwd, env, run = runCli, now = Dat
   let lastStart = 0;
 
   async function fetchOne(branch) {
-    const wait = lastStart + minGapMs - now();
+    // Reserve this call's start slot before waiting, so overlapping calls queue up minGapMs apart.
+    const start = Math.max(now(), lastStart + minGapMs);
+    lastStart = start;
+    const wait = start - now();
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
-    lastStart = now();
     try {
-      const { stdout } = await run("gh", ["pr", "view", branch, "--json", "number,state,statusCheckRollup"], { cwd, env, timeout: timeoutMs, maxBuffer: 1 << 20 });
+      const { stdout } = await run("gh", ["pr", "view", "--json", "number,state,statusCheckRollup", "--", branch], { cwd, env, timeout: timeoutMs, maxBuffer: 1 << 20 });
       const j = JSON.parse(stdout);
       const state = String(j.state || "").toLowerCase();
       const number = Number(j.number);
@@ -99,15 +126,16 @@ export function createPrStatus({ workspaceDir, cwd, env, run = runCli, now = Dat
 
   return async function prStatus(branch, { force = false } = {}) {
     if (workspaceDir && !(await prTrackingEnabled(workspaceDir))) return { ok: false, reason: "disabled" };
-    if (typeof branch !== "string" || !branch || branch.startsWith("-") || branch.length > 255 || /[\s\0]/.test(branch)) {
-      return { ok: false, reason: "invalid-branch" };
-    }
+    if (!validBranch(branch)) return { ok: false, reason: "invalid-branch" };
+    // gh reads the repo from cwd; without it gh would ask about whatever repo the server runs in.
+    if (typeof cwd !== "string" || !cwd) return { ok: false, reason: "error" };
     const hit = cache.get(branch);
     if (!force && hit && now() - hit.at < cacheMs) return hit.result;
     if (inflight.has(branch)) return inflight.get(branch);
     const p = fetchOne(branch).then(result => {
-      // gh missing or logged out is worth retrying soon; keep every answer for the cache window anyway.
-      cache.set(branch, { at: now(), result });
+      const at = now();
+      for (const [b, e] of cache) if (at - e.at >= cacheMs) cache.delete(b); // drop expired answers
+      cache.set(branch, { at, result });
       return result;
     }).finally(() => inflight.delete(branch));
     inflight.set(branch, p);
