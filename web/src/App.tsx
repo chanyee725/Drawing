@@ -465,7 +465,7 @@ export function App() {
     if (f) void report(Promise.resolve().then(() => exportMarkdown(f.title, f.document, f.blocks)));
   };
   const pdfScope = exportSelected ? 'selection' : showDoc ? 'document' : 'canvas';
-  const pdfExport = () => void report(pdfScope === 'document' ? Promise.resolve().then(exportDocumentPdf) : exportCanvas(canvasHandle.current, 'pdf', session.getState().file?.title ?? '', exportOptions));
+  const pdfExport = () => void report(pdfScope === 'document' ? Promise.resolve().then(() => exportDocumentPdf(session.getState().file?.document)) : exportCanvas(canvasHandle.current, 'pdf', session.getState().file?.title ?? '', exportOptions));
   const openExport = useCallback((o: boolean) => {
     if (o) setExportSelected(canvasHandle.current?.scope().selected ?? false);
     setExportOpen(o);

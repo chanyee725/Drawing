@@ -31,7 +31,7 @@ function FrameView({ node, selected }: ReactNodeViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!found, id, sig, dark]);
 
-  const label = found ? frameLabel(found) : saved ? `프레임 ${saved}` : '프레임';
+  const label = found ? frameLabel(found) : saved ? frameLabel({ name: saved, named: true }) : '프레임';
   return (
     <NodeViewWrapper as="figure" className={`doc-diagram doc-frame${selected ? ' is-selected' : ''}`} data-frame-embed="" data-frame-id={id} contentEditable={false}>
       {found ? (

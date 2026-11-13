@@ -18,11 +18,14 @@ const escapeTitle = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', 
 
 /** Print one SVG picture from a hidden iframe (a data-free srcdoc, no requests). */
 export async function printSvg(svg: string, title = ''): Promise<string> {
+  document.querySelectorAll('iframe[data-print-frame]').forEach((old) => old.remove()); // a print that never finished
   const frame = document.createElement('iframe');
+  // No scripts, no navigation; the same origin is needed to call print() on it, and modals for print() itself.
+  frame.setAttribute('sandbox', 'allow-same-origin allow-modals');
   frame.setAttribute('aria-hidden', 'true');
   frame.setAttribute('data-print-frame', '');
   frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:1100px;height:800px;border:0;visibility:hidden';
-  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeTitle(title)}</title><style>@page{margin:10mm}html,body{margin:0;background:#fff}svg{display:block;max-width:100%;max-height:270mm;height:auto;margin:0 auto}</style></head><body>${svg}</body></html>`;
+  frame.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeTitle(title)}</title><style>@page{margin:10mm}html,body{margin:0;background:#fff}svg{display:block;max-width:100%;max-height:250mm;height:auto;margin:0 auto}</style></head><body>${svg}</body></html>`;
   await new Promise<void>((ok) => {
     frame.onload = () => ok();
     document.body.appendChild(frame);
@@ -33,8 +36,8 @@ export async function printSvg(svg: string, title = ''): Promise<string> {
     throw new Error('인쇄를 준비하지 못했어요');
   }
   const cleanup = () => frame.remove();
+  // Removed only when the browser says printing is over: the dialog may stay open for as long as the user likes.
   win.addEventListener('afterprint', cleanup, { once: true });
-  setTimeout(cleanup, 120_000);
   win.focus();
   win.print();
   return PRINT_HINT;

@@ -91,3 +91,9 @@ test('blockPlacements offsets blocks by the frame origin and padding, clipped to
   ]);
   assert.deepEqual(blockPlacements(frame, [], 8).images, []);
 });
+
+test('a frame the canvas named "프레임" is numbered like an unnamed one, never "프레임 프레임"', () => {
+  const frames = framesOf({ elements: [{ id: 'a', type: 'frame', name: '프레임' }, { id: 'b', type: 'frame', name: '개요' }, { id: 'c', type: 'frame' }] });
+  assert.deepEqual(frames.map(frameLabel), ['프레임 1', '프레임 개요', '프레임 2']);
+  assert.equal(frameLabel({ name: '프레임 개요', named: true }), '프레임 개요'); // a saved name that already says it
+});

@@ -6,6 +6,7 @@ import { printDocument, printSvg } from './print';
 import { documentToMarkdown, exportName } from './markdown';
 import { DEFAULT_EXPORT, exportBackground, exportSuffix, withSvgBackground, type ExportOptions } from './options';
 import type { CanvasHandle } from './types';
+import { docHasContent } from '../doc/model';
 
 export type ImageKind = 'svg' | 'png' | 'copy' | 'pdf';
 
@@ -65,6 +66,8 @@ export function exportMarkdown(title: string, document: unknown, blocks: readonl
 }
 
 /** The document column only (with its diagrams), through the browser's print dialog. */
-export function exportDocumentPdf(): string {
+export function exportDocumentPdf(document: unknown): string {
+  // An empty page would print as a blank sheet: say so instead.
+  if (!docHasContent(document)) return '문서가 비어 있어서 인쇄할 내용이 없어요. 먼저 내용을 써 주세요';
   return printDocument();
 }
