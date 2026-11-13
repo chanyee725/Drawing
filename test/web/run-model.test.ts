@@ -199,3 +199,69 @@ test('stripModel: blocking never makes the bar go backwards; skipped steps leave
   assert.deepEqual(overlaySteps(rows)[3]!.before, 'active');
   assert.equal(overlaySteps(rows)[4]!.skipped, true);
 });
+
+// ---- E27: paused runs and steps carried from an earlier run ----
+
+const fmt = (t: number) => {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+};
+
+test('pickRun: a paused run is shown before older ones', () => {
+  const s = (id: string, state: RunSummary['state']): RunSummary => ({ id, state, startedAt: 0, endedAt: null, totals: { cost: 0, mtok: 0 } });
+  assert.equal(pickRun([s('3', 'stopped'), s('2', 'paused'), s('1', 'done')])?.id, '2');
+});
+
+test('stepRows and stripModel: a limit pause says when it goes on and turns amber', () => {
+  const at = T0 + 20 * MIN;
+  const resetAt = T0 + 125 * MIN;
+  const r = record({ state: 'paused', pause: { by: 'limit', at, resetAt } });
+  const now = T0 + 40 * MIN;
+  const rows = stepRows(r, new Map(), now);
+  const impl = rows.find((x) => x.id === 'impl')!;
+  assert.equal(impl.paused, 'limit');
+  assert.equal(impl.label, '한도로 멈춤');
+  assert.equal(impl.time, `한도로 멈춤 · ${fmt(resetAt)}에 이어요`);
+  assert.equal(impl.glyph, '⏸');
+  assert.equal(rows.find((x) => x.id === 'plan')!.paused, undefined);
+  const sm = stripModel(r, rows, sessionRows(r, new Map(), now), 0.9, now);
+  assert.equal(sm.tone, 'warn');
+  assert.equal(sm.parts[0], `한도로 멈춤 · ${fmt(resetAt)}에 이어요`);
+  assert.equal(sm.parts[2], '20분'); // the clock stopped at the pause
+  assert.deepEqual(sm.attention, []);
+  // Without a known reset time.
+  const r2 = record({ state: 'paused', pause: { by: 'limit', at } });
+  assert.equal(stepRows(r2, new Map(), now).find((x) => x.id === 'impl')!.time, '한도로 멈춤 · 한도가 풀리면 이어요');
+});
+
+test('stepRows and stripModel: 멈추기 pauses quietly, live sessions still count', () => {
+  const at = T0 + 20 * MIN;
+  const r = record({ state: 'paused', pause: { by: 'stop', at } });
+  const live = new Map<string, LiveSession>([['s2', { id: 's2', name: 'Juno', role: 'impl', state: 'working' }]]);
+  const rows = stepRows(r, live, T0 + 50 * MIN);
+  const impl = rows.find((x) => x.id === 'impl')!;
+  assert.deepEqual([impl.paused, impl.label, impl.time], ['stop', '멈춤', '8분']);
+  const sm = stripModel(r, rows, sessionRows(r, live, T0 + 50 * MIN), null, T0 + 50 * MIN);
+  assert.deepEqual([sm.tone, sm.glyph, sm.parts[0]], ['muted', '⏸', '멈춤']);
+  assert.equal(historyLines(r)[0]!.text, '멈춤');
+  assert.match(runListText({ id: r.id, startedAt: T0, endedAt: null, state: 'paused', totals: r.totals, pause: r.pause }), /· 멈춤 · 20분 ·/);
+});
+
+test('stepRows: steps carried over from a stopped run show as done', () => {
+  const r = record({
+    steps: {
+      ...record().steps,
+      plan: { state: 'done', startedAt: T0 - 60 * MIN, endedAt: T0 - 48 * MIN, sessions: [{ sid: 's0', name: 'Mira', state: 'working' }], carried: '0000000000000-aaaaaa' },
+    },
+  });
+  const plan = stepRows(r, new Map(), T0 + 20 * MIN).find((x) => x.id === 'plan')!;
+  assert.deepEqual([plan.view, plan.label, plan.time], ['done', '완료', '12분']);
+});
+
+test('applyRunEvent: the run summary carries the pause', () => {
+  const r = record();
+  const pause = { by: 'limit' as const, at: T0, resetAt: T0 + MIN };
+  const n = applyRunEvent(r, { file: r.file, runId: r.id, run: { id: r.id, startedAt: T0, endedAt: null, state: 'paused', totals: r.totals, pause } });
+  assert.equal(n.state, 'paused');
+  assert.deepEqual(n.pause, pause);
+});

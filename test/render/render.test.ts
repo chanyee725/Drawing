@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { brotliDecompressSync } from 'node:zlib';
 import { parse } from '../../shared/dsl/index.ts';
 import { renderDiagram, sceneToSvg } from '../../shared/render/index.ts';
 import type { SceneBox, SceneEdge } from '../../shared/render/index.ts';
@@ -226,6 +227,52 @@ test('clean text embeds the bundled Drawing Sans, the 600 face only when used (E
   assert.doesNotMatch(rough.svg, /Drawing Sans';font-weight/);
 });
 
+/** The name records (English, Windows platform) inside a WOFF2 file, by name ID. */
+function woff2Names(bytes: Buffer): Map<number, string> {
+  const numTables = bytes.readUInt16BE(12);
+  let p = 48;
+  const base128 = () => {
+    let v = 0;
+    for (let i = 0; i < 5; i++) {
+      const b = bytes[p++];
+      v = v * 128 + (b & 0x7f);
+      if (!(b & 0x80)) return v;
+    }
+    throw new Error('bad UIntBase128');
+  };
+  const KNOWN = ['cmap', 'head', 'hhea', 'hmtx', 'maxp', 'name', 'OS/2', 'post', 'cvt ', 'fpgm', 'glyf', 'loca', 'prep', 'CFF ', 'VORG', 'EBDT', 'EBLC', 'gasp', 'hdmx', 'kern', 'LTSH', 'PCLT', 'VDMX', 'vhea', 'vmtx', 'BASE', 'GDEF', 'GPOS', 'GSUB', 'EBSC', 'JSTF', 'MATH', 'CBDT', 'CBLC', 'COLR', 'CPAL', 'SVG ', 'sbix', 'acnt', 'avar', 'bdat', 'bloc', 'bsln', 'cvar', 'fdsc', 'feat', 'fmtx', 'fvar', 'gvar', 'hsty', 'just', 'lcar', 'mort', 'morx', 'opbd', 'prop', 'trak', 'Zapf', 'Silf', 'Glat', 'Gloc', 'Feat', 'Sill'];
+  const tables: { tag: string; length: number }[] = [];
+  for (let i = 0; i < numTables; i++) {
+    const flags = bytes[p++];
+    let tag = KNOWN[flags & 0x3f];
+    if ((flags & 0x3f) === 0x3f) {
+      tag = bytes.subarray(p, p + 4).toString('latin1');
+      p += 4;
+    }
+    let length = base128();
+    const version = flags >> 6;
+    if ((tag === 'glyf' || tag === 'loca') ? version === 0 : version !== 0) length = base128();
+    tables.push({ tag, length });
+  }
+  const data = brotliDecompressSync(bytes.subarray(p, p + bytes.readUInt32BE(20)));
+  let at = 0;
+  for (const t of tables) {
+    if (t.tag === 'name') break;
+    at += t.length;
+  }
+  const count = data.readUInt16BE(at + 2);
+  const strings = at + data.readUInt16BE(at + 4);
+  const out = new Map<number, string>();
+  for (let i = 0; i < count; i++) {
+    const r = at + 6 + i * 12;
+    if (data.readUInt16BE(r) !== 3 || data.readUInt16BE(r + 4) !== 0x409) continue;
+    const len = data.readUInt16BE(r + 8);
+    const off = strings + data.readUInt16BE(r + 10);
+    out.set(data.readUInt16BE(r + 6), Buffer.from(data.subarray(off, off + len)).swap16().toString('utf16le'));
+  }
+  return out;
+}
+
 test('the embedded clean font is the bundled OFL subset under its own name', async () => {
   const fonts = await import('../../shared/render/font-clean.ts');
   const dir = new URL('../../shared/render/fonts/', import.meta.url);
@@ -234,12 +281,23 @@ test('the embedded clean font is the bundled OFL subset under its own name', asy
     assert.equal(base64, bytes.toString('base64'));
     assert.equal(bytes.subarray(0, 4).toString('latin1'), 'wOF2');
     assert.ok(bytes.length < 20_000, `${weight} is ${bytes.length} bytes`);
+    // The family the file itself declares, not only the CSS name, must avoid the reserved name; the copyright and
+    // license records stay so an exported SVG carries the notice.
+    const names = woff2Names(bytes);
+    assert.equal(names.get(1), 'Drawing Sans');
+    assert.equal(names.get(6), `DrawingSans-${weight === 400 ? 'Regular' : 'SemiBold'}`);
+    for (const id of [1, 4, 6]) assert.doesNotMatch(names.get(id) ?? '', /Pretendard/, `name ${id}`);
+    assert.match(names.get(0) ?? '', /^Copyright/);
+    assert.match(names.get(13) ?? '', /SIL Open Font License, Version 1\.1/);
+    assert.match(names.get(14) ?? '', /scripts\.sil\.org\/OFL/);
   }
   const license = readFileSync(fileURLToPath(new URL('drawing-sans-OFL.txt', dir)), 'utf8');
   assert.match(license, /SIL OPEN FONT LICENSE Version 1\.1/);
   // "Pretendard" is a reserved font name: the subset must not be offered under it.
   assert.match(license, /Reserved Font Name Pretendard/);
   assert.doesNotMatch(FONT_FAMILY.clean.split(',')[0], /Pretendard/);
+  // The page's Pretendard webfont must not reach an inline diagram SVG, or it differs from the canvas image.
+  for (const family of Object.values(FONT_FAMILY)) assert.doesNotMatch(family, /Pretendard/);
 });
 
 test('the embedded rough font is the bundled OFL file', async () => {
@@ -350,4 +408,13 @@ test('erd: Chen cardinality writes "many" as * (E60)', async () => {
   assert.deepEqual([...marks].sort(), ['*', '*', '*', '1']);
   const fk = scene.items.find((it) => it.kind === 'text' && it.lines.join('') === 'fk');
   assert.ok(fk?.kind === 'text' && fk.tone === 'muted' && fk.anchor === 'end');
+});
+
+test('arrows, dashes and math signs are measured near their real width in the clean face', async () => {
+  const { textWidth } = await import('../../shared/render/text.ts');
+  // Drawing Sans advance widths in em (hmtx of the bundled subset).
+  for (const [ch, em] of [['→', 0.913], ['—', 0.957], ['…', 0.762], ['+', 0.627], ['=', 0.627], ['&', 0.609]] as const) {
+    const w = textWidth(ch, 100, 'clean');
+    assert.ok(w >= em * 100 * 0.95 && w <= em * 100 * 1.05, `${ch} measured ${w}, real ${em * 100}`);
+  }
 });

@@ -7,7 +7,17 @@ import type { SessionState } from '../../../shared/dispatch/types.ts';
 import { STEP_VIEWS, progressLabel, stepView, type Progress, type StepView } from '../../../shared/dispatch/step-view.ts';
 import { roleLabel, runProgress, type RunAgent, type RunStep } from './overlayModel.ts';
 
-export type RunState = 'running' | 'done' | 'failed' | 'stopped';
+export type RunState = 'running' | 'paused' | 'done' | 'failed' | 'stopped';
+
+/** Why a run is paused (E27): the usage-limit guard (`resetAt`: when the window clears) or the person's 멈추기. */
+export interface Pause {
+  by: 'limit' | 'stop';
+  at: number;
+  resetAt?: number;
+}
+
+/** Running or paused: its sessions are still there, so live Dispatch state applies. */
+export const isLive = (state: RunState | undefined) => state === 'running' || state === 'paused';
 
 /** A session as the record keeps it (record.js pickSession). */
 export interface RecSession {
@@ -32,6 +42,8 @@ export interface RecStep {
   startedAt: number | null;
   endedAt: number | null;
   sessions: RecSession[];
+  /** Run id this step was finished in (계획 다시 열기 carried it over as done). */
+  carried?: string;
 }
 
 export interface RunRecord {
@@ -45,9 +57,10 @@ export interface RunRecord {
   steps: Record<string, RecStep>;
   totals: { cost: number; mtok: number };
   timeline: [number, string, string][];
+  pause?: Pause | null;
 }
 
-export type RunSummary = Pick<RunRecord, 'id' | 'startedAt' | 'endedAt' | 'state' | 'totals'>;
+export type RunSummary = Pick<RunRecord, 'id' | 'startedAt' | 'endedAt' | 'state' | 'totals' | 'pause'>;
 
 /** The live Dispatch session fields the run screen reads (shared/dispatch/types.ts Session). */
 export interface LiveSession {
@@ -79,15 +92,15 @@ export interface RunEvent {
 
 // ---- picking and patching ----
 
-/** The run to show: the one running, else the newest. `list` is newest first (GET /api/runs). */
+/** The run to show: the one running (or paused), else the newest. `list` is newest first (GET /api/runs). */
 export function pickRun(list: readonly RunSummary[]): RunSummary | null {
-  return list.find((r) => r.state === 'running') ?? list[0] ?? null;
+  return list.find((r) => isLive(r.state)) ?? list[0] ?? null;
 }
 
 /** Apply a `run` event to the record it belongs to; returns the same object when it does not apply. */
 export function applyRunEvent(record: RunRecord, ev: RunEvent): RunRecord {
   if (ev.runId !== record.id) return record;
-  if (ev.run) return { ...record, state: ev.run.state, endedAt: ev.run.endedAt, totals: ev.run.totals };
+  if (ev.run) return { ...record, state: ev.run.state, endedAt: ev.run.endedAt, totals: ev.run.totals, pause: ev.run.pause ?? null };
   if (!ev.step || !record.steps[ev.step]) return record;
   const step = record.steps[ev.step]!;
   let sessions = step.sessions;
@@ -146,6 +159,8 @@ export interface StepRow {
   node: string;
   /** Blocked step: its view before blocking, from the timeline (keeps its progress weight). */
   before?: StepView;
+  /** Paused mid-step: 'limit' (한도로 멈춤) or 'stop' (멈추기). */
+  paused?: Pause['by'];
 }
 
 type Live = ReadonlyMap<string, LiveSession>;
@@ -163,6 +178,9 @@ export function beforeBlocked(timeline: RunRecord['timeline'], stepId: string): 
   return undefined;
 }
 
+/** "15:10에 이어요", or without a known reset time "한도가 풀리면 이어요". */
+export const resumeAt = (p: Pause) => (p.resetAt ? `${fmtClock(p.resetAt)}에 이어요` : '한도가 풀리면 이어요');
+
 const stateNow = (s: RecSession, live: Live, running: boolean): SessionState | undefined => (running ? live.get(s.sid)?.state : undefined) ?? s.state;
 
 function roleOf(plan: Plan, stepId: string, s: RecSession, live: Live): string {
@@ -174,7 +192,10 @@ function roleOf(plan: Plan, stepId: string, s: RecSession, live: Live): string {
 
 export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.now(), labels: ReadonlyMap<string, string> = new Map()): StepRow[] {
   const plan = record.plan.snapshot;
-  const running = record.state === 'running';
+  const running = isLive(record.state);
+  const pause = record.state === 'paused' ? (record.pause ?? { by: 'stop' as const, at: now }) : null;
+  // A paused run's clock stops at the pause.
+  const until = pause ? pause.at : now;
   return plan.steps.map((ps, i) => {
     const step = record.steps[ps.id] ?? { state: 'pending', startedAt: null, endedAt: null, sessions: [] };
     const node = ps.node ?? ps.id;
@@ -187,20 +208,27 @@ export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.n
     else view = stepView({ sessions: states.map((state) => ({ state })) });
     // A finished run closed its steps: what ran and was not blocked is done.
     if (record.state === 'done' && !skipped && view !== 'blocked' && states.length > 0) view = 'done';
+    // Finished in an earlier run (계획 다시 열기 carried it over).
+    if (step.carried && !skipped) view = 'done';
+    const paused = pause && view === 'active' ? pause.by : undefined;
     const waiting = (view === 'active' || view === 'review') && states.includes('waiting');
     const v = STEP_VIEWS[view];
     let time: string;
     if (skipped) time = '건너뜀';
     else if (view === 'blocked') time = '막힘';
     else if (step.startedAt === null) time = '기다려요';
-    else if (view === 'done' || !running || step.endedAt !== null) time = fmtDur((step.endedAt ?? record.endedAt ?? now) - step.startedAt);
+    else if (paused === 'limit') time = `한도로 멈춤 · ${resumeAt(pause!)}`;
+    else if (view === 'done' || !running || step.endedAt !== null) time = fmtDur((step.endedAt ?? record.endedAt ?? until) - step.startedAt);
+    else if (paused) time = fmtDur(until - step.startedAt);
     else time = `${fmtDur(now - step.startedAt)}째`;
     const agents = step.sessions.map((s) => {
       const l = live.get(s.sid);
       const model = l?.modelLabel ?? s.model ?? l?.model;
       return { name: l?.name ?? s.name ?? s.sid, role: roleOf(plan, ps.id, s, live), ...(model ? { model } : {}) };
     });
-    const row: StepRow = { id: ps.id, n: i + 1, title: labels.get(node) ?? node, view, glyph: v.glyph, label: skipped ? '건너뜀' : v.label, time, agents, waiting, skipped, node };
+    const label = skipped ? '건너뜀' : paused === 'limit' ? '한도로 멈춤' : paused ? '멈춤' : v.label;
+    const row: StepRow = { id: ps.id, n: i + 1, title: labels.get(node) ?? node, view, glyph: paused ? '⏸' : v.glyph, label, time, agents, waiting, skipped, node };
+    if (paused) row.paused = paused;
     if (view === 'blocked') {
       // The timeline is capped, so a step blocked long ago can lose its history; one that started still carries 'active' weight.
       const before = beforeBlocked(record.timeline, ps.id) ?? (step.startedAt !== null || step.sessions.length > 0 ? 'active' : undefined);
@@ -237,7 +265,7 @@ export interface SessionRow {
 
 export function sessionRows(record: RunRecord, live: Live = new Map(), now = Date.now()): SessionRow[] {
   const plan = record.plan.snapshot;
-  const running = record.state === 'running';
+  const running = isLive(record.state);
   const out: SessionRow[] = [];
   for (const ps of plan.steps) {
     for (const s of record.steps[ps.id]?.sessions ?? []) {
@@ -277,6 +305,9 @@ export interface Attention {
 export interface StripModel {
   state: RunState;
   glyph: string;
+  /** Colour of the strip: warn (amber) while the limit guard holds the run. */
+  tone: 'ok' | 'warn' | 'muted';
+  pause: Pause | null;
   /** `실행 중 · 5단계 중 2 완료 · 48% · 남은 3 · 24분째 · $1.82 · 5시간 68%` as parts, joined with " · ". */
   parts: string[];
   /** Weighted progress (the strip's bar). */
@@ -287,6 +318,7 @@ export interface StripModel {
 
 const RUN_LABEL: Record<RunState, { glyph: string; label: string }> = {
   running: { glyph: '●', label: '실행 중' },
+  paused: { glyph: '⏸', label: '멈춤' },
   done: { glyph: '✓', label: '완료' },
   failed: { glyph: '⏸', label: '멈춤 · 실패' },
   stopped: { glyph: '⏸', label: '멈춤' },
@@ -298,9 +330,12 @@ const ORDER: SessionState[] = ['failed', 'stuck', 'waiting'];
 /** `five`: the 5-hour usage share 0–1 from Dispatch limits, shown while running. */
 export function stripModel(record: RunRecord, rows: readonly StepRow[], sessions: readonly SessionRow[], five: number | null = null, now = Date.now()): StripModel {
   const running = record.state === 'running';
+  const pause = record.state === 'paused' ? (record.pause ?? { by: 'stop' as const, at: now }) : null;
   const p = runProgress(overlaySteps(rows));
   const r = RUN_LABEL[record.state] ?? RUN_LABEL.stopped;
-  const parts = [r.label, progressLabel(p), running ? `${fmtDur(now - record.startedAt)}째` : fmtDur((record.endedAt ?? now) - record.startedAt), fmtCost(record.totals.cost)];
+  const label = pause?.by === 'limit' ? `한도로 멈춤 · ${resumeAt(pause)}` : r.label;
+  const dur = running ? `${fmtDur(now - record.startedAt)}째` : fmtDur((record.endedAt ?? pause?.at ?? now) - record.startedAt);
+  const parts = [label, progressLabel(p), dur, fmtCost(record.totals.cost)];
   if (running && five !== null && Number.isFinite(five)) parts.push(`5시간 ${Math.round(five * 100)}%`);
   const attention: Attention[] = [];
   if (running) {
@@ -308,7 +343,8 @@ export function stripModel(record: RunRecord, rows: readonly StepRow[], sessions
       for (const s of sessions)
         if (s.state === st) attention.push({ sid: s.sid, text: `${s.name}(${s.roleName})가 ${NEEDS[st]}`, since: null });
   }
-  return { state: record.state, glyph: r.glyph, parts, progress: p, attention };
+  const tone = running ? 'ok' : pause?.by === 'limit' ? 'warn' : 'muted';
+  return { state: record.state, glyph: r.glyph, tone, pause, parts, progress: p, attention };
 }
 
 // ---- history ----
@@ -340,6 +376,7 @@ export function historyLines(record: RunRecord, labels: ReadonlyMap<string, stri
   };
   const out: HistoryLine[] = [{ at: record.startedAt, text: `시작 · 계획 rev ${record.plan.revision}` }];
   for (const [at, step, state] of record.timeline) out.push({ at, text: `${title(step)} · ${STEP_STATE_LABEL[state] ?? state}` });
+  if (record.state === 'paused' && record.pause) out.push({ at: record.pause.at, text: record.pause.by === 'limit' ? '한도로 멈춤' : '멈춤' });
   if (record.endedAt !== null) out.push({ at: record.endedAt, text: RUN_LABEL[record.state]?.label ?? record.state });
   return out.reverse().slice(0, max);
 }
@@ -348,6 +385,6 @@ export function historyLines(record: RunRecord, labels: ReadonlyMap<string, stri
 export function runListText(r: RunSummary, now = Date.now()): string {
   const d = new Date(r.startedAt);
   const label = RUN_LABEL[r.state]?.label ?? r.state;
-  const dur = r.state === 'running' ? `${fmtDur(now - r.startedAt)}째` : fmtDur((r.endedAt ?? r.startedAt) - r.startedAt);
+  const dur = r.state === 'running' ? `${fmtDur(now - r.startedAt)}째` : fmtDur((r.endedAt ?? r.pause?.at ?? r.startedAt) - r.startedAt);
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${fmtClock(r.startedAt)} · ${label} · ${dur} · ${fmtCost(r.totals.cost)}`;
 }

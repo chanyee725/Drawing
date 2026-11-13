@@ -220,3 +220,151 @@ test('a one-step plan with autostart starts at once', { timeout: 60_000 }, async
     await t.stop();
   }
 });
+
+// ---- E27: 멈추기, 이어서 하기, 계획 다시 열기, the limit guard ----
+
+async function running(t, steps = STEPS) {
+  const { call, d, lead } = t;
+  const w = await call('POST', '/api/pipeline/plan', { lead: lead.id, goal: '멈춤 연습', steps });
+  assert.equal(w.status, 200, JSON.stringify(w.body));
+  const go = await call('POST', '/api/pipeline/start', { path: w.body.path, revision: w.body.revision });
+  assert.equal(go.status, 200, JSON.stringify(go.body));
+  await until(() => ['idle', 'done'].includes(d.hub.get(lead.id).status), 10_000);
+  return { path: w.body.path, runId: go.body.runId };
+}
+const told = (d, id) => d.hub.transcript(id).filter((m) => m.kind === 'user').map((m) => m.text).join('\n');
+const statusOf = async (call, path) => (await call('GET', `/api/pipeline?path=${encodeURIComponent(path)}`)).body;
+
+test('멈추기 pauses the plan and holds the team; 이어서 하기 hands the open steps back to the lead', { timeout: 60_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead, ws } = t;
+    const { path, runId } = await running(t);
+    assert.equal((await call('POST', '/api/pipeline/resume', { path })).status, 409);
+    const mate = (await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: lead.id })).body.sessions[0];
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, stage: 'done' });
+    await until(() => ['idle', 'done'].includes(d.hub.get(mate.id).status), 10_000);
+
+    // No header, no stop.
+    const base = `http://127.0.0.1:${t.app.server.address().port}`;
+    const bare = await fetch(`${base}/api/pipeline/stop`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) });
+    assert.equal(bare.status, 403);
+
+    const interrupted = [];
+    const real = d.hub.interrupt.bind(d.hub);
+    d.hub.interrupt = (id) => {
+      interrupted.push(id);
+      return real(id);
+    };
+    d.hub.get(mate.id).status = 'running'; // mid-turn, as far as the hub knows
+    const stopped = await call('POST', '/api/pipeline/stop', { path });
+    assert.equal(stopped.status, 200, JSON.stringify(stopped.body));
+    assert.equal(stopped.body.state, 'paused');
+    assert.equal(stopped.body.pause.by, 'stop');
+    assert.deepEqual(interrupted, [mate.id]);
+    assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 409);
+    const rec = JSON.parse(readFileSync(join(ws, '.drawing', 'runs', ...path.split('/'), `${runId}.json`), 'utf8'));
+    assert.equal(rec.state, 'paused');
+    assert.equal(rec.pause.by, 'stop');
+    // Paused: no new teammates, no plan rewrite, and teammate reports wait.
+    const gated = await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'x' }], worktree: false, parent: lead.id });
+    assert.equal(gated.status, 409);
+    assert.match(gated.body.error, /멈춰 있어요/);
+    assert.equal((await call('POST', '/api/pipeline/plan', { lead: lead.id, path, goal: 'x', steps: STEPS })).status, 409);
+    d.hub.rt(mate.id).pendingReport = '[mate 보고] 끝';
+    d.hub.deliverReport(d.hub.get(mate.id));
+    assert.doesNotMatch(told(d, lead.id), /\[mate 보고\]/);
+
+    const go = await call('POST', '/api/pipeline/resume', { path });
+    assert.equal(go.status, 200, JSON.stringify(go.body));
+    assert.equal(go.body.state, 'running');
+    assert.equal(go.body.pause, null);
+    const said = told(d, lead.id);
+    assert.match(said, /\[계획 이어서 하기 · rev \d+\]/);
+    assert.match(said, /끝나지 않은 단계: ui, review/);
+    assert.match(said, /\[mate 보고\] 끝/);
+    const live = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${runId}`)).body;
+    assert.equal(live.state, 'running');
+  } finally {
+    await t.stop();
+  }
+});
+
+test('the limit guard pauses a running plan and resumes it after the reset; 이어서 하기 waits for it', { timeout: 60_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead } = t;
+    const pipe = t.app.ctx.modules.pipeline;
+    const { path, runId } = await running(t);
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', stage: 'impl' });
+    const resetAt = Date.now() + 60 * 60 * 1000;
+    d.hub.limitHit = () => ({ key: 'five:x', reason: '5시간 한도 93%', resetAt });
+    d.hub.checkTickets(); // saves the lead's open work as a ticket, like a real rate_limit_event
+    await pipe.syncLimit();
+    let st = await statusOf(call, path);
+    assert.equal(st.state, 'paused');
+    assert.equal(st.pause.by, 'limit');
+    assert.equal(st.pause.resetAt, resetAt);
+    assert.match(st.blockers[0], /한도에 걸려 있어요/);
+    const refused = await call('POST', '/api/pipeline/resume', { path });
+    assert.equal(refused.status, 409);
+    assert.match(refused.body.error, /한도에 걸려 있어요/);
+    const rec = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${runId}`)).body;
+    assert.equal(rec.state, 'paused');
+    assert.deepEqual(Object.keys(rec.pause).sort(), ['at', 'by', 'resetAt']);
+
+    // The window clears: one message to the lead (the ticket), carrying the plan's open steps.
+    d.hub.limitHit = () => null;
+    await pipe.syncLimit();
+    st = await statusOf(call, path);
+    assert.equal(st.state, 'running');
+    const said = told(d, lead.id);
+    assert.equal(said.match(/\[Dispatch 티켓 재개\]/g)?.length, 1);
+    assert.match(said, /\[계획 이어서 하기 · rev \d+\][^\n]*\n끝나지 않은 단계: api, ui, review/);
+    assert.equal(said.match(/\[계획 이어서 하기/g).length, 1);
+    // A second look changes nothing.
+    await pipe.syncLimit();
+    assert.equal(told(d, lead.id).match(/\[계획 이어서 하기/g).length, 1);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('계획 다시 열기 ends the stopped run and the next 시작하기 carries the finished steps over', { timeout: 60_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead } = t;
+    const { path, runId } = await running(t);
+    assert.equal((await call('POST', '/api/pipeline/reopen', { path })).status, 409); // running: stop first
+    const mate = (await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: lead.id })).body.sessions[0];
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, stage: 'done' });
+    await until(() => d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
+    assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+
+    const re = await call('POST', '/api/pipeline/reopen', { path });
+    assert.equal(re.status, 200, JSON.stringify(re.body));
+    assert.equal(re.body.state, 'plan');
+    assert.equal(re.body.runId, null);
+    assert.deepEqual(re.body.changes, []);
+    assert.match(told(d, lead.id), /\[계획 다시 열림\][^]*이미 끝난 단계: api/);
+    const old = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${runId}`)).body;
+    assert.equal(old.state, 'stopped');
+    // A plan again: no teammates until 시작하기; the lead may revise it and the carry survives.
+    assert.equal((await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'x' }], worktree: false, parent: lead.id })).status, 409);
+    const rev = await call('POST', '/api/pipeline/plan', { lead: lead.id, path, goal: '멈춤 연습 2', steps: STEPS });
+    assert.equal(rev.status, 200, JSON.stringify(rev.body));
+
+    const go = await call('POST', '/api/pipeline/start', { path, revision: rev.body.revision });
+    assert.equal(go.status, 200, JSON.stringify(go.body));
+    assert.notEqual(go.body.runId, runId);
+    const next = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(next.steps.api.state, 'done');
+    assert.equal(next.steps.api.carried, runId);
+    assert.equal(next.steps.api.sessions[0].sid, mate.id);
+    assert.equal(next.steps.ui.state, 'pending');
+    assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api/);
+    assert.equal(d.store.data.pipelines[path].carry, undefined);
+  } finally {
+    await t.stop();
+  }
+});
