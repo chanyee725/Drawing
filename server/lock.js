@@ -4,7 +4,8 @@
 // A lock whose owner is gone (dead pid, or its port no longer answers as that server) is stale and
 // gets replaced, so a crash never blocks the next start.
 import { readFileSync, unlinkSync } from 'node:fs';
-import { link, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { link, lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, relative, sep } from 'node:path';
 
 const HOST = '127.0.0.1';
@@ -53,59 +54,95 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * Removes the lock at `file` only if it still reads `raw` (the content judged stale). Removal runs
  * under `<file>.break`, so two servers replacing the same stale lock cannot have the slower one
- * delete the lock the faster one just took. A break file whose pid is gone is cleared.
+ * delete the lock the faster one just took.
  */
 async function removeIfUnchanged(file, raw) {
-  const brk = `${file}.break`;
-  const tmp = `${brk}.${process.pid}.tmp`;
-  for (let i = 0; i < 200; i++) {
-    await writeTemp(tmp, { pid: process.pid });
-    let got = false;
-    try {
-      await link(tmp, brk);
-      got = true;
-    } catch (err) {
-      if (err.code !== 'EEXIST') throw err;
-    } finally {
-      await rm(tmp, { force: true });
-    }
-    if (!got) {
-      const { raw: brkRaw, holder } = await readLock(brk);
-      if (holder && !pidAlive(holder.pid)) await clearDeadBreak(brk, brkRaw);
-      else await sleep(10);
-      continue;
-    }
-    try {
-      if ((await readLock(file)).raw === raw) await rm(file, { force: true });
-      return;
-    } finally {
-      await rm(brk, { force: true });
-    }
+  const release = await acquireBreak(`${file}.break`);
+  try {
+    if ((await readLock(file)).raw === raw) await rm(file, { force: true });
+  } finally {
+    await release();
   }
-  throw new LockBreakTimeoutError('lock break timed out');
 }
 
 export class LockBreakTimeoutError extends Error {
   name = 'LockBreakTimeoutError';
 }
 
+const ownerPid = (name) => Number.parseInt(name, 10);
+
 /**
- * Clears a `.break` file whose holder died. A plain rm could delete a `.break` that another waiter
- * took between our read and the rm, so move it aside first (rename is atomic: one waiter wins the
- * old file) and put it back when what we moved is not the dead holder's content.
+ * Takes the mutex `brk` and returns its async release(). The mutex is a folder holding one file
+ * named after its owner (`<pid>-<uuid>`). It is made as `<brk>.<owner>.tmp/<owner>` and renamed
+ * into place: rename onto a missing or empty folder succeeds, onto a held one (never empty) fails.
+ *
+ * A holder judged dead is cleared by unlinking its own file name and then removing the folder only
+ * while empty. Both steps act on that holder alone, so a waiter that judged a holder dead and acts
+ * late (after someone else cleared it and took the mutex) finds the name gone and touches nothing;
+ * a new owner renamed onto the emptied folder makes the rmdir fail. #161 moved the whole `.break`
+ * aside instead, which with 3+ waiters could move a live holder's break and let two in (#199).
+ * `owner`, `isDead` and `tries` are for tests; isDead(name) defaults to "its pid is not running".
  */
-async function clearDeadBreak(brk, deadRaw) {
-  const aside = `${brk}.${process.pid}.stale`;
-  try {
-    await rename(brk, aside);
-  } catch {
-    return; // someone else cleared or took it
+export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()}`, isDead, tries = 200 } = {}) {
+  const dead = isDead ?? (async (name) => !pidAlive(ownerPid(name)));
+  const stage = `${brk}.${owner}.tmp`;
+  for (let i = 0; i < tries; i++) {
+    await rm(stage, { recursive: true, force: true });
+    await mkdir(stage);
+    await writeFile(join(stage, owner), '', { flag: 'wx' });
+    try {
+      await rename(stage, brk);
+      return () => releaseBreak(brk, owner);
+    } catch (err) {
+      if (!['ENOTEMPTY', 'EEXIST', 'ENOTDIR', 'EISDIR'].includes(err.code)) throw err;
+    } finally {
+      await rm(stage, { recursive: true, force: true });
+    }
+    if (!(await clearDeadBreak(brk, dead))) await sleep(10);
   }
+  throw new LockBreakTimeoutError('lock break timed out');
+}
+
+/** Clears `brk` when its holder is dead; true when something was cleared (retry at once). */
+async function clearDeadBreak(brk, dead) {
+  let names;
   try {
-    if ((await readLock(aside)).raw !== deadRaw) await link(aside, brk).catch(() => {});
-  } finally {
-    await rm(aside, { force: true });
+    names = await readdir(brk);
+  } catch (err) {
+    if (err.code === 'ENOENT') return true;
+    if (err.code === 'ENOTDIR') return clearOldBreakFile(brk);
+    throw err;
   }
+  let cleared = names.length === 0; // emptied by a release or a clear; the next rename replaces it
+  for (const name of names) {
+    if (!(await dead(name))) continue;
+    try {
+      await unlink(join(brk, name)); // ENOENT: someone else cleared this holder already
+      cleared = true;
+    } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+    }
+  }
+  if (cleared) await rmdir(brk).catch(() => {}); // ENOTEMPTY: a new owner already took it
+  return cleared;
+}
+
+/** A `.break` file left by a server from before #199: cleared only when its pid is gone. */
+async function clearOldBreakFile(brk) {
+  const { holder } = await readLock(brk);
+  if (holder && pidAlive(holder.pid)) return false;
+  await rm(brk, { force: true });
+  return true;
+}
+
+async function releaseBreak(brk, owner) {
+  try {
+    await unlink(join(brk, owner));
+  } catch (err) {
+    if (err.code === 'ENOENT') return; // judged dead and cleared: the folder is not ours any more
+    throw err;
+  }
+  await rmdir(brk).catch(() => {}); // ENOTEMPTY: the next owner already took it
 }
 
 export class LockPathError extends Error {
