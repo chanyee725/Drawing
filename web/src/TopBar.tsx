@@ -101,7 +101,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
       </span>
       <ToggleGroup variant="segmented" size="sm" value={view} onValueChange={(v) => onView(v as View)} aria-label="보기 방식" className={cn('shrink-0 md:mx-auto', narrow && 'h-11')}>
         {(narrow ? NARROW_VIEWS : VIEWS).map((v) => (
-          <ToggleGroupItem key={v.id} value={v.id} className={cn('px-2 md:px-3', narrow && 'h-10', FOCUS_RING)}>
+          <ToggleGroupItem key={v.id} value={v.id} className={cn('px-2 md:px-3', narrow && 'h-10 min-w-11', FOCUS_RING)}>
             {v.label}
           </ToggleGroupItem>
         ))}

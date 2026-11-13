@@ -1,6 +1,6 @@
 // shadcn/ui (MIT) new-york Toggle + ToggleGroup, adapted: relative imports, one file, the variants this app uses.
-// Single-choice groups keep toggle-button semantics (role="button" + aria-pressed, design doc 6 §5) instead of
-// Radix's default radio role for type="single".
+// Single-choice groups keep toggle-button semantics (role="group" with role="button" + aria-pressed items, design doc 6 §5)
+// instead of Radix's default radiogroup/radio roles for type="single".
 import * as React from 'react';
 import { ToggleGroup as ToggleGroupPrimitive } from 'radix-ui';
 import { cva, type VariantProps } from 'class-variance-authority';
@@ -42,6 +42,8 @@ function ToggleGroup({
   return (
     <ToggleGroupPrimitive.Root
       type="single"
+      // Radix gives single-choice roots role="radiogroup"; the items are toggle buttons, so the root is a plain group.
+      role="group"
       data-slot="toggle-group"
       data-variant={variant}
       value={value}

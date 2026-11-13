@@ -81,5 +81,8 @@ test('docPlace: the path above the open document and its sub-documents', () => {
   assert.deepEqual(docPlace(view, 'x.dpx.json'), { trail: [], node: view.loose[0] });
   // Not in the view yet (just created): the project only, no node.
   assert.deepEqual(docPlace(view, 'A/new.dpx.json'), { trail: [{ kind: 'project', path: 'A', label: 'Alpha' }], node: null });
+  // Opened right after it was made, without the suffix: still found.
+  assert.equal(docPlace(view, 'A/login/token').node?.path, 'A/login/token.dpx.json');
+  assert.deepEqual(docPlace(view, 'A/login/token').trail.map((c) => c.path), ['A', 'A/login.dpx.json']);
   assert.deepEqual(docPlace(null, 'A/login.dpx.json'), { trail: [], node: null });
 });

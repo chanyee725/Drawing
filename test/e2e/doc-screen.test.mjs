@@ -87,6 +87,7 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     // Sub-document block at the end of the document: same data as the sidebar.
     const subs = page.getByRole('region', { name: '하위 문서' });
     await subs.getByRole('button', { name: /토큰 갱신/ }).waitFor();
+    await page.locator('.excalidraw').first().waitFor();
     await shot(page, `${theme}-doc-1440`);
     if (theme === 'dark') {
       await page.close();
@@ -114,6 +115,11 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     await page.getByRole('menuitem', { name: '하위 문서 추가' }).click();
     await page.waitForFunction(() => document.querySelector('input[aria-label="파일 제목"]')?.value === '세부 규칙');
     assert.equal((await call('GET', `/api/file?path=${encodeURIComponent('결제 시스템/로그인 로직/세부 규칙')}`)).status, 200);
+    // The closing menu keeps the header aria-hidden for a moment; wait for the path to be readable again.
+    await page.waitForFunction(() => {
+      const nav = document.querySelector('nav[aria-label="경로"]');
+      return nav && !nav.closest('[aria-hidden="true"]') && [...nav.querySelectorAll('button')].map((b) => b.textContent).join('|') === '결제 시스템|로그인 로직';
+    });
     assert.deepEqual(await path.getByRole('button').allInnerTexts(), ['결제 시스템', '로그인 로직']);
     assert.equal(await title(page), '세부 규칙');
 
@@ -134,6 +140,9 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     await page.locator('.ProseMirror').waitFor();
     await page.waitForTimeout(400);
     assert.deepEqual(await pressed(page), ['문서:true', '캔버스:false']);
+    // Ancestors are hidden here, and so is the separator before the title.
+    const sep = await page.locator('nav[aria-label="경로"] li:last-child').evaluate((li) => getComputedStyle(li, '::before').content);
+    assert.ok(sep === 'none' || sep === 'normal', `no separator before the title on a narrow screen: ${sep}`);
     for (const name of ['파일 목록 열기', '더 보기', '문서', '캔버스']) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox();
       assert.ok(box.height >= 40 && box.width >= 40, `${name} is a touch target: ${JSON.stringify(box)}`);
