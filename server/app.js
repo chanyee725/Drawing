@@ -54,6 +54,9 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
     try {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (url.pathname.startsWith('/api/')) {
+        if (req.method !== 'GET' && req.method !== 'HEAD' && !writeAllowed(req.headers)) {
+          return sendJson(res, 403, { error: 'forbidden' });
+        }
         for (const r of routes) {
           if (r.method !== req.method) continue;
           const match = r.path instanceof RegExp ? url.pathname.match(r.path) : r.path === url.pathname ? [url.pathname] : null;
@@ -90,6 +93,15 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
   }
 
   return { server, ctx, close };
+}
+
+/**
+ * Every non-GET /api request needs a custom header: a browser can't send it cross-origin without a
+ * preflight this server never approves, so another site can't write here. x-drawing: 1 is
+ * Drawing's own; x-dispatch: 1 is accepted for the Dispatch plugin.
+ */
+export function writeAllowed(headers) {
+  return headers['x-drawing'] === '1' || headers['x-dispatch'] === '1';
 }
 
 export function isAllowedHost(host, port) {

@@ -40,7 +40,7 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   for (let i = 0; i < 100 && !log.includes('workspace'); i++) await new Promise((r) => setTimeout(r, 100));
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
-  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) })).json();
+  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) })).json();
   const el = (o) => ({ angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 0, opacity: 100, groupIds: [], roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false, ...o });
   const frame = el({ id: 'frame_1', type: 'frame', x: 100, y: 100, width: 400, height: 300, name: '구조도', frameId: null });
   const box = el({ id: 'box_1', type: 'rectangle', x: 140, y: 140, width: 120, height: 80, frameId: 'frame_1', backgroundColor: '#a5d8ff' });
