@@ -9,6 +9,7 @@ export const GROUPS = [
   { id: 'canvas', label: '캔버스' },
   { id: 'block', label: '블록' },
   { id: 'file', label: '파일' },
+  { id: 'project', label: '프로젝트' },
 ] as const;
 export type CommandGroup = (typeof GROUPS)[number]['id'];
 

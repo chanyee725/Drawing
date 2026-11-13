@@ -8,7 +8,7 @@
 
 import type { BlockLayout, LayoutBasis, LayoutItem, Point, SceneHandle } from '../../../shared/render/index.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
-import type { EditAction } from './layoutSession.ts';
+import { IMAGE_TEXT, type EditAction, type ImageReasonCode } from './reasons.ts';
 
 export type Box = { x: number; y: number; w: number; h: number };
 /** A draggable element in layout coordinates. */
@@ -194,20 +194,7 @@ export function nudgeFor(key: string, shift: boolean): { dx: number; dy: number 
   }
 }
 
-export type ImageReasonCode = 'locked' | 'rotated' | 'cropped';
-
-const IMAGE_TEXT: Record<EditAction, Record<ImageReasonCode, string>> = {
-  move: {
-    locked: '잠긴 블록은 옮길 수 없어요',
-    rotated: '돌린 블록은 옮길 수 없어요',
-    cropped: '자른 블록은 옮길 수 없어요',
-  },
-  freeform: {
-    locked: '잠긴 블록은 자유 도형으로 바꿀 수 없어요',
-    rotated: '돌린 블록은 자유 도형으로 바꿀 수 없어요. 회전을 풀고 다시 해 주세요',
-    cropped: '자른 블록은 자유 도형으로 바꿀 수 없어요. 자르기를 풀고 다시 해 주세요',
-  },
-};
+export type { ImageReasonCode } from './reasons.ts';
 
 /** Why a block image cannot be used for `action` on the canvas side (the code side is `editReasonCode`), or null. */
 export function imageReasonCode(img: { angle?: number; locked?: boolean; crop?: unknown }, action: EditAction = 'move'): ImageReasonCode | null {

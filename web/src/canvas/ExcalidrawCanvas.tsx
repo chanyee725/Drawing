@@ -15,12 +15,13 @@ import { CanvasInsertMenu } from './CanvasInsertMenu';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram, prunedLayout } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
-import { renderBlock, type BlockPicture } from './render';
+import { renderBlock, type BlockPicture, type PicTheme } from './render';
 import { baseFileId, exportVariants, pictureScale, scaleSvg, svgDataURL, variantId } from './resolution';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, liveFrames, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
+import { RunOverlay } from './RunOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE } from './cleanStyle';
@@ -42,8 +43,9 @@ type Props = {
 };
 
 const theme = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
-// Pictures are always drawn light: Excalidraw's dark mode inverts the whole canvas, images included.
-const PIC_THEME = 'light';
+// Excalidraw's dark mode puts a filter over the whole canvas, images included: dark pictures are drawn pre-corrected
+// for it (darkFilter.ts), so they come out in the dark palette instead of an inverted light one.
+const picTheme = (dark: boolean): PicTheme => (dark ? 'dark-canvas' : 'light');
 const newElId = (blockId: string) => `blk_${blockId}_${Math.random().toString(36).slice(2, 8)}`;
 const liveRects = (els: readonly ExcalidrawElement[]): Rect[] => els.filter((e) => !e.isDeleted).map((e) => rectOf(e));
 
@@ -85,7 +87,21 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const sizes = useRef(new Map<string, BlockPicture>());
   // The picture each block shows, so a block whose code did not change is not rendered again.
   const picCache = useRef<PictureCache<BlockPicture>>(new Map());
-  const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
+  // The theme the pictures in `picCache` (and so on the canvas) are drawn in; a switch draws every block again.
+  const shownTheme = useRef(picTheme(dark));
+  const want = picTheme(dark);
+  const draw = useCallback(
+    (list: readonly Block[]) => {
+      if (shownTheme.current !== want) {
+        shownTheme.current = want;
+        picCache.current.clear();
+      }
+      return picturesFor(list, picCache.current, (b) => renderBlock(b, want));
+    },
+    [want],
+  );
+  // The run overlay reads pictures by the image's file id (a sharpened variant maps back to its base picture).
+  const pictureOf = useCallback((fileId: string) => sizes.current.get(baseFileId(fileId)), []);
   const wrap = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   const canvasRef = useRef(canvas);
@@ -130,7 +146,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const pic = sizes.current.get(baseFileId(img.fileId ?? ''));
     const el = wrap.current;
     if (!pic || !el) return null;
-    let origin = pic.anchor && pic.anchor.key === hash(`${PIC_THEME}\n${b.type}\n${b.code}`) ? pic.anchor : null;
+    let origin = pic.anchor && pic.anchor.key === hash(`${shownTheme.current}\n${b.type}\n${b.code}`) ? pic.anchor : null;
     // A picture drawn with its layout left out (§4.2) has no anchor, but it is what the session composes for that layout.
     const s = ready(sessRef.current, b);
     if (!pic.anchor && pic.layoutReset && s) origin = { key: '', ...(s.compose(b.layout).scene.origin ?? { x: 0, y: 0 }) };
@@ -283,7 +299,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       for (const b of blocks) seenLayouts.current.set(b.id, layoutSig(b.layout));
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
-      const placed = placeBlocks(blocks, pics, liveRects(free));
+      // A block goes back into the frame it was saved in, if that frame is still there (#83).
+      const placed = placeBlocks(liveFrames(blocks, free as unknown as SceneEl[]), pics, liveRects(free));
       const images = restoreElements(
         placed.map((b, i) => blockImageSkeleton(b, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
@@ -349,7 +366,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       if (missing.length) {
         changed = true;
         const mpics = missing.map((b) => pics[index.get(b.id)!]!);
-        const skeletons = placeBlocks(missing, mpics, liveRects(next)).map(
+        const skeletons = placeBlocks(liveFrames(missing, next as unknown as SceneEl[]), mpics, liveRects(next)).map(
           (b, i) => blockImageSkeleton(b, mpics[i]!.fileId, newElId(b.id)) as unknown as ExcalidrawElement,
         );
         next.push(...restoreElements(skeletons, null));
@@ -481,7 +498,9 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           const g = split.geometry.get(id)!;
           const old = graveyard.current.get(id)!;
           graveyard.current.delete(id);
-          return { ...old, x: g.x, y: g.y, w: g.w, h: g.h };
+          const { frameId: _old, ...rest } = old;
+          const f = split.frames.get(id);
+          return { ...rest, x: g.x, y: g.y, w: g.w, h: g.h, ...(f ? { frameId: f } : {}) };
         }),
       ];
     }
@@ -657,6 +676,25 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     };
     // Excalidraw inverts the white background itself in dark mode; a transparent export skips the background.
     const opts = (o: ExportOptions) => ({ exportBackground: !o.transparent, viewBackgroundColor: '#ffffff', exportWithDarkMode: o.dark });
+    // Block images show the pictures drawn for the canvas theme. A dark export gets the same filter as the dark canvas,
+    // so it needs the pre-corrected pictures, a light one the light pictures: swap them in when the canvas differs.
+    const forTheme = async (elements: readonly ExcalidrawElement[], dark: boolean) => {
+      const want = picTheme(dark);
+      if (want === shownTheme.current) return { elements: [...elements], pictureOf: (id: string) => sizes.current.get(id) };
+      const byId = new Map(blocksRef.current.map((b) => [b.id, b]));
+      const pics = new Map<string, BlockPicture>();
+      const out = await Promise.all(
+        elements.map(async (el) => {
+          const bid = el.type === 'image' ? blockIdOf(el as unknown as SceneEl) : null;
+          const b = bid === null ? undefined : byId.get(bid);
+          if (!b) return el;
+          const p = await renderBlock(b, want);
+          pics.set(p.fileId, p);
+          return { ...el, fileId: p.fileId as FileId } as ExcalidrawElement;
+        }),
+      );
+      return { elements: out, pictureOf: (id: string) => pics.get(id) };
+    };
     handle.current = {
       scope: () => {
         const s = scope();
@@ -665,7 +703,13 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       svg: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        const el = await exportToSvg({ elements, appState: opts(o), files: api.getFiles(), exportPadding: 16 });
+        const t = await forTheme(elements, o.dark);
+        const files = { ...api.getFiles() };
+        for (const e of t.elements) {
+          const p = e.type === 'image' && e.fileId ? t.pictureOf(e.fileId) : undefined;
+          if (p && !files[p.fileId]) files[p.fileId] = fileData(p);
+        }
+        const el = await exportToSvg({ elements: t.elements, appState: opts(o), files, exportPadding: 16 });
         el.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
         return { svg: new XMLSerializer().serializeToString(el), width: parseFloat(el.getAttribute('width') ?? '0'), height: parseFloat(el.getAttribute('height') ?? '0') };
       },
@@ -673,10 +717,11 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         const { elements } = scope();
         if (!elements.length) return null;
         // Block images carry the variant picked for the view; the export uses the one sharp at its own scale.
-        const ex = exportVariants(elements, o.scale, (id) => sizes.current.get(id));
+        const t = await forTheme(elements, o.dark);
+        const ex = exportVariants(t.elements, o.scale, t.pictureOf);
         const files = { ...api.getFiles() };
         for (const { picture, k } of ex.need) {
-          const p = sizes.current.get(picture.fileId);
+          const p = t.pictureOf(picture.fileId);
           const id = variantId(picture.fileId, k);
           if (p && !files[id]) files[id] = fileData(p, k);
         }
@@ -743,6 +788,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           setEditing(b.id);
         }}
       />
+      {api && wrap.current && <RunOverlay api={api} wrap={wrap.current} pictureOf={pictureOf} hide={edit?.blockId ?? null} />}
       {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
         <LayoutEditOverlay
           layout={editBlock.layout}

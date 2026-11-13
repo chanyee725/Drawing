@@ -4,8 +4,11 @@ import { watch } from 'node:fs';
 import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, lstat, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join, sep } from 'node:path';
+import { ensureDirInside, LockPathError } from '../lock.js';
 import { createResolver, parseRelPath, PathError } from './paths.js';
 import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
+import { applyPlanOps } from './plan-ops.js';
+import { PLAN_VERSION } from '../../shared/dispatch/plan.ts';
 
 export class StoreError extends Error {
   constructor(status, message, extra = {}) {
@@ -30,6 +33,8 @@ export const TRASH_DIR = ['.drawing', 'trash'];
 export const TRASH_DAYS = 30;
 export const TRASH_MAX = 200;
 const TRASH_ID = /^\d{13}-[0-9a-f]{8}$/;
+// Pipeline run records (server/runs/) live beside history and follow the file the same way on move, delete and restore.
+export const RUNS_DIR = ['.drawing', 'runs'];
 
 export function createStore(
   workspaceDir,
@@ -44,6 +49,16 @@ export function createStore(
   let queue = Promise.resolve();
   let watcher = null;
   const timers = new Map();
+  // Listeners told when a file's sidecars (history, runs) move: {kind:'move', from, to} | {kind:'trash', path, trashId}
+  // | {kind:'restore', path, trashId}. Called inside the serial queue, so they see a settled tree.
+  const sidecarListeners = new Set();
+  const sidecarEvent = (e) => {
+    for (const fn of sidecarListeners) {
+      try {
+        fn(e);
+      } catch {}
+    }
+  };
 
   // Serialize every mutation so revision check + rename is one step.
   const serial = (fn) => {
@@ -141,14 +156,16 @@ export function createStore(
   // `.drawing/history/<file path>/<ms timestamp>.json` holds the file as it was on disk just before a save
   // overwrote it (the timestamp is that save's time), so the end of each edit session is kept.
   // History is a convenience: a failure here never fails the save, delete or move it belongs to.
-  const historyDirOf = async (rel) => {
+  const sidecarDirOf = async (root, rel) => {
     try {
-      return await fsr.resolveInternal(...HISTORY_DIR, ...rel.split('/'));
+      return await fsr.resolveInternal(...root, ...rel.split('/'));
     } catch (err) {
       if (err instanceof PathError) throw new StoreError(400, err.message);
       throw err;
     }
   };
+  const historyDirOf = (rel) => sidecarDirOf(HISTORY_DIR, rel);
+  const runsDirOf = (rel) => sidecarDirOf(RUNS_DIR, rel);
 
   async function snapshotIds(dir) {
     try {
@@ -256,32 +273,72 @@ export function createStore(
     });
   }
 
-  // A file or folder moved: its history moves with it (best effort); one deleted: its history goes too.
-  async function moveHistory(from, to) {
+  // A file or folder moved: its history and runs move with it (best effort); one deleted: its history goes too.
+  async function moveSidecar(root, from, to) {
     try {
-      const fromDir = await historyDirOf(from);
+      const fromDir = await sidecarDirOf(root, from);
       if (!(await statOrNull(fromDir))) return;
-      const toDir = await historyDirOf(to);
+      const toDir = await sidecarDirOf(root, to);
       await rm(toDir, { recursive: true, force: true });
       await mkdir(dirname(toDir), { recursive: true });
       await rename(fromDir, toDir);
-      await pruneEmptyHistoryParents(fromDir);
+      await pruneEmptyParents(root, fromDir);
     } catch {}
   }
-  // Remove now-empty parent folders of a history dir that moved or went away, up to (not including) `.drawing/history`.
-  async function pruneEmptyHistoryParents(dir) {
+  async function moveHistory(from, to) {
+    await moveSidecar(HISTORY_DIR, from, to);
+    await moveSidecar(RUNS_DIR, from, to);
+    sidecarEvent({ kind: 'move', from, to });
+  }
+  // Remove now-empty parent folders of a sidecar dir that moved or went away, up to (not including) `.drawing/<kind>`.
+  async function pruneEmptyParents(rootSegs, dir) {
     try {
-      const root = await fsr.resolveInternal(...HISTORY_DIR);
+      const root = await fsr.resolveInternal(...rootSegs);
       for (let d = dirname(dir); d.startsWith(root + sep) && d !== root; d = dirname(d)) await rmdir(d); // throws (ENOTEMPTY) at the first non-empty one
     } catch {}
   }
-  const dropHistory = (rel) =>
-    historyDirOf(rel)
+  const pruneEmptyHistoryParents = (dir) => pruneEmptyParents(HISTORY_DIR, dir);
+  const dropSidecar = (root, rel) =>
+    sidecarDirOf(root, rel)
       .then(async (d) => {
         await rm(d, { recursive: true, force: true });
-        await pruneEmptyHistoryParents(d);
+        await pruneEmptyParents(root, d);
       })
       .catch(() => {});
+  const dropHistory = async (rel) => {
+    await dropSidecar(HISTORY_DIR, rel);
+    await dropSidecar(RUNS_DIR, rel);
+  };
+  const nonEmptyDir = async (dir) => {
+    try {
+      return (await readdir(dir)).length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  // ---- run record sidecars: server/runs/ owns their content; the store owns where they live ----
+  const runsApi = {
+    // Run `fn` in the store's mutation queue, so a run write never interleaves with a move, delete or restore.
+    serial,
+    fileRel: checkedFileRel,
+    dirOf: runsDirOf,
+    // The `runs` folder inside a trash entry must be a real folder inside the workspace (not a link out of it).
+    trashDirOf: async (trashId) => {
+      const dir = join(await entryDir(trashId), 'runs');
+      try {
+        await ensureDirInside(fsr.root, dir);
+      } catch (err) {
+        if (err instanceof LockPathError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      return dir;
+    },
+    onChange(fn) {
+      sidecarListeners.add(fn);
+      return () => sidecarListeners.delete(fn);
+    },
+  };
 
   // ---- trash: deleted files stay restorable for TRASH_DAYS ----
   // `.drawing/trash/<ms>-<hex>/` holds `meta.json` {path, deletedAt}, `file.json` (the content when we saw it go)
@@ -300,7 +357,9 @@ export function createStore(
     try {
       const histDir = await historyDirOf(rel);
       const hasHistory = (await snapshotIds(histDir)).length > 0;
-      if (text == null && !hasHistory) return null;
+      const runsDir = await runsDirOf(rel);
+      const hasRuns = await nonEmptyDir(runsDir);
+      if (text == null && !hasHistory && !hasRuns) return null;
       const born = await readBorn(histDir);
       const t = now();
       const id = `${String(t).padStart(13, '0')}-${randomBytes(4).toString('hex')}`;
@@ -311,6 +370,11 @@ export function createStore(
       if (hasHistory) await rename(histDir, join(dir, 'history'));
       await rm(histDir, { recursive: true, force: true });
       await pruneEmptyHistoryParents(histDir);
+      if (hasRuns) {
+        await rename(runsDir, join(dir, 'runs'));
+        await pruneEmptyParents(RUNS_DIR, runsDir);
+        sidecarEvent({ kind: 'trash', path: rel, trashId: id });
+      }
       if (purge) await purgeTrash([id]);
       return id;
     } catch {
@@ -428,8 +492,11 @@ export function createStore(
       await atomicWrite(abs, text, { exclusive: true });
       await adopt(rel, abs);
       if (hasHist) await mergeHistory(histDir, await historyDirOf(rel));
+      const hasRuns = (await statOrNull(join(dir, 'runs')))?.isDirectory() === true;
+      if (hasRuns) await mergeRuns(join(dir, 'runs'), await runsDirOf(rel));
       if (entry.created) await markBorn(rel, entry.created);
       await rm(dir, { recursive: true, force: true });
+      if (hasRuns) sidecarEvent({ kind: 'restore', path: rel, trashId: id });
       for (let d = dirname(rel); d !== '.'; d = dirname(d)) knownDirs.add(d);
       onExternalChange?.({ kind: 'tree', path: rel });
       return { path: rel };
@@ -446,6 +513,16 @@ export function createStore(
       while (taken.has(next)) next = String(Number(next) + 1).padStart(13, '0');
       taken.add(next);
       await rename(join(fromDir, `${id}.json`), join(toDir, `${next}.json`)).catch(() => {});
+    }
+  }
+
+  // Put trashed run records back; a record whose name is taken at the path keeps the one already there.
+  async function mergeRuns(fromDir, toDir) {
+    await mkdir(toDir, { recursive: true });
+    const taken = new Set(await readdir(toDir).catch(() => []));
+    for (const name of await readdir(fromDir).catch(() => [])) {
+      if (name.startsWith('.') || taken.has(name) || !(await plainFile(join(fromDir, name)))) continue;
+      await rename(join(fromDir, name), join(toDir, name)).catch(() => {});
     }
   }
 
@@ -485,10 +562,13 @@ export function createStore(
       } else if (e.isFile() && isDpx(e.name)) {
         let title = '';
         let revision = null;
+        let pipeline;
         try {
           const f = parseStored(await readFile(join(absDir, e.name), 'utf8'));
           title = f.title;
           revision = f.revision;
+          // Run states (실행 중 / 멈춤 / 완료) come from run records later (E21); a file with a plan is a draft until then.
+          if (f.plan) pipeline = { state: 'plan' };
         } catch {
           // unreadable file still shows up so it can be renamed or deleted
         }
@@ -501,7 +581,9 @@ export function createStore(
         // Saves replace the file (atomic rename), so its birth time is the last save on most systems; projects.js
         // takes the earlier of this and the oldest history snapshot. Without a birth time (0) the mtime stands in.
         const born = st.birthtimeMs > 0 && st.birthtimeMs < st.mtimeMs ? st.birthtime : st.mtime;
-        out.push({ type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString(), created: born.toISOString() });
+        const row = { type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString(), created: born.toISOString() };
+        if (pipeline) row.pipeline = pipeline;
+        out.push(row);
       }
     }
     // folders first
@@ -528,13 +610,24 @@ export function createStore(
   }
 
   // ---- file operations ----
-  async function createFile(rel, { title } = {}) {
+  // `body` may carry starting content (document, canvas, blocks, plan), e.g. a pipeline template; it is checked like a save.
+  async function createFile(rel, body = {}) {
     rel = checkedFileRel(rel);
     checkFolderNames(rel.split('/').slice(0, -1));
     const abs = await wrapPath(rel).catch((err) => {
       throw asParentClash(err);
     });
-    const fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
+    const { title } = body ?? {};
+    let fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
+    const { document, canvas, blocks, plan } = body ?? {};
+    if (document !== undefined || canvas !== undefined || blocks !== undefined || plan !== undefined) {
+      try {
+        fresh = { ...normalizeContent({ title: fresh.title, document, canvas, blocks, plan }), revision: fresh.revision };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+    }
     return serial(async () => {
       await ensureParent(abs);
       const file = { ...fresh, revision: Math.max(fresh.revision, (tombstones.get(rel) ?? 0) + 1) };
@@ -606,6 +699,35 @@ export function createStore(
     });
   }
 
+  // Agents change the plan without holding the whole file: step-level ops applied to what is on disk now, under
+  // the same lock as saves. `revision` is optional; when given, a stale one gets 409 like a save.
+  async function patchPlanAt(rel, body) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    const base = body?.revision;
+    if (base !== undefined && (!Number.isInteger(base) || base < 1)) throw new StoreError(400, 'revision must be an integer >= 1');
+    if (!Array.isArray(body?.ops) || body.ops.length === 0) throw new StoreError(400, 'ops must be a non-empty array');
+    return serial(async () => {
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
+      if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
+      if (base !== undefined && current.revision !== base) throw new StoreError(409, 'stale write', { revision: current.revision });
+      if (current.plan && current.plan.v > PLAN_VERSION) throw new StoreError(422, '더 새 버전에서 만든 계획이라 바꾸지 않았어요');
+      let next;
+      try {
+        const plan = applyPlanOps(current.plan, body.ops);
+        next = { ...normalizeContent({ ...current, plan }), revision: current.revision + 1 };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      const text = serialize(next);
+      await snapshotQuietly(rel, before);
+      await atomicWrite(abs, text);
+      known.set(rel, { hash: sha(text), revision: next.revision });
+      return { path: rel, revision: next.revision, plan: next.plan ?? null };
+    });
+  }
+
   async function createFolder(rel) {
     parseOrThrow(rel);
     checkFolderNames(rel.split('/'));
@@ -632,10 +754,14 @@ export function createStore(
    * `type` is 'file' | 'folder'. Without it a file wins: `from` is tried as a file
    * (extension optional) first, then as a folder.
    */
-  async function move(from, to, type) {
+  async function move(from, to, type, { withSubdocs = false } = {}) {
     parseOrThrow(from);
     parseOrThrow(to);
     if (type !== undefined && type !== 'file' && type !== 'folder') throw new StoreError(400, 'type must be "file" or "folder"');
+    if (withSubdocs) {
+      if (type !== 'file') throw new StoreError(400, 'withSubdocs needs type "file"');
+      return serial(() => moveWithSubdocs(from, to));
+    }
     return serial(async () => {
       if (type !== 'folder') {
         const fileFrom = checkedFileRel(from);
@@ -649,6 +775,37 @@ export function createStore(
       if (!st?.isDirectory()) throw new StoreError(404, 'not found');
       return moved(from, await moveFolder(from, fromAbs, to));
     });
+  }
+
+  // A document and its sub-documents folder (`X/` next to `X.dpx.json`) move as one: both targets are checked
+  // before anything moves, and the file goes back if the folder move still fails.
+  async function moveWithSubdocs(from, to) {
+    const fileFrom = checkedFileRel(from);
+    const fileTo = checkedFileRel(to);
+    const fromAbs = await wrapPath(fileFrom);
+    if (!(await statOrNull(fromAbs))?.isFile()) throw new StoreError(404, 'not found');
+    const subFrom = fileFrom.slice(0, -FILE_EXT.length);
+    const subTo = fileTo.slice(0, -FILE_EXT.length);
+    const subAbs = await wrapPath(subFrom);
+    const hasSub = (await statOrNull(subAbs))?.isDirectory();
+    if (hasSub && (subTo === subFrom || subTo.startsWith(subFrom + '/'))) throw new StoreError(400, 'cannot move a folder into itself');
+    // A folder already named like the new document would become its sub-documents (an unrelated group taken over),
+    // so the move is refused even when the document has no sub-documents of its own.
+    const subToAbs = await wrapPath(subTo).catch((err) => {
+      throw asParentClash(err);
+    });
+    if (await statOrNull(subToAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    if (!hasSub) return moved(from, await moveFile(fileFrom, fromAbs, fileTo));
+    checkFolderNames(subTo.split('/'));
+    const result = await moveFile(fileFrom, fromAbs, fileTo);
+    try {
+      await moveFolder(subFrom, subAbs, subTo);
+    } catch (err) {
+      await moveFile(fileTo, await wrapPath(fileTo), fileFrom).catch(() => {});
+      throw err;
+    }
+    moved(subFrom, { path: subTo });
+    return moved(from, result);
   }
 
   // A move or rename through the API tells other tabs where the thing went; `from` is the path as the caller wrote it.
@@ -711,17 +868,47 @@ export function createStore(
     tombstones.delete(rel);
   }
 
-  async function removeFile(rel) {
+  // Remove the empty folders under (and including) absDir, deepest first; anything still holding a file stays.
+  // Returns the rel paths of the folders it removed. Symlinks are never followed.
+  async function pruneEmptyDirs(absDir, relDir) {
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const removed = [];
+    for (const e of entries) if (e.isDirectory()) removed.push(...(await pruneEmptyDirs(join(absDir, e.name), `${relDir}/${e.name}`)));
+    if (await rmdir(absDir).then(() => true, () => false)) removed.push(relDir); // fails (ENOTEMPTY) when something stays
+    return removed;
+  }
+
+  // withSubdocs: the document's sub-documents (`.dpx.json` files under `X/`, next to `X.dpx.json`) go to the trash
+  // with it. Only those files are removed: anything else under X/ (notes, images, hidden files) cannot be kept in
+  // the trash, so it stays where it is, with the folders that hold it. Folders left empty are removed.
+  async function removeFile(rel, { withSubdocs = false } = {}) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
+    const subRel = rel.slice(0, -FILE_EXT.length);
+    const subAbs = withSubdocs ? await wrapPath(subRel) : null;
     return serial(async () => {
       const st = await statOrNull(abs);
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
       const text = await readFile(abs, 'utf8').catch(() => null);
+      const sub = subAbs && (await statOrNull(subAbs))?.isDirectory() ? await collectFiles(subAbs, subRel) : null;
       await unlink(abs);
       forget(rel, false);
-      await trashQuietly(rel, text);
+      if (sub) {
+        for (const f of sub) {
+          await unlink(join(subAbs, f.rel.slice(subRel.length + 1)));
+          forget(f.rel, false);
+        }
+        for (const d of await pruneEmptyDirs(subAbs, subRel)) knownDirs.delete(d);
+        await trashMany([[rel, text], ...sub.map((f) => [f.rel, f.text])]);
+        for (const f of sub) await dropHistory(f.rel);
+      } else await trashQuietly(rel, text);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
+      if (sub) onExternalChange?.({ kind: 'tree', path: subRel, from: subRel });
       return { path: rel };
     });
   }
@@ -917,5 +1104,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close };
+  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close, runs: runsApi };
 }

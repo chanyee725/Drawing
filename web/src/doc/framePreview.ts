@@ -32,13 +32,14 @@ export async function renderFrame(scene: readonly CanvasEl[], frameId: string, d
   const pad = Math.max(0, (parseFloat(svg.getAttribute('width') ?? '0') - fw) / 2) || 0;
   const { clip: box, images } = blockPlacements({ x: fx, y: fy, width: fw, height: fh }, blocks, pad);
   if (images.length) {
-    // Always the light picture: a dark export puts an invert filter on the whole SVG, which would invert a dark one twice.
+    // A dark export puts Excalidraw's dark filter on the whole SVG, these pictures included: the dark ones are drawn
+    // pre-corrected for it, like on the dark canvas.
     const byId = new Map(blocks.map((x) => [x.id, x]));
     const placed = images.flatMap((b) => {
       const block = byId.get(b.id);
       return block ? [{ b, block }] : [];
     });
-    const pics = await Promise.all(placed.map((p) => renderBlock(p.block, 'light')));
+    const pics = await Promise.all(placed.map((p) => renderBlock(p.block, dark ? 'dark-canvas' : 'light')));
     const clipId = `frame-clip-${frameId.replace(/[^\w-]/g, '_')}`;
     const clip = document.createElementNS(SVG_NS, 'clipPath');
     clip.setAttribute('id', clipId);

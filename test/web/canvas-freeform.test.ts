@@ -162,5 +162,8 @@ test('frameFor: the image keeps its own frame, else the smallest live frame that
   assert.equal(frameFor(img, [img, big, small, part]), 'small');
   assert.equal(frameFor(img, [img, r('gone', 'frame', 50, 50, 300, 200, { isDeleted: true }), big]), 'big');
   assert.equal(frameFor(img, [img, part, r('rect', 'rectangle', 0, 0, 1000, 1000)]), null, 'partly inside or not a frame');
-  assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small]), 'own');
+  assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small, r('own', 'frame', 900, 900, 10, 10)]), 'own');
+  // The image's own frame only counts while that frame is live (#83).
+  assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small, r('own', 'frame', 900, 900, 10, 10, { isDeleted: true })]), 'small');
+  assert.equal(frameFor({ ...img, frameId: 'missing' }, [img, big]), 'big');
 });

@@ -67,7 +67,7 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   await pic.waitFor({ timeout: 30000 });
   assert.match(await pic.getAttribute('src'), /^data:image\/svg\+xml/);
   assert.equal(await page.locator('.doc-frame figcaption').textContent(), '프레임 구조도 · 누르면 캔버스로 가요');
-  await page.getByText('저장했어요').waitFor();
+  await page.locator('[data-save="saved"]').waitFor();
   // The diagram block inside the frame is drawn in the preview (it is not a canvas element).
   await page.waitForFunction(() => decodeURIComponent(document.querySelector('.doc-frame .doc-diagram-pic img')?.getAttribute('src') ?? '').includes('data-block-id'), null, { timeout: 30000 });
   const svgText = decodeURIComponent((await pic.getAttribute('src')).split(',')[1]);
@@ -76,8 +76,7 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   const node = saved.document.content.find((n) => n.type === 'frameEmbed');
   assert.deepEqual(node.attrs, { frameId: 'frame_1', name: '구조도' });
 
-  // Dark mode: Excalidraw inverts the whole exported SVG, so the block layer must stay the light picture
-  // (drawn dark it would be inverted twice). Its picture is the same as in the light page.
+  // Dark mode: Excalidraw inverts the whole exported SVG, so the block layer is drawn pre-corrected for that filter.
   const lightPic = /<image[^>]*data-block-id="b_in"/.exec(svgText)?.[0].match(/href="([^"]+)"/)?.[1];
   const dark = await (await browser.newContext({ viewport: { width: 1400, height: 900 }, colorScheme: 'dark' })).newPage();
   await dark.goto(`${BASE}/#file=fr`);
@@ -86,7 +85,9 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   assert.match(darkSvg, /invert\(/, 'the export is in dark mode');
   const darkPic = /<image[^>]*data-block-id="b_in"/.exec(darkSvg)?.[0].match(/href="([^"]+)"/)?.[1];
   assert.ok(lightPic && darkPic);
-  assert.equal(darkPic, lightPic, 'frame preview draws blocks light, also in dark mode');
+  // E17: a dark export puts Excalidraw's dark filter over the SVG, so its block pictures are the dark palette
+  // pre-corrected for that filter (like on the dark canvas), not the light picture.
+  assert.notEqual(darkPic, lightPic, 'frame preview draws blocks with the pre-corrected dark palette in dark mode');
   await dark.close();
 
   // Clicking the preview shows the frame on the canvas and selects it. Check the selection itself:

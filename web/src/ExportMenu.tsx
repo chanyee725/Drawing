@@ -1,3 +1,4 @@
+import { Download } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
 import { IS_MAC } from './platform';
@@ -21,16 +22,14 @@ type Props = {
   pdfScope: 'selection' | 'document' | 'canvas';
   onPdf: () => void;
   disabled?: boolean;
+  /** Below md the trigger is a 44px icon button (버전 기록 lives in the header's ⋯ menu). */
+  narrow?: boolean;
 };
 
-/** A pill that sets an option and keeps the menu open. */
+/** An option pill; picking one keeps the menu open (onSelect preventDefault). */
 const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[state=checked]:border-primary data-[state=checked]:bg-muted data-[state=checked]:font-semibold data-[state=checked]:text-foreground';
-const keep = (fn: () => void) => (e: Event) => {
-  e.preventDefault();
-  fn();
-};
 
-export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled }: Props) {
+export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled, narrow }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   // The option pills come first in the DOM, so Radix's keyboard entry focus lands on "1배" and
   // Ctrl+E → Enter would change the PNG size. Move focus to the first export action once open.
@@ -54,20 +53,29 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
     { id: 'md', label: '문서를 Markdown으로', hint: '다이어그램은 코드 블록', off: false, run: onMarkdown },
   ];
   return (
-    <div className="hidden shrink-0 md:block">
+    <div className="shrink-0">
       <DropdownMenu open={open} onOpenChange={onOpen} modal={false}>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" disabled={disabled} title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`} className="whitespace-nowrap">
-            내보내기
-          </Button>
+          {narrow ? (
+            <Button variant="outline" size="icon" disabled={disabled} aria-label="내보내기" title="내보내기" className="size-11">
+              <Download />
+            </Button>
+          ) : (
+            <Button variant="outline" disabled={disabled} title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`} className="whitespace-nowrap">
+              내보내기
+            </Button>
+          )}
         </DropdownMenuTrigger>
         <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
           <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
             <legend className="sr-only">이미지 옵션</legend>
-            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => onOptions({ ...options, scale: Number(v) as ExportOptions['scale'] })}>
+            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
+              const scale = SCALES.find((s) => String(s) === v);
+              if (scale) onOptions({ ...options, scale });
+            }}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">PNG 크기</span>
               {SCALES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={keep(() => {})}>
+                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={(e) => e.preventDefault()}>
                   {s}배
                 </DropdownMenuRadioItem>
               ))}
@@ -75,7 +83,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="색상" value={String(options.dark)} onValueChange={(v) => onOptions({ ...options, dark: v === 'true' })}>
               <span className="mr-auto px-1 text-xs text-muted-foreground">색상</span>
               {([false, true] as const).map((d) => (
-                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={keep(() => {})}>
+                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={(e) => e.preventDefault()}>
                   {d ? '다크' : '라이트'}
                 </DropdownMenuRadioItem>
               ))}
@@ -86,7 +94,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
           </fieldset>
           <DropdownMenuSeparator />
           {items.map((it) => (
-            <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start">
+            <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start max-md:min-h-11">
               <div className="flex min-w-0 flex-1 flex-col">
                 <span>{it.label}</span>
                 <span className="text-xs text-muted-foreground">{it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}</span>

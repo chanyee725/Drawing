@@ -74,7 +74,7 @@ test('outline, heading link and wikilink in a headless browser', { skip: !ON && 
   const link = await page.evaluate(() => navigator.clipboard.readText());
   assert.match(link, /#file=main&h=h_[a-z0-9]+$/);
 
-  await page.getByText('저장했어요').waitFor();
+  await page.locator('[data-save="saved"]').waitFor();
 
   // Opening the link in a fresh page jumps to that heading.
   const page2 = await ctx.newPage();

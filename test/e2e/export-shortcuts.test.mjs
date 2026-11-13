@@ -225,6 +225,10 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     assert.ok(Math.abs(w(x2.data) - 2 * w(x1.data)) <= 2, `2x is twice 1x (${w(x2.data)} vs ${w(x1.data)})`);
     await open();
     await opt('[data-export-scale="3"]');
+    // The pills are radio items: role, group name and checked state reach assistive tech (#120).
+    const menu = page.getByRole('menu', { name: '내보내기' });
+    await menu.getByRole('group', { name: 'PNG 크기' }).getByRole('menuitemradio', { name: '3배', checked: true }).waitFor();
+    assert.equal(await menu.getByRole('menuitemradio', { name: '1배', checked: false }).count(), 1, '1x is no longer checked');
     const x3 = await downloadVia('png');
     assert.equal(x3.name, 'E7 내보내기@3x.png');
     assert.ok(Math.abs(w(x3.data) - 3 * w(x1.data)) <= 3, `3x is three times 1x (${w(x3.data)} vs ${w(x1.data)})`);
@@ -239,6 +243,8 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     await open();
     await opt('[data-export-transparent]');
     await opt('[data-export-dark="true"]');
+    await menu.getByRole('group', { name: '색상' }).getByRole('menuitemradio', { name: '다크', checked: true }).waitFor();
+    assert.equal(await menu.getByRole('menuitemradio', { name: '라이트', checked: false }).count(), 1, 'light is no longer checked');
     const dk = await downloadVia('png');
     assert.equal(dk.name, 'E7 내보내기@3x-dark.png');
     const [r, g, b, a] = await corner(dk.data);

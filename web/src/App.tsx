@@ -1,13 +1,17 @@
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, type Block, type DocNode, type DpxFile, type Project, type ProjectsView, type TreeNode } from './api';
 import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
-import { sameDrawing } from './canvas/sync';
+import { newBlockId, sameDrawing } from './canvas/sync';
+import { pipelineTemplate } from './pipelineTemplate';
 import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
-import { ShellHome } from './ShellHome';
+import { Home, type CreateKind } from './home/Home';
+import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
 import { asTreeNode, docPlace, newFileDir, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
 import { SubDocs } from './SubDocs';
+import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
+import { shownView, toCanvas } from './viewMode';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -30,9 +34,9 @@ import { CommandPalette } from './CommandPalette';
 import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
 import { displayName } from './Sidebar';
 import {
-  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown,
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown, Layers, FolderClosed,
   Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
-  SquareDashedMousePointer, Sun, Trash, Type, Undo2, ZoomIn, ZoomOut,
+  SquareDashedMousePointer, Sun, Trash, Type, Undo2, Workflow, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
@@ -65,8 +69,6 @@ function useNarrow() {
 }
 
 const NO_BLOCKS: Block[] = [];
-// Showing something on the canvas: next to the document, or instead of it on a narrow screen.
-const toCanvas = (v: View, narrow: boolean): View => (narrow ? 'canvas' : v === 'doc' ? 'both' : v);
 
 type TreeFile = Extract<TreeNode, { type: 'file' }>;
 /** Every file in the tree, depth first (folders in tree order). */
@@ -182,7 +184,9 @@ export function App() {
   // What the main panel shows; opening a file switches to the document screen.
   const [section, setSection] = useState<Section>({ kind: 'all' });
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [view, setView] = useState<View>('both');
+  const [wideView, setView] = useState<View>('both');
+  // Below md only one pane fits: the split view falls back to the document (design doc 6 §6).
+  const view = shownView(wideView, narrow);
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
@@ -197,6 +201,7 @@ export function App() {
   exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteGroup, setPaletteGroup] = useState<Command['group']>(undefined);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
@@ -212,9 +217,11 @@ export function App() {
     }
   }, []);
 
+  // Path this tab is deleting right now (see the SSE handler below).
+  const removing = useRef<string | null>(null);
   // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
   // slices it shows, never blocks, canvas or document.
-  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); if (!removing.current) setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
@@ -314,7 +321,7 @@ export function App() {
       const old = await api.historyVersion(p, id);
       await api.historySnapshot(p);
       const cur = await api.readFile(p);
-      await api.saveFile(p, { revision: cur.revision, title: old.title, document: old.document, canvas: old.canvas, blocks: old.blocks });
+      await api.saveFile(p, { revision: cur.revision, title: old.title, document: old.document, canvas: old.canvas, blocks: old.blocks, plan: old.plan });
       load(p, await api.readFile(p));
       void refreshTree();
       setStatus('이전 버전으로 되돌렸어요');
@@ -341,19 +348,21 @@ export function App() {
     };
   }, [session]);
 
-  // New files go in the project shown (or the open file's project); a typed `a/b` path still works.
-  // A sub-document goes in the folder named after the open document (design doc 6 §1).
-  const newFile = async (sub = false) => {
-    const dir = sub && path ? subFolderOf(path) : newFileDir(section, projects, path);
-    const name = window.prompt(sub ? '하위 문서 이름을 입력해 주세요' : dir ? `새 파일 이름을 입력해 주세요 (${dir} 안에 만들어요)` : '새 파일 이름을 입력해 주세요');
+  /** `folder` = project path the file goes into; undefined = the project shown (or the open file's), null = workspace root. */
+  // `sub`: a sub-document of the open document, in the folder named after it (design doc 6 §1).
+  const newFile = async (folder?: string | null, kind: CreateKind = 'doc', sub = false) => {
+    const dir = sub && path ? subFolderOf(path) : folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
+    const label = kind === 'plan' ? '새 파이프라인 계획 이름을 입력해 주세요' : '새 파일 이름을 입력해 주세요';
+    const name = window.prompt(sub ? '하위 문서 이름을 입력해 주세요' : dir ? `${label} (${dir} 안에 만들어요)` : label);
     const stem = name ? fileStem(name) : '';
     if (!stem) return;
-    const p = dir ? `${dir}/${stem}` : stem;
+    const p = stem.includes('/') ? stem : folderPrefix(dir || null) + stem;
     await session.flush();
     try {
-      await api.createFile(p, p.split('/').pop() ?? p);
+      // A pipeline plan starts from the pipeline template (E18); other kinds start empty.
+      await api.createFile(p, p.split('/').pop() ?? p, kind === 'plan' ? pipelineTemplate(newBlockId()) : undefined);
       await refreshTree();
-      await open(p);
+      if (await open(p) && kind === 'canvas') setView('canvas');
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 파일이 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
@@ -382,8 +391,6 @@ export function App() {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 프로젝트가 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
-  // Path this tab is deleting right now (see the SSE handler below).
-  const removing = useRef<string | null>(null);
   // The open file is gone (deleted or moved away): drop it and its pending save.
   const closeOpenFile = useCallback(() => {
     session.close();
@@ -419,10 +426,12 @@ export function App() {
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
   const ownMoves = useRef(new Set<string>());
   // `title`: a renamed file takes the new name as its title too, because the sidebar shows the title.
-  const move = async (n: TreeNode, to: string, title?: string): Promise<boolean> => {
+  // `sub`: a document's sub-documents folder that moves along in the same request (sidebar drag, 옮기기 menu).
+  const move = async (n: TreeNode, to: string, title?: string, sub?: { from: string; to: string }): Promise<boolean> => {
     const from = n.path;
-    ownMoves.current.add(from);
-    setTimeout(() => ownMoves.current.delete(from), 5000);
+    const echoes = sub ? [from, sub.from] : [from];
+    for (const x of echoes) ownMoves.current.add(x);
+    setTimeout(() => echoes.forEach((x) => ownMoves.current.delete(x)), 5000);
     let readFailed = false;
     let release = () => {};
     try {
@@ -430,9 +439,11 @@ export function App() {
       // An edit made while the (possibly slow) move runs must not be saved to the old path. Only the open
       // file (or the folder holding it) needs this: holding for an unrelated move would also skip the save on tab close.
       const open = session.getState().path;
-      if (open && (open === from || (n.type === 'folder' && open.startsWith(`${from}/`)))) release = session.hold();
-      const r = await api.move(from, to, n.type);
-      const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
+      const under = (dir: string) => !!open && open.startsWith(`${dir}/`);
+      if (open && (open === from || (n.type === 'folder' && under(from)) || (sub && under(sub.from)))) release = session.hold();
+      const r = await api.move(from, to, n.type, !!sub);
+      const now = session.getState().path;
+      const next = pathAfterMove(now, from, (r as { path?: string }).path ?? to, n.type) ?? (sub ? pathAfterMove(now, sub.from, sub.to, 'folder') : null);
       if (next) {
         // The revision is re-read: a name that was deleted before makes the server raise it.
         const fresh = await api.readFile(next).catch(() => null);
@@ -453,7 +464,7 @@ export function App() {
       if (readFailed) setError('옮겼어요. 다만 파일을 다시 읽지 못했어요. 저장이 안 되면 화면을 새로 고쳐 주세요');
       return true;
     } catch (e) {
-      ownMoves.current.delete(from);
+      for (const x of echoes) ownMoves.current.delete(x);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
       return false;
     } finally {
@@ -470,24 +481,39 @@ export function App() {
     if (problem) return setError(problem);
     const to = renameTarget(n, name);
     if (!to) return;
-    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined);
-    if (ok && n.type === 'file' && 'children' in entry && entry.children.length) {
-      const sub = subFolderOf(n.path);
-      await move({ type: 'folder', name: sub.split('/').pop() ?? sub, path: sub, children: [] }, subFolderOf(to));
-    }
+    // One request for a document: the server checks both targets first, so a taken sub-documents name refuses
+    // the whole rename instead of leaving the sub-documents behind. An empty `X/` moves along too.
+    const sub = n.type === 'file' ? { from: subFolderOf(n.path), to: subFolderOf(to) } : undefined;
+    const ok = await move(n, to, n.type === 'file' ? fileStem(name) : undefined, sub);
     if (ok && section.kind === 'project' && section.path === n.path) setSection({ kind: 'project', path: to });
+  };
+
+  // Drag or 옮기기 menu in the sidebar: a document or group into a project or group. Resolves true when it moved.
+  const moveEntry = async (item: MoveItem, dir: string): Promise<boolean> => {
+    const to = moveTarget(item, dir);
+    if (!to) return false;
+    const n: TreeNode = item.kind === 'doc' ? { type: 'file', name: item.path.split('/').pop() ?? item.path, path: item.path, title: '', revision: null } : { type: 'folder', name: item.label, path: item.path, children: [] };
+    return move(n, to, undefined, subdocsMove(item, to) ?? undefined);
   };
 
   const remove = async (entry: DocNode | Project) => {
     const n = asTreeNode(entry);
     const label = n.type === 'file' ? n.title || n.name : n.name;
-    const keep = n.type === 'file' ? "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요." : "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요.";
+    const subdocs = n.type === 'file' && 'children' in entry && entry.children.length > 0;
+    const keep =
+      n.type === 'folder'
+        ? "안에 있던 파일은 30일 동안 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요. 빈 폴더는 돌아오지 않아요."
+        : subdocs
+          ? "하위 문서도 함께 지워져요. 30일 동안은 '최근에 지운 파일'에서 하나씩 되살릴 수 있어요."
+          : "30일 동안은 '최근에 지운 파일'에서 되살릴 수 있어요.";
     if (!window.confirm(`"${label}"을(를) 지울까요? ${keep}`)) return;
     removing.current = n.path;
     try {
-      if (n.type === 'file') await api.removeFile(n.path);
+      // A document's sub-documents folder (`X/`, even an empty one) goes with it, so it never lingers as a group.
+      if (n.type === 'file') await api.removeFile(n.path, true);
       else await api.removeFolder(n.path);
-      if (path && (path === n.path || path.startsWith(`${n.path}/`))) closeOpenFile();
+      const gone = n.type === 'file' ? subFolderOf(n.path) : n.path;
+      if (path && (path === n.path || path.startsWith(`${gone}/`))) closeOpenFile();
       if (section.kind === 'project' && section.path === n.path) setSection({ kind: 'all' });
       await refreshTree();
     } catch (e) {
@@ -497,10 +523,8 @@ export function App() {
     }
   };
 
-  // Narrow screens show one pane at a time (design doc 6 §6): 'both' shows the document there.
-  const shown: View = narrow && view === 'both' ? 'doc' : view;
-  const showDoc = shown !== 'canvas';
-  const showCanvas = shown !== 'doc';
+  const showDoc = view !== 'canvas';
+  const showCanvas = view !== 'doc';
   const narrowRef = useRef(narrow);
   narrowRef.current = narrow;
   const showBlock = useCallback((blockId: string) => {
@@ -551,10 +575,22 @@ export function App() {
       // Inside a text field, the document editor or the code editor these keys belong to the editor
       // (Ctrl+E is "code" in the document), so the export shortcuts step aside; the menu and palette still work.
       const editing = e.target instanceof Element && !!e.target.closest('.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""]');
+      if (!mod && !e.shiftKey && !e.altKey && !editing && !e.isComposing && !e.repeat && !(e.target instanceof Element && e.target.closest('[role=dialog], [role=menu]'))) {
+        if (k === 'KeyG') chord.g = Date.now();
+        else if (k === 'KeyP' && Date.now() - chord.g < CHORD_MS) {
+          e.preventDefault();
+          setTimeout(() => (chord.g = 0));
+          setExportOpen(false);
+          setPaletteGroup('project');
+          setPaletteOpen(true);
+          return;
+        }
+      }
       if (mod && !e.shiftKey && !e.altKey && k === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
         setExportOpen(false);
+        setPaletteGroup(undefined);
         setPaletteOpen((o) => !o);
       } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen && !editing && window.matchMedia(EXPORT_MENU_QUERY).matches) {
         e.preventDefault();
@@ -610,6 +646,7 @@ export function App() {
     const canvasCmd = (id: string, title: string, keys: string | undefined, k: Parameters<CanvasHandle['key']>[0], keywords: string[], icon: Command['icon']): Command => ({ id, title, group: 'canvas', icon, keys, disabled: needCanvas, hint: needCanvas ? '캔버스가 보일 때' : undefined, keywords, run: key(k) });
     return [
       { id: 'new-file', title: '새 파일', icon: FilePlus, keywords: ['new', 'file', 'create', '만들기', '파일'], run: () => void newFile() },
+      { id: 'new-pipeline', title: '새 파이프라인', icon: Workflow, keywords: ['new', 'pipeline', 'plan', 'create', '만들기', '파이프라인', '계획'], run: () => void newFile(undefined, 'plan') },
       { id: 'new-folder', title: '새 폴더', icon: FolderPlus, keywords: ['new', 'folder', 'create', '만들기', '폴더'], run: () => void newFolder() },
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
@@ -645,6 +682,28 @@ export function App() {
       freeformCmd(),
     ];
   };
+  // Top-level folders are projects. Going to one closes the open file and shows the project home.
+  const goProject = (id: string | null) => showSection(id ? { kind: 'project', path: id } : { kind: 'all' });
+  const projectCommands = (): Command[] => [
+    {
+      id: 'project:all',
+      title: '모든 파일',
+      group: 'project',
+      icon: Layers,
+      keywords: ['dashboard', 'home', '대시보드', '프로젝트'],
+      run: () => goProject(null),
+    },
+    ...tree
+      .filter((n) => n.type === 'folder')
+      .map((n) => ({
+        id: `project:${n.path}`,
+        title: n.name,
+        group: 'project' as const,
+        icon: FolderClosed,
+        keywords: ['project', '프로젝트'],
+        run: () => goProject(n.path),
+      })),
+  ];
   const fileCommands = (): Command[] =>
     filesOf(tree).map((f) => ({
       id: `file:${f.path}`,
@@ -660,13 +719,14 @@ export function App() {
   const [registry] = useState(() => new CommandRegistry());
   useCommandSource(registry, 'app', commands);
   useCommandSource(registry, 'files', fileCommands);
+  useCommandSource(registry, 'projects', projectCommands);
 
   const dark = theme === 'dark';
   const place = useMemo(() => docPlace(projects, path), [projects, path]);
   const doc = hasFile && path && (
     <>
       <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
-      <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(true)} />
+      <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(undefined, 'doc', true)} />
     </>
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
@@ -674,6 +734,8 @@ export function App() {
   // The document screen sits flush against the sidebar (frame A); everything else is a floating panel (frame B).
   const docScreen = hasFile && section.kind === 'doc';
   const homeSection = section.kind === 'doc' ? ({ kind: 'all' } as const) : section;
+  // Dashboard / project home (shown outside the document screen): null = all files, else a project id (its folder path).
+  const homeProject = homeSection.kind === 'project' ? homeSection.path : null;
   const showSection = useCallback(
     (s: Section) => {
       setSection(s);
@@ -716,6 +778,7 @@ export function App() {
       onNewProject={() => void newProject()}
       onRename={(n) => void renameEntry(n)}
       onDelete={(n) => void remove(n)}
+      onMove={moveEntry}
       onArchive={() => setTrashOpen(true)}
       onCommands={() => {
         setExportOpen(false);
@@ -735,7 +798,7 @@ export function App() {
         <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} scope={homeProject ?? (path?.includes('/') ? path.split('/')[0] : null)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
             <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
@@ -762,7 +825,15 @@ export function App() {
             </div>
           )}
           {!docScreen ? (
-            <ShellHome section={homeSection} view={projects} narrow={narrow} onOpen={openFile} onNewFile={() => void newFile()} />
+            <Home
+              narrow={narrow}
+              project={homeProject}
+              version={tree}
+              onProject={goProject}
+              onOpen={openFile}
+              onCreate={(k, project) => void newFile(project, k)}
+              onDelete={(p, t) => void remove({ type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
+            />
           ) : (
             <>
           <TopBar
@@ -770,21 +841,23 @@ export function App() {
             hasFile={hasFile}
             status={status}
             statusAlert={statusAlert}
-            view={shown}
+            view={view}
             onView={setView}
             narrow={narrow}
             trail={place.trail}
             onCrumb={openCrumb}
-            onSubDoc={() => void newFile(true)}
+            onSubDoc={() => void newFile(undefined, 'doc', true)}
             onTitle={(title) => edit({ title })}
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
             setExportOpen(false);
+            setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
             exportMenu={
               <ExportMenu
+                narrow={narrow}
                 open={exportOpen}
                 onOpen={openExport}
                 disabled={!hasFile}
@@ -799,7 +872,7 @@ export function App() {
               />
             }
           />
-              {shown === 'both' ? (
+              {view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">

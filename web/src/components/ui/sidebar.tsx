@@ -11,13 +11,12 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from './sheet';
 const SIDEBAR_WIDTH = '264px';
 const MOBILE_QUERY = '(max-width: 767px)';
 
-// Sidebar colours. shadcn's own names are --sidebar, --sidebar-accent and --sidebar-border; until the token
-// ticket (#132) adds them, these map onto the app's existing tokens.
+// Sidebar colours. The shell and sidebar sit on --sidebar; the inset panel stays on --background.
 const C = {
-  bg: 'bg-panel text-foreground',
+  bg: 'bg-sidebar text-sidebar-foreground',
   hover: 'hover:bg-accent hover:text-foreground',
   active: 'aria-[current=page]:bg-muted aria-[current=page]:text-foreground',
-  border: 'border-border',
+  border: 'border-sidebar-border',
 };
 
 type SidebarContextValue = { isMobile: boolean; openMobile: boolean; setOpenMobile: (open: boolean) => void; toggleSidebar: () => void };
@@ -134,7 +133,7 @@ const SidebarMenu = ({ className, ...props }: React.ComponentProps<'ul'>) => <ul
 const SidebarMenuItem = ({ className, ...props }: React.ComponentProps<'li'>) => <li data-slot="sidebar-menu-item" className={cn('group/menu-item relative', className)} {...props} />;
 
 const MENU_BUTTON =
-  'flex h-[30px] w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm font-medium text-text-2 outline-none select-none max-md:h-11 disabled:opacity-50 [&>svg]:size-[17px] [&>svg]:shrink-0';
+  'flex h-[30px] w-full min-w-0 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm font-medium text-sidebar-foreground/80 outline-none select-none max-md:h-11 disabled:opacity-50 [&>svg]:size-[17px] [&>svg]:shrink-0';
 
 function SidebarMenuButton({ asChild = false, className, ...props }: React.ComponentProps<'button'> & { asChild?: boolean }) {
   const Comp = asChild ? SlotPrimitive.Root : 'button';

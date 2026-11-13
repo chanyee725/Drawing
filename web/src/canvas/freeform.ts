@@ -169,13 +169,14 @@ function iconBefore(tx: SceneText, group: SceneBox, icons: SceneIcon[]) {
 type Rect = { id: string; type: string; x: number; y: number; width: number; height: number; isDeleted?: boolean; frameId?: string | null };
 
 /**
- * The frame converted shapes belong to: the image's own frame, else the smallest live frame that holds the whole
- * image (block images are rebuilt with no frameId on load, so a block that sits in a frame may not be marked as in it).
+ * The frame converted shapes belong to: the image's own frame while it is live, else the smallest live frame that
+ * holds the whole image (blocks saved before #83 carry no frame, so a block that sits in a frame may not be marked as in it).
  */
 export function frameFor(img: Rect, elements: readonly Rect[]): string | null {
-  if (img.frameId) return img.frameId;
+  const live = elements.filter((e) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe'));
+  if (img.frameId && live.some((f) => f.id === img.frameId)) return img.frameId;
   const holds = (f: Rect) => img.x >= f.x && img.y >= f.y && img.x + img.width <= f.x + f.width && img.y + img.height <= f.y + f.height;
-  const frames = elements.filter((e) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe') && holds(e));
+  const frames = live.filter(holds);
   return frames.sort((a, b) => a.width * a.height - b.width * b.height)[0]?.id ?? null;
 }
 

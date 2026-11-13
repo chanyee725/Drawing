@@ -69,7 +69,7 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
   const row = (scope, re) => scope.locator('[data-slot="sidebar-menu-button"]').filter({ hasText: re }).first();
   const shot = async (page, name) => SHOTS && page.screenshot({ path: join(SHOTS, `${name}.png`) });
   const title = (page) => page.getByLabel('파일 제목').inputValue();
-  const pressed = (page) => page.getByRole('group', { name: '보기 방식' }).getByRole('button').evaluateAll((bs) => bs.map((b) => `${b.textContent}:${b.getAttribute('aria-pressed')}`));
+  const pressed = (page) => page.getByRole('toolbar', { name: '보기 방식' }).getByRole('button').evaluateAll((bs) => bs.map((b) => `${b.textContent}:${b.getAttribute('aria-pressed')}`));
 
   for (const theme of ['light', 'dark']) {
     const page = await open(theme, 1440);
@@ -84,6 +84,24 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     assert.equal(await page.getByLabel('파일 제목').getAttribute('aria-current'), 'page');
     // View switch: toggle buttons with aria-pressed, exactly one pressed.
     assert.deepEqual(await pressed(page), ['문서:false', '둘 다:true', '캔버스:false']);
+    // Layout A: path and save state on the left; view switch, 내보내기 and ⋯ on the right.
+    const save = page.locator('header [data-save]');
+    assert.equal(await save.innerText(), '저장됨');
+    const dot = await save.locator('span').first().evaluate((n) => { const r = n.getBoundingClientRect(); return { w: r.width, bg: getComputedStyle(n).backgroundColor }; });
+    const ok = await page.evaluate(() => { const n = document.createElement('i'); n.style.color = 'var(--ok)'; document.body.append(n); const c = getComputedStyle(n).color; n.remove(); return c; });
+    assert.equal(dot.w, 6);
+    assert.equal(dot.bg, ok, 'saved dot uses --ok');
+    const box = async (loc) => loc.boundingBox();
+    const views = await box(page.getByRole('toolbar', { name: '보기 방식' }));
+    const exp = await box(page.getByRole('button', { name: '내보내기' }));
+    const more = await box(page.getByRole('button', { name: '더 보기' }));
+    assert.ok(views.x > (await box(save)).x + 100 && views.x + views.width < exp.x && exp.x < more.x && more.x + more.width > 1440 - 24, 'view switch sits on the right, before 내보내기 and ⋯');
+    // Keyboard: one Tab stop in the toolbar, arrow keys move between the choices.
+    await page.getByRole('button', { name: '둘 다', exact: true }).focus();
+    await page.keyboard.press('ArrowRight');
+    // Radix moves focus on the next tick.
+    await page.waitForFunction(() => document.activeElement?.textContent === '캔버스');
+    assert.deepEqual(await page.getByRole('toolbar', { name: '보기 방식' }).getByRole('button').evaluateAll((bs) => bs.map((b) => b.tabIndex)), [-1, -1, 0]);
     // Sub-document block at the end of the document: same data as the sidebar.
     const subs = page.getByRole('region', { name: '하위 문서' });
     await subs.getByRole('button', { name: /토큰 갱신/ }).waitFor();
@@ -143,7 +161,7 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     // Ancestors are hidden here, and so is the separator before the title.
     const sep = await page.locator('nav[aria-label="경로"] li:last-child').evaluate((li) => getComputedStyle(li, '::before').content);
     assert.ok(sep === 'none' || sep === 'normal', `no separator before the title on a narrow screen: ${sep}`);
-    for (const name of ['파일 목록 열기', '더 보기', '문서', '캔버스']) {
+    for (const name of ['파일 목록 열기', '내보내기', '더 보기', '문서', '캔버스']) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox();
       assert.ok(box.height >= 44 && box.width >= 44, `${name} is a 44px touch target: ${JSON.stringify(box)}`);
     }

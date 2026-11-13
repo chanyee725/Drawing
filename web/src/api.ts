@@ -3,19 +3,26 @@
 export type { BlockLayout } from '../../shared/render/block-layout.ts';
 import type { BlockLayout } from '../../shared/render/block-layout.ts';
 // Newest file format this web build understands; a 422 on a file above it means a newer app wrote it.
-export const FILE_FORMAT_VERSION = 3;
-export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout };
+export const FILE_FORMAT_VERSION = 4;
+// Pipeline steps (format v4). The web only carries it through saves for now; docs/workspace-api.md "Pipeline `plan`".
+export type { Plan, PlanStep } from '../../shared/dispatch/plan.ts';
+import type { Plan } from '../../shared/dispatch/plan.ts';
+export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout; frameId?: string };
 export type DpxFile = {
   version: number;
   title: string;
   document: unknown;
   canvas: unknown;
   blocks: Block[];
+  /** Present only in pipeline files. Saves send it back unchanged. */
+  plan?: Plan;
   revision: number;
 };
 export type TreeNode =
   | { type: 'folder'; name: string; path: string; children: TreeNode[] }
-  | { type: 'file'; name: string; path: string; title: string; revision: number | null; mtime?: string; created?: string };
+  | { type: 'file'; name: string; path: string; title: string; revision: number | null; mtime?: string; created?: string; pipeline?: PipelineMark };
+/** Tree mark of a pipeline file. Only `plan` (draft) exists until runs are recorded (E21). */
+export type PipelineMark = { state: 'plan' };
 
 /** Projects view (GET /api/workspace/projects, docs/workspace-api.md). Times are ISO strings. */
 export type DocNode = {
@@ -24,6 +31,8 @@ export type DocNode = {
   name: string;
   title?: string;
   revision?: number | null;
+  /** Set on a pipeline file (E18). */
+  pipeline?: PipelineMark;
   created: string | null;
   modified: string | null;
   /** Documents below this one. */
@@ -83,10 +92,13 @@ export const api = {
   providers: () => call<{ providers: Record<string, ProviderState> }>('GET', '/api/state').then((r) => r.providers ?? {}),
   limits: () => call<ProviderLimits>('GET', '/api/limits'),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
-  createFile: (path: string, title: string) => call<DpxFile>('POST', '/api/file', { path, title }),
-  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks'>, keepalive = false) =>
+  /** `content`: starting document, canvas, blocks and plan (a template); defaults to an empty file. */
+  createFile: (path: string, title: string, content?: Partial<Pick<DpxFile, 'document' | 'canvas' | 'blocks' | 'plan'>>) =>
+    call<DpxFile>('POST', '/api/file', { ...content, path, title }),
+  saveFile: (path: string, f: Pick<DpxFile, 'revision' | 'title' | 'document' | 'canvas' | 'blocks' | 'plan'>, keepalive = false) =>
     call<DpxFile>('PUT', `/api/file${q(path)}`, f, keepalive),
-  removeFile: (path: string) => call<unknown>('DELETE', `/api/file${q(path)}`),
+  /** `withSubdocs`: the document's sub-documents folder (`X/` next to `X.dpx.json`) goes to the trash with it. */
+  removeFile: (path: string, withSubdocs = false) => call<unknown>('DELETE', `/api/file${q(path)}${withSubdocs ? '&withSubdocs=1' : ''}`),
   createFolder: (path: string) => call<unknown>('POST', '/api/folder', { path }),
   removeFolder: (path: string) => call<unknown>('DELETE', `/api/folder${q(path)}`),
   history: (path: string) => call<{ versions: HistoryEntry[] }>('GET', `/api/history${q(path)}`).then((r) => r.versions),
@@ -95,5 +107,65 @@ export const api = {
   historySnapshot: (path: string) => call<{ id: string | null }>('POST', `/api/history${q(path)}`, {}),
   trash: () => call<{ items: TrashItem[] }>('GET', '/api/trash').then((r) => r.items),
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
-  move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
+  /** `withSubdocs`: a document's sub-documents folder (`X/` next to `X.dpx.json`) moves along (type 'file' only). */
+  move: (from: string, to: string, type: 'file' | 'folder', withSubdocs = false) =>
+    call<unknown>('POST', '/api/move', withSubdocs ? { from, to, type, withSubdocs } : { from, to, type }),
+};
+
+// Project view: GET /api/workspace/projects (docs/workspace-api.md "Projects view"), mapped to the shapes the screens use.
+type DocNodeDto = { type: 'doc' | 'group'; path: string; name: string; title?: string; created: string | null; modified: string | null; children: DocNodeDto[] };
+type ProjectDto = { path: string; name: string; icon: string | null; description: string; created: string | null; modified: string | null; count: number; docs: DocNodeDto[] };
+export type ProjectDoc = {
+  path: string;
+  name: string;
+  title: string;
+  /** A folder without a same-named file: a parent without a document of its own. */
+  bundle: boolean;
+  /** ms since epoch (0 = unknown) */
+  createdAt: number;
+  modifiedAt: number;
+  children: ProjectDoc[];
+};
+export type ProjectInfo = {
+  /** The project folder's path (its unique id). */
+  id: string;
+  path: string;
+  name: string;
+  icon: string;
+  description: string;
+  docCount: number;
+  createdAt: number;
+  modifiedAt: number;
+  docs: ProjectDoc[];
+};
+export type ProjectsResponse = { projects: ProjectInfo[]; unfiled: ProjectDoc[] };
+export type RecentFile = { path: string; title: string; project: string | null; parent: string | null; createdAt: number; modifiedAt: number };
+const time = (s: string | null) => (s ? Date.parse(s) || 0 : 0);
+const toDoc = (n: DocNodeDto): ProjectDoc => ({
+  path: n.path,
+  name: n.name,
+  title: n.title || n.name,
+  bundle: n.type === 'group',
+  createdAt: time(n.created),
+  modifiedAt: time(n.modified),
+  children: n.children.map(toDoc),
+});
+export const projectsApi = {
+  projects: () =>
+    call<{ projects: ProjectDto[]; loose: DocNodeDto[] }>('GET', '/api/workspace/projects').then(
+      (r): ProjectsResponse => ({
+        projects: r.projects.map((p) => ({
+          id: p.path,
+          path: p.path,
+          name: p.name,
+          icon: p.icon ?? [...p.name][0] ?? '',
+          description: p.description,
+          docCount: p.count,
+          createdAt: time(p.created),
+          modifiedAt: time(p.modified),
+          docs: p.docs.map(toDoc),
+        })),
+        unfiled: r.loose.map(toDoc),
+      }),
+    ),
 };

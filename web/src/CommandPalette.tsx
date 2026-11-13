@@ -9,12 +9,24 @@ import { filterCommands, groupCommands, type Command as Cmd } from './commands';
 export { filterCommands } from './commands';
 export type { Command } from './commands';
 
-type Props = { commands: Cmd[]; onClose: () => void };
+type Props = {
+  commands: Cmd[];
+  onClose: () => void;
+  /** Name of the project the user is in; shown as a chip, and its files are listed first. */
+  scope?: string | null;
+  /** Start with only this section (G P opens the menu on projects). */
+  onlyGroup?: Cmd['group'];
+};
 
 /** The Ctrl/Cmd+K menu: one search box over every registered command, in sections, keyboard first. */
-export function CommandPalette({ commands, onClose }: Props) {
+export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
   const [query, setQuery] = useState('');
-  const list = useMemo(() => filterCommands(commands, query), [commands, query]);
+  const [group, setGroup] = useState(onlyGroup);
+  const list = useMemo(() => {
+    const found = filterCommands(commands, query).filter((c) => !group || c.group === group);
+    // Files of the current project come first inside their section.
+    return scope ? [...found.filter((c) => c.hint?.startsWith(`${scope}/`)), ...found.filter((c) => !c.hint?.startsWith(`${scope}/`))] : found;
+  }, [commands, query, group, scope]);
   const groups = useMemo(() => groupCommands(list), [list]);
   // Sections reorder the list, so the first row on screen is the first enabled one in section order.
   const first = useMemo(() => groups.flatMap((g) => g.items).find((c) => !c.disabled)?.id ?? '', [groups]);
@@ -70,13 +82,23 @@ export function CommandPalette({ commands, onClose }: Props) {
       >
         <DialogPrimitive.Title className="sr-only">명령 팔레트</DialogPrimitive.Title>
         <Command shouldFilter={false} loop value={selected} onValueChange={setSelected} label="명령 찾기" className="rounded-lg bg-transparent">
-          <CommandInput
-            ref={input}
-            value={query}
-            onValueChange={setQuery}
-            placeholder="명령이나 파일 이름을 입력해요"
-            className="h-11"
-          />
+          <div className="flex items-center border-b pr-3 [&>div]:flex-1 [&>div]:border-b-0">
+            <CommandInput
+              ref={input}
+              value={query}
+              onValueChange={(v) => {
+                setQuery(v);
+                if (v) setGroup(undefined);
+              }}
+              placeholder={group === 'project' ? '프로젝트 이름을 입력해요' : '명령이나 파일 이름을 입력해요'}
+              className="h-11"
+            />
+            {scope && (
+              <span data-slot="scope-chip" title="지금 프로젝트" className="max-w-32 shrink-0 truncate rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground">
+                {scope}
+              </span>
+            )}
+          </div>
           <CommandList className="max-h-[min(400px,60vh)]">
             <CommandEmpty>맞는 명령이 없어요</CommandEmpty>
             {groups.map((g) => (

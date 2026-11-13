@@ -44,8 +44,9 @@ type Props = {
 
 // Pixels a press must travel before it counts as a drag (a smaller move is a click).
 const DRAG_PX = 3;
-// Excalidraw's dark theme inverts the whole canvas; the overlay picture gets the same filter so it does not flash.
-const DARK_FILTER = 'invert(93%) hue-rotate(180deg)';
+// The overlay sits outside Excalidraw's dark filter, so it draws with the dark palette itself; the block image under
+// the filter is pre-corrected to look the same (darkFilter.ts), so entering edit mode does not flash.
+const paletteOf = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
 const ACCENT = '#3b82f6';
 const GUIDE = '#ec4899';
 
@@ -58,14 +59,14 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, s
   // Drawing of an uncommitted drag; kept after the commit until the block's layout catches up, so nothing flickers.
   const [preview, setPreview] = useState<{ sig: string; scene: Scene; svg: string; guides: Line[] } | null>(null);
   const [box, setBox] = useState<{ a: { x: number; y: number }; b: { x: number; y: number } } | null>(null);
-  const committed = useMemo(() => session.compose(layout), [session, layout]);
+  const committed = useMemo(() => session.compose(layout, paletteOf(dark)), [session, layout, dark]);
   const handles = useMemo(() => layoutHandles(committed.scene.handles, committed.scene.origin), [committed]);
   const shown = preview ?? committed;
   const shownHandles = useMemo(() => (preview ? layoutHandles(preview.scene.handles, preview.scene.origin) : handles), [preview, handles]);
 
   // Latest values for the window listeners of a gesture.
-  const live = useRef({ layout, session, frame, handles, selected, stale, onCommit });
-  live.current = { layout, session, frame, handles, selected, stale, onCommit };
+  const live = useRef({ layout, session, frame, handles, selected, stale, onCommit, dark });
+  live.current = { layout, session, frame, handles, selected, stale, onCommit, dark };
   const gesture = useRef<Gesture | null>(null);
   const frameReq = useRef(0);
 
@@ -100,7 +101,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, s
     (next: BlockLayout, guides: Line[]) => {
       cancelAnimationFrame(frameReq.current);
       frameReq.current = requestAnimationFrame(() => {
-        const { scene, svg } = live.current.session.compose(next);
+        const { scene, svg } = live.current.session.compose(next, paletteOf(live.current.dark));
         setPreview({ sig: layoutSig(next), scene, svg, guides });
       });
     },
@@ -113,7 +114,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, s
       setPreview(null);
       return;
     }
-    const { scene, svg } = live.current.session.compose(next);
+    const { scene, svg } = live.current.session.compose(next, paletteOf(live.current.dark));
     setPreview({ sig: layoutSig(next), scene, svg, guides: [] });
     live.current.onCommit(next);
   }, []);
@@ -341,7 +342,7 @@ export function LayoutEditOverlay({ layout, session, frame, dark, wrap, start, s
       >
         <div
           className="absolute left-0 top-0"
-          style={{ width: shown.scene.width, height: shown.scene.height, transform: `scale(${k})`, transformOrigin: '0 0', filter: dark ? DARK_FILTER : undefined }}
+          style={{ width: shown.scene.width, height: shown.scene.height, transform: `scale(${k})`, transformOrigin: '0 0' }}
           // The SVG comes from our own renderer, which escapes every label.
           dangerouslySetInnerHTML={{ __html: shown.svg }}
         />

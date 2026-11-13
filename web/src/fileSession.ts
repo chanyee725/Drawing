@@ -8,6 +8,9 @@ import { isRetryableSaveError, RELOAD_STOPPED, saveProblemText } from './saveRet
 import { migrateDocument } from './doc/model.ts';
 
 export const SAVE_DELAY = 700;
+/** Status texts while saving and after a save (the header shows them as a save dot). */
+export const SAVING = '저장 중이에요…';
+export const SAVED_STATUS = '저장했어요';
 export const RETRY_MIN = 1000;
 export const RETRY_MAX = 30000;
 
@@ -81,7 +84,7 @@ export function createFileSession(deps: Deps) {
       if (!p || !f || !dirty || conflicted || holds > 0) return;
       const seq = editSeq;
       inFlight = true;
-      if (!reloadStopped) setStatus('저장 중이에요…');
+      if (!reloadStopped) setStatus(SAVING);
       try {
         const saved = await deps.saveFile(p, f, keepalive);
         if (state.path !== p) return;
@@ -90,7 +93,7 @@ export function createFileSession(deps: Deps) {
         if (editSeq === seq) {
           dirty = false;
           reloadStopped = false;
-          setStatus('저장했어요');
+          setStatus(SAVED_STATUS);
         }
         deps.onSaved?.();
       } catch (e) {
