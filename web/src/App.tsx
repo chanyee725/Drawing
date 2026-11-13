@@ -384,8 +384,10 @@ export function App() {
     let release = () => {};
     try {
       await session.flush();
-      // An edit made while the (possibly slow) move runs must not be saved to the old path.
-      release = session.hold();
+      // An edit made while the (possibly slow) move runs must not be saved to the old path. Only the open
+      // file (or the folder holding it) needs this: holding for an unrelated move would also skip the save on tab close.
+      const open = session.getState().path;
+      if (open && (open === from || (n.type === 'folder' && open.startsWith(`${from}/`)))) release = session.hold();
       const r = await api.move(from, to, n.type);
       const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
       if (next) {
