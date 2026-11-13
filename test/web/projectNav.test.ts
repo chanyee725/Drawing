@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asTreeNode, newFileDir, openPathsFor, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
+import { asTreeNode, docPlace, newFileDir, openPathsFor, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
 import type { DocNode, ProjectsView } from '../../web/src/api.ts';
 
 const doc = (path: string, children: DocNode[] = []): DocNode => ({
@@ -66,4 +66,20 @@ test('percent clamps and rounds', () => {
   assert.equal(percent(1.4), 100);
   assert.equal(percent(null), null);
   assert.equal(percent(Number.NaN), null);
+});
+
+test('docPlace: the path above the open document and its sub-documents', () => {
+  const deep = docPlace(view, 'A/login/token/exp.dpx.json');
+  assert.deepEqual(deep.trail.map((c) => [c.kind, c.path]), [['project', 'A'], ['doc', 'A/login.dpx.json'], ['doc', 'A/login/token.dpx.json']]);
+  assert.equal(deep.trail[0].label, 'Alpha');
+  assert.equal(deep.node?.path, 'A/login/token/exp.dpx.json');
+  const parent = docPlace(view, 'A/login.dpx.json');
+  assert.deepEqual(parent.trail.map((c) => c.path), ['A']);
+  assert.deepEqual(parent.node?.children.map((c) => c.path), ['A/login/token.dpx.json']);
+  // A group (folder without its own document) is a step too, labelled by its folder name.
+  assert.deepEqual(docPlace(view, 'A/g/m.dpx.json').trail.map((c) => [c.kind, c.label]), [['project', 'Alpha'], ['group', 'g']]);
+  assert.deepEqual(docPlace(view, 'x.dpx.json'), { trail: [], node: view.loose[0] });
+  // Not in the view yet (just created): the project only, no node.
+  assert.deepEqual(docPlace(view, 'A/new.dpx.json'), { trail: [{ kind: 'project', path: 'A', label: 'Alpha' }], node: null });
+  assert.deepEqual(docPlace(null, 'A/login.dpx.json'), { trail: [], node: null });
 });
