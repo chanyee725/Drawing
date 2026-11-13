@@ -12,6 +12,27 @@ import { codexLimits, geminiResetFrom, isQuotaError, SharedLimits } from "./limi
 import { recordState, trimToWindow, WINDOW_MS } from "../../shared/dispatch/timeline.js";
 import { asksUser, attentionOf, checkKey, ctxOver, ctxShare, longOver, mtokens, recordCheck, sessionState, sessionStuck, stuckSig, taskStuck } from "./state.js";
 
+const badRequest = msg => Object.assign(new Error(msg), { status: 400 });
+
+// agy runs headless with no way to ask before a tool call, so it only gets the modes it can honour.
+const GEMINI_PERMS = ["plan", "auto"];
+
+// Refuse a mode that is unknown or that the provider would run looser than chosen.
+export function checkPerm(provider, perm) {
+  if (!PERMS.includes(perm)) throw badRequest("알 수 없는 권한 모드예요");
+  if (provider === "gemini" && !GEMINI_PERMS.includes(perm)) throw badRequest("Gemini는 plan·auto 모드만 쓸 수 있어요");
+  return perm;
+}
+
+// Effort words are passed into CLI args (and into a codex -c TOML value), so only plain words are allowed.
+const EFFORT_WORDS = ["minimal", "none", "low", "medium", "high", "xhigh", "max"];
+export function checkEffort(model, effort) {
+  if (effort == null || effort === "") return effort || null;
+  const allowed = (model.efforts || []).filter(e => EFFORT_WORDS.includes(e));
+  if (!allowed.includes(effort)) throw badRequest("이 모델에서 쓸 수 없는 생각 수준이에요");
+  return effort;
+}
+
 const MCP_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "mcp.js");
 const MAX_TRANSCRIPT = 400;
 const STALL_MS = 10 * 60 * 1000;
@@ -411,6 +432,15 @@ export class Hub extends EventEmitter {
         throw new Error(`${name}가 Dispatch에 연결되지 않았어요. 연결하기에서 먼저 연결하세요.`);
       }
     }
+    // Check every item's mode and effort before anything starts, so a bad item makes nothing.
+    for (const it of items) {
+      const role = effectiveRoles(this.roles, this.store).find(r => r.id === it.role);
+      if (!role) continue; // reported below
+      const model = this.models.find(m => m.id === (it.model || role.model));
+      if (!model) continue;
+      checkPerm(model.provider, it.perm || role.perm);
+      checkEffort(model, it.effort);
+    }
     // The limit gauges come from Claude, so they only gate Claude sessions.
     const usesClaude = items.some(it => {
       const id = it.model || this.roles.find(r => r.id === it.role)?.model;
@@ -640,7 +670,7 @@ export class Hub extends EventEmitter {
   setPerm(id, perm) {
     const s = this.get(id), r = this.live.get(id);
     if (!s) throw Object.assign(new Error("세션이 없어요"), { status: 404 });
-    if (!PERMS.includes(perm)) throw Object.assign(new Error("알 수 없는 권한 모드예요"), { status: 400 });
+    checkPerm(s.provider, perm);
     if (s.provider === "claude" && r?.proc) {
       r.proc.stdin.write(JSON.stringify({ type: "control_request", request_id: randomUUID(),
         request: { subtype: "set_permission_mode", mode: perm } }) + "\n");
@@ -852,6 +882,16 @@ export class Hub extends EventEmitter {
     // Turn clock and token baseline for the web "thinking" line.
     s.turnStartedAt = Date.now();
     s.turnTokensBase = s.usage.input + s.usage.output + s.usage.cacheRead + s.usage.cacheWrite;
+    // Last gate before a CLI starts: a session saved with a mode or effort that is no longer
+    // allowed (older state, a hand-edited file) stops with an error instead of running looser.
+    try {
+      checkPerm(s.provider, s.perm);
+      if (s.effort) checkEffort({ efforts: this.models.find(m => m.id === s.model)?.efforts || EFFORT_WORDS }, s.effort);
+    } catch (e) {
+      this.push(s, { kind: "error", text: e.message });
+      this.touch(s, { status: "error", error: e.message });
+      return;
+    }
     if (s.provider === "claude") this.startClaude(s, prompt);
     else if (s.provider === "gemini") this.startGemini(s, prompt);
     else this.startCodex(s, prompt);
@@ -985,7 +1025,7 @@ export class Hub extends EventEmitter {
     const first = !s.providerSessionId;
     const args = ["exec", ...(first ? [] : ["resume", s.providerSessionId]), "--json", "--skip-git-repo-check",
       "-m", s.model, "-c", `sandbox_mode="${sandbox}"`];
-    if (s.effort) args.push("-c", `model_reasoning_effort="${s.effort}"`);
+    if (s.effort) args.push("-c", `model_reasoning_effort="${checkEffort({ efforts: EFFORT_WORDS }, s.effort)}"`);
     {
       const env = Object.entries(this.mcpEnv(s)).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(",");
       args.push("-c", `mcp_servers.dispatch.command=${JSON.stringify(process.execPath)}`,
@@ -1044,7 +1084,8 @@ export class Hub extends EventEmitter {
   }
 
   startGemini(s, prompt) {
-    const mode = s.perm === "acceptEdits" || s.perm === "auto" ? "auto" : s.perm === "plan" ? "plan" : "auto";
+    // agy has no approval channel in headless mode, so only plan and auto are allowed (checkPerm
+    // refuses the others, in create, setPerm and start). The skip flag goes with auto only.
     const first = !s.providerSessionId;
     const system = this.systemPrompt(s);
     const textPrompt = first && system ? `[역할]\n${system}\n\n[작업]\n${prompt}` : prompt;
@@ -1052,8 +1093,8 @@ export class Hub extends EventEmitter {
       "-p", textPrompt,
       "--output-format", "stream-json",
       "--model", s.model,
-      "--mode", mode,
-      "--dangerously-skip-permissions",
+      "--mode", s.perm,
+      ...(s.perm === "auto" ? ["--dangerously-skip-permissions"] : []),
     ];
     if (s.effort) args.push("--effort", s.effort);
     if (s.providerSessionId) args.push("--conversation", s.providerSessionId);
