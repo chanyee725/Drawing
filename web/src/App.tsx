@@ -4,6 +4,8 @@ import type { CanvasData, CanvasFocus } from './canvas/ExcalidrawCanvas';
 import { sameDrawing } from './canvas/sync';
 import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } from './doc/model';
 import { Sidebar } from './Sidebar';
+import { Home, type CreateKind } from './home/Home';
+import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -26,7 +28,7 @@ import { CommandPalette } from './CommandPalette';
 import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
 import { displayName } from './Sidebar';
 import {
-  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown,
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown, Layers, FolderClosed,
   Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
   SquareDashedMousePointer, Sun, Trash, Type, Undo2, ZoomIn, ZoomOut,
 } from 'lucide-react';
@@ -187,6 +189,9 @@ export function App() {
   exportOptionsRef.current = exportOptions;
   const [exportSelected, setExportSelected] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteGroup, setPaletteGroup] = useState<Command['group']>(undefined);
+  // Dashboard / project home (shown while no file is open): null = all files, else a project id.
+  const [homeProject, setHomeProject] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   // Set by the canvas while it is mounted (export, palette commands).
@@ -327,15 +332,17 @@ export function App() {
     };
   }, [session]);
 
-  const newFile = async () => {
-    const name = window.prompt('새 파일 이름을 입력해 주세요');
-    const p = name ? fileStem(name) : '';
-    if (!p) return;
+  /** `folder` = project id the file goes into (null/undefined = workspace root). */
+  const newFile = async (folder: string | null = null, kind: CreateKind = 'doc') => {
+    const name = window.prompt(kind === 'plan' ? '새 파이프라인 계획 이름을 입력해 주세요' : '새 파일 이름을 입력해 주세요');
+    const stem = name ? fileStem(name) : '';
+    if (!stem) return;
+    const p = stem.includes('/') ? stem : folderPrefix(folder) + stem;
     await session.flush();
     try {
       await api.createFile(p, p.split('/').pop() ?? p);
       await refreshTree();
-      await open(p);
+      if (await open(p) && kind === 'canvas') setView('canvas');
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 파일이 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
@@ -504,10 +511,22 @@ export function App() {
       // Inside a text field, the document editor or the code editor these keys belong to the editor
       // (Ctrl+E is "code" in the document), so the export shortcuts step aside; the menu and palette still work.
       const editing = e.target instanceof Element && !!e.target.closest('.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""]');
+      if (!mod && !e.shiftKey && !e.altKey && !editing && !e.isComposing && !e.repeat && !(e.target instanceof Element && e.target.closest('[role=dialog], [role=menu]'))) {
+        if (k === 'KeyG') chord.g = Date.now();
+        else if (k === 'KeyP' && Date.now() - chord.g < CHORD_MS) {
+          e.preventDefault();
+          setTimeout(() => (chord.g = 0));
+          setExportOpen(false);
+          setPaletteGroup('project');
+          setPaletteOpen(true);
+          return;
+        }
+      }
       if (mod && !e.shiftKey && !e.altKey && k === 'KeyK') {
         e.preventDefault();
         e.stopPropagation();
         setExportOpen(false);
+        setPaletteGroup(undefined);
         setPaletteOpen((o) => !o);
       } else if (mod && !e.shiftKey && !e.altKey && k === 'KeyE' && fileOpen && !editing && window.matchMedia(EXPORT_MENU_QUERY).matches) {
         e.preventDefault();
@@ -598,6 +617,33 @@ export function App() {
       freeformCmd(),
     ];
   };
+  // Top-level folders are projects. Going to one closes the open file and shows the project home.
+  const goProject = async (id: string | null) => {
+    await session.flush();
+    if (session.isDirty() && !window.confirm('저장하지 못한 변경이 있어요. 그래도 나갈까요?')) return;
+    if (path) closeOpenFile();
+    setHomeProject(id);
+  };
+  const projectCommands = (): Command[] => [
+    {
+      id: 'project:all',
+      title: '모든 파일',
+      group: 'project',
+      icon: Layers,
+      keywords: ['dashboard', 'home', '대시보드', '프로젝트'],
+      run: () => void goProject(null),
+    },
+    ...tree
+      .filter((n) => n.type === 'folder')
+      .map((n) => ({
+        id: `project:${n.path}`,
+        title: n.name,
+        group: 'project' as const,
+        icon: FolderClosed,
+        keywords: ['project', '프로젝트'],
+        run: () => void goProject(n.path),
+      })),
+  ];
   const fileCommands = (): Command[] =>
     filesOf(tree).map((f) => ({
       id: `file:${f.path}`,
@@ -613,6 +659,7 @@ export function App() {
   const [registry] = useState(() => new CommandRegistry());
   useCommandSource(registry, 'app', commands);
   useCommandSource(registry, 'files', fileCommands);
+  useCommandSource(registry, 'projects', projectCommands);
 
   const dark = theme === 'dark';
   const doc = hasFile && path && (
@@ -660,6 +707,7 @@ export function App() {
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
             setExportOpen(false);
+            setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
@@ -681,7 +729,7 @@ export function App() {
           />
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} scope={homeProject ?? (path?.includes('/') ? path.split('/')[0] : null)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
             <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
@@ -708,9 +756,14 @@ export function App() {
             </div>
           )}
           {!hasFile ? (
-            <main className="flex flex-1 items-center justify-center" style={{ color: 'var(--text-muted)' }}>
-              <p>{narrow ? '파일 목록에서 파일을 만들거나 골라 주세요.' : '왼쪽에서 파일을 만들거나 골라 주세요.'}</p>
-            </main>
+            <Home
+              project={homeProject}
+              version={tree}
+              onProject={setHomeProject}
+              onOpen={(p) => void open(p)}
+              onCreate={(k, project) => void newFile(project, k)}
+              onDelete={(p, t) => void remove({ type: 'file', name: p.split('/').pop() ?? p, path: p, title: t, revision: null })}
+            />
           ) : view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (

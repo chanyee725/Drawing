@@ -67,3 +67,33 @@ export const api = {
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
   move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
 };
+
+// Project view (server/projects): top-level folders as projects, sub-docs nested, root files unfiled.
+export type ProjectDoc = {
+  path: string;
+  name: string;
+  title: string;
+  /** A folder without a same-named file: a parent without a document of its own. */
+  bundle: boolean;
+  /** ms since epoch */
+  createdAt: number;
+  modifiedAt: number;
+  children: ProjectDoc[];
+};
+export type ProjectInfo = {
+  id: string;
+  path: string;
+  name: string;
+  icon: string;
+  description: string;
+  docCount: number;
+  createdAt: number;
+  modifiedAt: number;
+  docs: ProjectDoc[];
+};
+export type ProjectsResponse = { projects: ProjectInfo[]; unfiled: ProjectDoc[] };
+export type RecentFile = { path: string; title: string; project: string | null; parent: string | null; createdAt: number; modifiedAt: number };
+export const projectsApi = {
+  projects: () => call<ProjectsResponse>('GET', '/api/projects'),
+  recent: (limit = 20) => call<{ files: RecentFile[] }>('GET', `/api/recent?limit=${limit}`).then((r) => r.files),
+};
