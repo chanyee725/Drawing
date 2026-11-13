@@ -6,7 +6,7 @@ import { useId, useMemo } from 'react';
 import { progressLabel } from '../../../shared/dispatch/step-view.ts';
 import type { Scene } from '../../../shared/render/index.ts';
 import { badgeRect } from '../../../shared/render/badge.ts';
-import { overlayModel, pathData, type OverlayModel, type OverlayNode, type RunStep } from './overlayModel';
+import { legendOf, overlayModel, pathData, runProgress, type OverlayNode, type RunStep } from './overlayModel';
 import { setStill, useStill } from './runStore';
 
 type Props = {
@@ -19,6 +19,8 @@ type Props = {
   scale: number;
   /** No room above the picture (it touches the top of a clipped view): the motion switch sits inside its corner. */
   motionInside?: boolean;
+  /** Draw the legend beside the picture (canvas). The document puts `RunLegend` under the picture itself. */
+  legend?: boolean;
 };
 
 /** Below this scale the labels are too small to read and hidden (§5 "hidden below 40 % zoom"). */
@@ -33,7 +35,7 @@ export function textWidth(s: string, size = LABEL_FONT): number {
   return Math.ceil(w);
 }
 
-export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props) {
+export function RunLayer({ scene, steps, left, top, scale, motionInside, legend = true }: Props) {
   const model = useMemo(() => overlayModel(scene, steps), [scene, steps]);
   const still = useStill();
   if (!model.nodes.length) return null;
@@ -49,7 +51,7 @@ export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props
           <Step key={n.node} n={n} labels={labels} />
         ))}
       </svg>
-      <Legend model={model} />
+      {legend && <RunLegend steps={steps} />}
       {moving && (
         <button type="button" className="run-motion" onClick={() => setStill(!still)}>
           {still ? '움직임 켜기' : '움직임 멈추기'}
@@ -88,10 +90,15 @@ function Step({ n, labels }: { n: OverlayNode; labels: boolean }) {
   );
 }
 
-/** Top-right of the block (§5.1): the weighted progress bar and text, then a collapsible list of agents and states. */
-function Legend({ model }: { model: OverlayModel }) {
+/**
+ * The board's legend (§5.1): the weighted progress bar and text, then a collapsible list of the agents and states in
+ * the run. Beside the picture's top-right corner on the canvas and under the picture in the document, so it never
+ * covers a node.
+ */
+export function RunLegend({ steps }: { steps: readonly RunStep[] }) {
   const id = useId();
-  const { progress: p, legend } = model;
+  const p = useMemo(() => runProgress(steps), [steps]);
+  const legend = useMemo(() => legendOf(steps), [steps]);
   return (
     <div className="run-legend" data-run-legend="">
       <p id={id} className="run-legend-progress">
