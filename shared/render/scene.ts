@@ -52,7 +52,8 @@ export interface SceneBox {
   dashed?: boolean;
 }
 
-export type TextTone = 'normal' | 'muted' | 'strong';
+/** `group`: a group title, in the group colour's strong shade (neutral groups: a muted slate). */
+export type TextTone = 'normal' | 'muted' | 'strong' | 'group';
 
 export interface SceneText {
   kind: 'text';
