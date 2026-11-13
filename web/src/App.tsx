@@ -691,7 +691,7 @@ export function App() {
               <button
                 type="button"
                 disabled={conflict.revision === undefined}
-                className="h-7 rounded-md px-3 font-medium text-white disabled:opacity-50"
+                className="h-7 rounded-md px-3 font-medium text-brand-foreground disabled:opacity-50"
                 style={{ background: 'var(--brand)' }}
                 onClick={overwrite}
               >

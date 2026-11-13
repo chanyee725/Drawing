@@ -3,6 +3,7 @@ import { Clock, Menu, Search } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { Kbd } from './components/ui/kbd';
 import { Segmented, SegmentedItem } from './components/ui/segmented';
+import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
 import { IS_MAC } from './platform';
 
@@ -37,7 +38,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
   return (
     <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-panel px-2 md:gap-3 md:px-3">
       {onToggleNav && (
-        <Button variant="ghost" size="icon-sm" onClick={onToggleNav} aria-label="파일 목록 열기">
+        <Button variant="ghost" size="icon-sm" onClick={onToggleNav} aria-label="파일 목록 열기" className={FOCUS_RING}>
           <Menu />
         </Button>
       )}
@@ -47,7 +48,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
           onChange={(e) => onTitle(e.target.value)}
           placeholder="제목 없는 파일"
           aria-label="파일 제목"
-          className="h-(--h-row) min-w-0 flex-1 rounded-md bg-transparent px-2 text-base font-medium outline-none placeholder:text-muted-foreground hover:bg-accent focus-visible:bg-background focus-visible:ring-[3px] focus-visible:ring-ring/50 md:w-56 md:flex-none"
+          className={`h-(--h-row) min-w-0 flex-1 rounded-md bg-transparent px-2 text-base font-medium outline-none placeholder:text-muted-foreground hover:bg-accent focus-visible:bg-background md:w-56 md:flex-none ${FOCUS_RING}`}
         />
       ) : (
         <span className="min-w-0 flex-1 truncate px-2 text-muted-foreground md:flex-none">파일을 골라 주세요</span>
@@ -64,19 +65,19 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
       </span>
       <Segmented className="shrink-0 md:mx-auto" aria-label="보기 방식">
         {VIEWS.map((v) => (
-          <SegmentedItem key={v.id} active={view === v.id} onClick={() => onView(v.id)} className="px-2 md:px-3">
+          <SegmentedItem key={v.id} active={view === v.id} onClick={() => onView(v.id)} className={cn('px-2 md:px-3', FOCUS_RING)}>
             {v.label}
           </SegmentedItem>
         ))}
       </Segmented>
       {onCommands && (
-        <Button variant="ghost" size="sm" onClick={onCommands} aria-label="명령 메뉴 열기" aria-haspopup="dialog" className="hidden text-muted-foreground md:inline-flex">
+        <Button variant="ghost" size="sm" onClick={onCommands} aria-label="명령 메뉴 열기" aria-haspopup="dialog" className={cn('hidden text-muted-foreground md:inline-flex', FOCUS_RING)}>
           <Search />
           <Kbd>{IS_MAC ? '⌘K' : 'Ctrl K'}</Kbd>
         </Button>
       )}
       {onHistory && (
-        <Button variant="outline" size="sm" onClick={onHistory} disabled={!hasFile} aria-haspopup="dialog" className="shrink-0">
+        <Button variant="outline" size="sm" onClick={onHistory} disabled={!hasFile} aria-haspopup="dialog" className={cn('shrink-0', FOCUS_RING)}>
           <Clock className="hidden md:block" />
           버전 기록
         </Button>

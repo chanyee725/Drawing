@@ -108,7 +108,7 @@ export function TrashDialog({ onClose, onRestored }: Props) {
                   </div>
                 )}
               </div>
-              <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50" style={{ background: 'var(--brand)' }}>
+              <button type="button" disabled={busy !== null} onClick={() => void restore(i)} className="h-7 shrink-0 rounded-md px-3 text-sm font-medium text-brand-foreground disabled:opacity-50" style={{ background: 'var(--brand)' }}>
                 {busy === i.id ? '되살리는 중이에요…' : '되살리기'}
               </button>
             </li>

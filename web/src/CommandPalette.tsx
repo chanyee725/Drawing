@@ -94,7 +94,7 @@ export function CommandPalette({ commands, onClose }: Props) {
                       disabled={c.disabled}
                       onSelect={() => run(c)}
                       data-cmd={c.id}
-                      className="h-8 cursor-pointer rounded-md py-0 data-[selected=true]:bg-brand-soft"
+                      className="h-8 cursor-pointer rounded-md py-0 data-[selected=true]:bg-brand-soft data-[selected=true]:text-foreground"
                     >
                       {Icon && <Icon className="size-4 text-muted-foreground" />}
                       <span className="min-w-0 flex-1 truncate">

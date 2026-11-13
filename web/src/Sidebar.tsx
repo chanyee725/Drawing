@@ -3,6 +3,7 @@ import { ChevronRight, FileText, FolderPlus, Moon, Pencil, Plus, Sun, Trash, X }
 import type { TreeNode } from './api';
 import { Button } from './components/ui/button';
 import { Input } from './components/ui/input';
+import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
 import { dropTarget, renameInitial } from './movePaths';
 
@@ -43,10 +44,10 @@ export const displayName = (n: { name: string; title?: string }) => n.title || n
 
 // Tree rows: 28px, inset and rounded, neutral hover; the open file gets the brand tint.
 const ROW =
-  'group flex h-(--h-row) cursor-pointer items-center gap-1.5 rounded-md pr-1 text-sm text-text-2 outline-none select-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50';
-const ROW_ACTION = 'flex size-5 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground';
+  'group flex h-(--h-row) cursor-pointer items-center gap-1.5 rounded-md pr-1 text-sm text-text-2 outline-none select-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
+const ROW_ACTION = 'flex size-5 items-center justify-center rounded-sm text-muted-foreground outline-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
 const FOOT_ROW =
-  'flex h-(--h-row) w-full items-center gap-2 rounded-md px-2 text-left text-sm text-text-2 outline-none hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50';
+  'flex h-(--h-row) w-full items-center gap-2 rounded-md px-2 text-left text-sm text-text-2 outline-none hover:bg-accent hover:text-foreground ' + FOCUS_RING;
 
 // The node being dragged (dataTransfer cannot be read during dragover, so keep it here).
 let dragging: TreeNode | null = null;
@@ -214,14 +215,14 @@ export function Sidebar(p: Props) {
         <span className="truncate">{p.workspace ?? 'Drawing'}</span>
       </div>
       <div className="px-2 pb-1">
-        <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="파일 검색" aria-label="파일 검색" className="h-(--h-row) bg-background" />
+        <Input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="파일 검색" aria-label="파일 검색" className={cn('h-(--h-row) bg-background focus-visible:border-input', FOCUS_RING)} />
       </div>
       <div className="flex h-(--h-row) items-center gap-0.5 pt-2 pr-2 pl-4 text-xs font-medium text-muted-foreground">
         <span className="mr-auto">파일</span>
-        <Button variant="ghost" size="icon-sm" onClick={p.onNewFolder} aria-label="새 폴더" title="새 폴더" className="size-6 text-muted-foreground">
+        <Button variant="ghost" size="icon-sm" onClick={p.onNewFolder} aria-label="새 폴더" title="새 폴더" className={cn('size-6 text-muted-foreground', FOCUS_RING)}>
           <FolderPlus className="size-3.5" />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={p.onNewFile} aria-label="새 파일" title="새 파일" className="size-6 text-muted-foreground">
+        <Button variant="ghost" size="icon-sm" onClick={p.onNewFile} aria-label="새 파일" title="새 파일" className={cn('size-6 text-muted-foreground', FOCUS_RING)}>
           <Plus className="size-3.5" />
         </Button>
       </div>

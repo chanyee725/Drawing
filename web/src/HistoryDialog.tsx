@@ -175,7 +175,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
             type="button"
             disabled={!preview || busy}
             onClick={() => void restore()}
-            className="h-8 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50"
+            className="h-8 rounded-md px-3 text-sm font-medium text-brand-foreground disabled:opacity-50"
             style={{ background: 'var(--brand)' }}
           >
             {busy ? '되돌리는 중이에요…' : '이 버전으로 되돌리기'}
