@@ -235,17 +235,27 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     const id = selRef.current;
     const b = id ? blocksRef.current.find((x) => x.id === id) : undefined;
     if (!xapi || !id || !b) return;
+    const first = imageOf(xapi.getSceneElements(), id);
+    const why = first && imageReason(first, 'freeform');
+    if (why) return setNotice({ blockId: id, text: why });
     const s = await openLayoutSession(b, 'freeform');
     if ('reason' in s) return setNotice({ blockId: id, text: s.reason });
     const els = xapi.getSceneElementsIncludingDeleted();
     const img = imageOf(els, id);
     if (!img) return;
+    // Checked again: the image may have been rotated or cropped while the session was opening.
+    const late = imageReason(img, 'freeform');
+    if (late) return setNotice({ blockId: id, text: late });
     const { scene } = s.compose(b.layout);
     const { skeletons, bindings } = sceneToFreeform(scene, { x: img.x, y: img.y, width: img.width, height: img.height }, () => Math.random().toString(36).slice(2, 12));
-    const made = bindArrows(convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as ExcalidrawElement[], bindings);
+    const converted = convertToExcalidrawElements(skeletons as never, { regenerateIds: false }) as unknown as ExcalidrawElement[];
+    // A block inside a frame leaves its shapes in that frame.
+    const inFrame = img.frameId ? converted.map((e) => ({ ...e, frameId: img.frameId })) : converted;
+    const made = bindArrows(inFrame, bindings);
     const fresh = made.filter((e) => !(e as { containerId?: string }).containerId).map((e) => e.id);
     xapi.updateScene({
-      elements: [...els.map((e) => (e === img ? newElementWith(img, { isDeleted: true }) : e)), ...made],
+      // The shapes take the image's place in the stacking order (inside its frame, if any).
+      elements: els.flatMap((e) => (e === img ? [newElementWith(img, { isDeleted: true }), ...made] : [e])),
       appState: { selectedElementIds: Object.fromEntries(fresh.map((x) => [x, true])) },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
