@@ -33,7 +33,13 @@ const NARROW = '(max-width: 767px)';
 // The open file lives in the URL hash so a reload reopens it. Only the workspace-relative path is kept.
 const setHashPath = (p: string | null) => {
   const url = `${window.location.pathname}${window.location.search}${p ? `#file=${encodeURIComponent(p)}` : ''}`;
-  window.history.replaceState(null, '', url);
+  window.history.replaceState({ drawing: 1 }, '', url);
+};
+// A link followed in this tab was cancelled or failed: the browser already added a history entry for it.
+// Step back over that entry (state is null on entries the browser made) so history has no duplicate of the open file.
+const undoLinkEntry = (current: string | null) => {
+  if (window.history.state === null) window.history.back();
+  else setHashPath(current);
 };
 
 function useNarrow() {
@@ -253,7 +259,7 @@ export function App() {
       }
       void open(link.path).then((ok) => {
         if (ok) jumpTo(link.heading);
-        else setHashPath(session.getState().path);
+        else undoLinkEntry(session.getState().path);
       });
     };
     window.addEventListener('hashchange', onHash);
@@ -375,8 +381,11 @@ export function App() {
     ownMoves.current.add(from);
     setTimeout(() => ownMoves.current.delete(from), 5000);
     let readFailed = false;
+    let release = () => {};
     try {
       await session.flush();
+      // An edit made while the (possibly slow) move runs must not be saved to the old path.
+      release = session.hold();
       const r = await api.move(from, to, n.type);
       const next = pathAfterMove(session.getState().path, from, (r as { path?: string }).path ?? to, n.type);
       if (next) {
@@ -400,6 +409,8 @@ export function App() {
     } catch (e) {
       ownMoves.current.delete(from);
       setError(moveErrorText(e instanceof ApiError ? e.status : undefined, e instanceof Error ? e.message : ''));
+    } finally {
+      release();
     }
   };
   const moveInto = (n: TreeNode, dir: string) => {
