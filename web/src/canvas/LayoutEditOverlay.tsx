@@ -45,7 +45,7 @@ type Props = {
 // Pixels a press must travel before it counts as a drag (a smaller move is a click).
 const DRAG_PX = 3;
 // The overlay sits outside Excalidraw's dark filter, so it draws with the dark palette itself; the block image under
-// the filter is pre-corrected to look the same (darkFilter.ts), so entering edit mode does not flash.
+// the filter is pre-corrected to look the same (shared/render/darkFilter.ts), so entering edit mode does not flash.
 const paletteOf = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
 const ACCENT = '#3b82f6';
 const GUIDE = '#ec4899';

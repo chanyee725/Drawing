@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DARK_FILTER, applyDarkFilter, preDarkFilter, preDarkFilterColor } from '../../web/src/canvas/darkFilter.ts';
+import { DARK_FILTER, applyDarkFilter, darkCanvasSeen, inDarkReachNear, preDarkFilter, preDarkFilterColor } from '../../shared/render/darkFilter.ts';
 import { renderBlock } from '../../web/src/canvas/render.ts';
-import { THEMES } from '../../shared/render/theme.ts';
+import { THEMES, badgeColors } from '../../shared/render/theme.ts';
 
 type Vec = [number, number, number];
 const rgbOf = (hex: string): Vec => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as Vec;
@@ -20,7 +20,7 @@ test('the filter is the one Excalidraw puts on its dark canvas', () => {
 
 test('every dark theme colour the filter can reach comes back through it', () => {
   const t = THEMES.dark;
-  for (const c of [t.background, t.text, t.muted, t.stroke, t.strongStroke, t.fill, t.groupStroke, t.groupText, t.edge, t.edgeSoft]) {
+  for (const c of [t.background, t.text, t.muted, t.stroke, t.strongStroke, t.fill, t.groupStroke, t.groupText, t.edge, t.edgeSoft, t.shadow]) {
     near(roundTrip(c), to255(rgbOf(c)), 1, c);
   }
 });
@@ -75,4 +75,73 @@ test('a block for the dark canvas is the dark picture with every colour pre-filt
   want.forEach((c, i) => assert.equal(got[i], preDarkFilterColor(c), `colour ${i}`));
   // The layout anchor is per theme, so switching themes never shifts a block.
   if (dark.anchor && canvas.anchor) assert.notEqual(canvas.anchor.key, dark.anchor.key);
+});
+
+// What the dark canvas shows: a colour painted into a 'dark-canvas' picture, seen through the filter.
+const seen = (painted: string) => '#' + to255(applyDarkFilter(rgbOf(painted))).map((x) => x.toString(16).padStart(2, '0')).join('');
+function contrast(a: string, b: string): number {
+  const lum = (hex: string) => {
+    const [r, g, b2] = rgbOf(hex).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b2!;
+  };
+  const [x, y] = [lum(a), lum(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+/** OKLCH hue in degrees. */
+function hue(hex: string): number {
+  const [r, g, b] = rgbOf(hex).map((x) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4)) as Vec;
+  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+  const a = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const bb = 0.0259040371 * l + 0.7827717662 * m - 0.808675778 * s;
+  return ((Math.atan2(bb, a) * 180) / Math.PI + 360) % 360;
+}
+const hueGap = (a: number, b: number) => Math.min(Math.abs(a - b), 360 - Math.abs(a - b));
+
+test('#202: the node shadow stays visible on the dark canvas and in a dark export', async () => {
+  const t = THEMES.dark;
+  // Excalidraw's dark canvas is white through the filter; a dark export fills with the theme background.
+  const canvas = seen('#ffffff');
+  assert.equal(canvas, '#121212');
+  const shadow = darkCanvasSeen(t.shadow);
+  assert.ok(contrast(shadow, canvas) >= 1.25, `shadow ${shadow} on canvas ${contrast(shadow, canvas).toFixed(2)}`);
+  assert.ok(contrast(shadow, t.background) >= 1.2, `shadow ${shadow} on background ${contrast(shadow, t.background).toFixed(2)}`);
+  const b = { id: 'darkshadow1', type: 'flowchart', code: 'A\nB\nA > B\n', x: 0, y: 0, w: 0, h: 0 };
+  const pic = await renderBlock(b, 'dark-canvas');
+  const fills = [...pic.svg.matchAll(/fill="(#[0-9a-f]{6})" stroke="none"/g)].map((m) => seen(m[1]!));
+  assert.ok(fills.length >= 2, 'two shadows drawn');
+  for (const f of fills) assert.ok(contrast(f, canvas) >= 1.25, `drawn shadow ${f} reads on the canvas`);
+});
+
+test('#244: badges on the dark canvas keep their hue and white text at 4.5:1', async () => {
+  const names = ['indigo', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'teal', 'cyan', 'gray', 'brown', '#fde047', '#123456'];
+  const code = names.map((c, i) => `N${i} [badge: v${i}, badgeColor: ${c}]`).join('\n') + '\n';
+  const pic = await renderBlock({ id: 'darkbadge1', type: 'flowchart', code, x: 0, y: 0, w: 0, h: 0 }, 'dark-canvas');
+  const chips = [...pic.svg.matchAll(/<g data-badge="(N\d+)"><rect [^>]*fill="(#[0-9a-f]{6})"\/><text [^>]*fill="(#[0-9a-f]{6})"/g)];
+  assert.equal(chips.length, names.length);
+  for (const [, id, fill, ink] of chips) {
+    const name = names[Number(id!.slice(1))]!;
+    const [f, t] = [seen(fill!), seen(ink!)];
+    assert.ok(contrast(f, t) >= 4.5, `${name}: ${f}/${t} ${contrast(f, t).toFixed(2)}`);
+    const want = badgeColors(name).fill;
+    // Greys have no hue to keep.
+    if (name !== 'gray') assert.ok(hueGap(hue(f), hue(want)) <= 8, `${name}: hue ${hue(f).toFixed(0)} vs ${hue(want).toFixed(0)}`);
+  }
+  // The dark export shows the same colours as the canvas: the fills are inside the filter's reach.
+  for (const name of names) {
+    const { fill, text } = badgeColors(name, 'dark');
+    near(roundTrip(fill), to255(rgbOf(fill)), 1, `${name} fill`);
+    near(roundTrip(text), to255(rgbOf(text)), 1, `${name} text`);
+  }
+  // Before #244 the filter's nearest pick turned red orange and indigo text fell under 4.5:1.
+  assert.ok(contrast(darkCanvasSeen('#d92d20'), '#ededed') < 4.5);
+});
+
+test('inDarkReachNear: in-reach colours come back as they are, out-of-reach ones keep their hue', () => {
+  assert.equal(inDarkReachNear('#3a3f47'), '#3a3f47');
+  const red = inDarkReachNear('#d92d20')!;
+  assert.ok(hueGap(hue(red), hue('#d92d20')) <= 3, red);
+  near(roundTrip(red), to255(rgbOf(red)), 1, 'red in reach');
+  assert.equal(inDarkReachNear('#d92d20', () => false), null);
 });

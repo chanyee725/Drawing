@@ -6,7 +6,7 @@ import { parse } from '../../shared/dsl/index.ts';
 import { layoutDiagram, sceneToSvg } from '../../shared/render/index.ts';
 import { BADGE_H, badgeRect } from '../../shared/render/badge.ts';
 import { badgeColors } from '../../shared/render/theme.ts';
-import type { Scene, SceneBadge, SceneBox, SceneLine, SceneText } from '../../shared/render/scene.ts';
+import type { Scene, SceneBadge, SceneBox, SceneEdge, SceneLine, SceneText } from '../../shared/render/scene.ts';
 
 async function scene(code: string, type: 'cloud-architecture' | 'flowchart' = 'cloud-architecture'): Promise<Scene> {
   const { ast, diagnostics } = parse(code, type);
@@ -68,10 +68,13 @@ test('badge: colour from badgeColor, else the node colour; white text reads at 4
   }
 });
 
-test('badge: the same fill in light and dark', async () => {
+test('badge: dark draws the in-reach fill of the same colour (#244, checked on the canvas in dark-filter.test.ts)', async () => {
   const s = await scene('A [badge: v2, badgeColor: red]', 'flowchart');
-  const fill = (svg: string) => /data-badge="A"><rect [^>]*fill="(#[0-9a-f]+)"/.exec(svg)![1];
-  assert.equal(fill(sceneToSvg(s, { theme: 'light' })), fill(sceneToSvg(s, { theme: 'dark' })));
+  const chip = (svg: string) => /data-badge="A"><rect [^>]*fill="(#[0-9a-f]+)"\/><text [^>]*fill="(#[0-9a-f]+)"/.exec(svg)!.slice(1);
+  assert.deepEqual(chip(sceneToSvg(s, { theme: 'light' })), ['#d92d20', '#ffffff']);
+  const dark = badgeColors('red', 'dark');
+  assert.deepEqual(chip(sceneToSvg(s, { theme: 'dark' })), [dark.fill, dark.text]);
+  assert.ok(contrast(dark.fill, dark.text) >= 4.5);
 });
 
 test('badge: text is escaped, an invalid colour falls back to indigo', async () => {
@@ -142,4 +145,111 @@ test('divider: with an empty label it is one unbroken line', async () => {
 test('divider: a badge on a divider is ignored', async () => {
   const s = await scene('Sep [shape: divider, badge: x]', 'flowchart');
   assert.equal(badges(s).length, 0);
+});
+
+test('divider: splits connected diagrams into rows too (#244)', async () => {
+  for (const dir of ['down', 'right']) {
+    const s = await scene([`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'B > C'].join('\n'), 'flowchart');
+    const h = new Map(s.handles!.map((x) => [x.id, x]));
+    const div = h.get('Phase 2')!;
+    for (const id of ['A', 'B']) assert.ok(h.get(id)!.y + h.get(id)!.h <= div.y, `${dir}: ${id} above`);
+    for (const id of ['C', 'D']) assert.ok(h.get(id)!.y >= div.y + div.h, `${dir}: ${id} below`);
+    // Nothing beside it: the line runs across everything above and below.
+    const x0 = Math.min(...['A', 'B', 'C', 'D'].map((id) => h.get(id)!.x));
+    const x1 = Math.max(...['A', 'B', 'C', 'D'].map((id) => h.get(id)!.x + h.get(id)!.w));
+    assert.ok(div.x <= x0 && div.x + div.w >= x1, `${dir}: spans ${div.x}..${div.x + div.w} over ${x0}..${x1}`);
+    // The edge across the divider is still drawn.
+    const edges = s.items.filter((i) => i.kind === 'edge');
+    assert.equal(edges.length, 3, `${dir}: three edges`);
+  }
+});
+
+type R = { x: number; y: number; w: number; h: number };
+/** Whether the axis-aligned segment p-q runs through the inside of `r` (touching its border is fine). */
+const cuts = (r: R, p: { x: number; y: number }, q: { x: number; y: number }): boolean =>
+  Math.max(p.x, q.x) > r.x + 0.5 && Math.min(p.x, q.x) < r.x + r.w - 0.5 && Math.max(p.y, q.y) > r.y + 0.5 && Math.min(p.y, q.y) < r.y + r.h - 0.5;
+/** Every drawn edge misses every node it does not join, the divider labels, and runs orthogonally. */
+function assertClear(s: Scene, label: string, what: string): void {
+  const h = new Map(s.handles!.map((x) => [x.id, x]));
+  const t = text(s, label)!;
+  const plate: R = { x: t.x - 30, y: t.y, w: 60, h: t.lineHeight };
+  for (const e of s.items.filter((i): i is SceneEdge => i.kind === 'edge')) {
+    for (let k = 1; k < e.points.length; k++) {
+      const p = e.points[k - 1]!;
+      const q = e.points[k]!;
+      assert.ok(p.x === q.x || p.y === q.y, `${what}: ${e.from}>${e.to} orthogonal`);
+      for (const [id, r] of h) {
+        if (id === e.from || id === e.to || r.kind !== 'node' || id === label) continue;
+        assert.ok(!cuts(r, p, q), `${what}: ${e.from}>${e.to} runs through ${id}: ${JSON.stringify(e.points)}`);
+      }
+      assert.ok(!cuts(plate, p, q), `${what}: ${e.from}>${e.to} strikes through the label ${label}: ${JSON.stringify(e.points)}`);
+    }
+  }
+}
+
+test('divider rows: edges across them go around nodes and the label, in every direction (#244)', async () => {
+  for (const dir of ['down', 'up', 'right', 'left']) {
+    // A forward edge, and a loop back to the earlier phase.
+    const s = await scene([`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'B > C', 'D > A'].join('\n'), 'flowchart');
+    assertClear(s, 'Phase 2', dir);
+    const h = new Map(s.handles!.map((x) => [x.id, x]));
+    const div = h.get('Phase 2')!;
+    // `up` reads bottom to top: the first phase sits under the divider.
+    const [first, second] = dir === 'up' ? [['C', 'D'], ['A', 'B']] : [['A', 'B'], ['C', 'D']];
+    for (const id of first) assert.ok(h.get(id)!.y + h.get(id)!.h <= div.y, `${dir}: ${id} above`);
+    for (const id of second) assert.ok(h.get(id)!.y >= div.y + div.h, `${dir}: ${id} below`);
+    assert.equal(s.items.filter((i) => i.kind === 'edge').length, 4, `${dir}: four edges`);
+  }
+});
+
+test('divider rows: an edge from a node above the next one in its row goes around it (#244)', async () => {
+  const s = await scene(['A > B', 'Phase 2 [shape: divider]', 'C > D', 'A > D', 'D > B'].join('\n'), 'flowchart');
+  assertClear(s, 'Phase 2', 'down');
+});
+
+test('divider rows: a divider inside a group splits its connected children too (#244)', async () => {
+  const s = await scene(['G {', '  A', '  B', '  Sep [shape: divider]', '  C', '  D', '}', 'A > B', 'C > D', 'B > C', 'D > A'].join('\n'), 'flowchart');
+  const h = new Map(s.handles!.map((x) => [x.id, x]));
+  const div = h.get('Sep')!;
+  const g = h.get('G')!;
+  for (const id of ['A', 'B']) assert.ok(h.get(id)!.y + h.get(id)!.h <= div.y, `${id} above`);
+  for (const id of ['C', 'D']) assert.ok(h.get(id)!.y >= div.y + div.h, `${id} below`);
+  // Full inside width of the group.
+  assert.ok(div.x <= g.x + 16 && div.x + div.w >= g.x + g.w - 16, `spans ${div.x}..${div.x + div.w} in ${g.x}..${g.x + g.w}`);
+  assertClear(s, 'Sep', 'group');
+  // Routes stay inside the group.
+  for (const e of s.items.filter((i): i is SceneEdge => i.kind === 'edge')) {
+    for (const p of e.points) assert.ok(p.x > g.x && p.x < g.x + g.w && p.y > g.y && p.y < g.y + g.h, `${e.from}>${e.to} leaves G at ${p.x},${p.y}`);
+  }
+});
+
+test('divider rows: two edges across between the same pair each go around, apart from each other (#244)', async () => {
+  const runs = (e: SceneEdge) => e.points.slice(1).map((q, k) => [e.points[k]!, q] as const);
+  /** Length two segments share on one line (parallel and closer than `space`). */
+  const overlap = (a: SceneEdge, b: SceneEdge, space: number): number => {
+    let most = 0;
+    for (const [p, q] of runs(a)) {
+      for (const [r, t] of runs(b)) {
+        const flat = p.y === q.y;
+        if (flat !== (r.y === t.y) || (flat ? p.x === q.x : p.y === q.y)) continue;
+        if (Math.abs(flat ? p.y - r.y : p.x - r.x) >= space) continue;
+        const lo = Math.max(flat ? Math.min(p.x, q.x) : Math.min(p.y, q.y), flat ? Math.min(r.x, t.x) : Math.min(r.y, t.y));
+        const hi = Math.min(flat ? Math.max(p.x, q.x) : Math.max(p.y, q.y), flat ? Math.max(r.x, t.x) : Math.max(r.y, t.y));
+        most = Math.max(most, hi - lo);
+      }
+    }
+    return most;
+  };
+  const cases: [string, string[]][] = [];
+  for (const dir of ['down', 'up', 'right', 'left']) {
+    cases.push([`${dir} there and back`, [`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'A > D', 'D > A']]);
+    cases.push([`${dir} twice`, [`direction ${dir}`, 'A > B', 'Phase 2 [shape: divider]', 'C > D', 'D > A', 'D > A']]);
+  }
+  for (const [what, code] of cases) {
+    const s = await scene(code.join('\n'), 'flowchart');
+    assertClear(s, 'Phase 2', what);
+    const pair = s.items.filter((i): i is SceneEdge => i.kind === 'edge' && [i.from, i.to].sort().join() === 'A,D');
+    assert.equal(pair.length, 2, `${what}: both edges drawn`);
+    assert.ok(overlap(pair[0]!, pair[1]!, 8) <= 1, `${what}: the two routes run apart: ${JSON.stringify(pair.map((e) => e.points))}`);
+  }
 });

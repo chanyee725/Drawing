@@ -47,7 +47,7 @@ type Props = {
 
 const theme = (dark: boolean) => (dark ? 'dark' : 'light') as 'dark' | 'light';
 // Excalidraw's dark mode puts a filter over the whole canvas, images included: dark pictures are drawn pre-corrected
-// for it (darkFilter.ts), so they come out in the dark palette instead of an inverted light one.
+// for it (shared/render/darkFilter.ts), so they come out in the dark palette instead of an inverted light one.
 const picTheme = (dark: boolean): PicTheme => (dark ? 'dark-canvas' : 'light');
 const newElId = (blockId: string) => `blk_${blockId}_${Math.random().toString(36).slice(2, 8)}`;
 const liveRects = (els: readonly ExcalidrawElement[]): Rect[] => els.filter((e) => !e.isDeleted).map((e) => rectOf(e));

@@ -7,7 +7,7 @@ import type { Scene } from '../../../shared/render/scene.ts';
 import { drawSig, fileIdFor, hash, type BlockLike, type OriginAnchor } from './sync.ts';
 import { svgDataURL } from './resolution.ts';
 import { sceneToSvg } from '../../../shared/render/index.ts';
-import { preDarkFilterColor } from './darkFilter.ts';
+import { preDarkFilterColor } from '../../../shared/render/darkFilter.ts';
 
 /**
  * How a picture is painted: `light`, `dark`, or `dark-canvas` = the dark palette pre-corrected for Excalidraw's dark

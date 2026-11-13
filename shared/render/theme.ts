@@ -3,6 +3,7 @@
 // drawn directly in the dark palette instead of inverting the light picture.
 
 import type { Paint } from './scene.ts';
+import { inDarkReachNear } from './darkFilter.ts';
 
 export type Theme = 'light' | 'dark';
 
@@ -53,7 +54,7 @@ export const THEMES: Record<Theme, ThemeColors> = {
     groupText: '#a7afbb',
     edge: '#8d96a5',
     edgeSoft: '#5b6370',
-    shadow: '#0b0c0e',
+    shadow: '#2b2f36',
   },
 };
 
@@ -175,12 +176,43 @@ const ratioOf = (a: string, b: string): number => {
 };
 
 /**
- * Badge chip colours (§2.1, §2.3: the same solid fill in both themes). A palette name fills with its light
- * border shade (Eraser's `#444CE7`, `#D92D20`, ...) and white text; when white would read under 4.5:1 on it
- * (orange, green, blue, gray), the palette's darker text shade fills instead. A hex fills as written, with
- * white or dark text, whichever reads better. No colour: indigo.
+ * Badge chip colours (§2.1, §2.3). A palette name fills with its light border shade (Eraser's `#444CE7`,
+ * `#D92D20`, ...) and white text; when white would read under 4.5:1 on it (orange, green, blue, gray), the
+ * palette's darker text shade fills instead. A hex fills as written, with white or dark text, whichever reads
+ * better. No colour: indigo.
+ *
+ * Dark: the dark canvas paints every colour through Excalidraw's filter (shared/render/darkFilter.ts), which
+ * cannot show these saturated fills; its nearest pick turned red orange and a yellow pale green, and white text
+ * fell to 3.6:1 (#244). So the dark fill is the nearest colour of the same hue the filter can show, still at
+ * 4.5:1 or better against the text as the canvas shows it (white comes out #ededed). A dark export uses the same
+ * colours, so both look alike.
  */
-export function badgeColors(color: string | undefined): { fill: string; text: string } {
+export function badgeColors(color: string | undefined, theme: Theme = 'light'): { fill: string; text: string } {
+  const light = lightBadge(color);
+  if (theme === 'light') return light;
+  const cached = darkBadges.get(light.fill);
+  if (cached) return cached;
+  const texts = light.text === '#ffffff' ? [DARK_BADGE_WHITE, DARK_BADGE_INK] : [DARK_BADGE_INK, DARK_BADGE_WHITE];
+  let out: { fill: string; text: string } | undefined;
+  for (const text of texts) {
+    const fill = inDarkReachNear(light.fill, (f) => ratioOf(f, text) >= 4.5);
+    if (fill) {
+      out = { fill, text };
+      break;
+    }
+  }
+  // Every hue reaches 4.5:1 against one of the two texts; this is only a guard.
+  out ??= { fill: '#3a3f47', text: DARK_BADGE_WHITE };
+  darkBadges.set(light.fill, out);
+  return out;
+}
+
+/** White and dark badge text as the dark canvas shows them (the filter's lightest grey is #ededed). */
+const DARK_BADGE_WHITE = '#ededed';
+const DARK_BADGE_INK = '#1f2329';
+const darkBadges = new Map<string, { fill: string; text: string }>();
+
+function lightBadge(color: string | undefined): { fill: string; text: string } {
   const named = namedOf(color ?? 'indigo');
   if (named) {
     const [, border, strong] = named.light;
