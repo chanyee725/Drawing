@@ -37,6 +37,17 @@ test("stepView: five states from stage and sessions", () => {
   assert.equal(stepView({ stage: "done", sessions: ses("failed") }), "done", "a finished step stays done");
 });
 
+test("stepView: a session with undefined state is unknown, counts as active", () => {
+  const unknown = [{}, { state: undefined }];
+  assert.equal(stepView({ sessions: unknown }), "active");
+  assert.equal(stepView({ sessions: [{ state: "done" }, {}] }), "active", "unknown is not done");
+  assert.equal(stepView({ stage: "impl", sessions: unknown }), "active");
+  assert.equal(stepView({ stage: "review", sessions: unknown }), "review");
+  assert.equal(stepView({ stage: "done", sessions: unknown }), "done");
+  assert.equal(stepView({ sessions: [{}, { state: "failed" }] }), "blocked", "a failed sibling still blocks");
+  assert.equal(waitingOnPerson({ sessions: unknown }), false);
+});
+
 test("stepView without a board stage falls back to sessions", () => {
   assert.equal(stepView({ sessions: ses("working", "done") }), "active");
   assert.equal(stepView({ sessions: ses("done", "done") }), "review", "finished sessions are not a merge");

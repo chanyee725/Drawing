@@ -3,8 +3,8 @@
   --island-bg-color: var(--background);
   --default-border-color: var(--border);
   --sidebar-border-color: var(--border);
-  /* Excalidraw's own violets follow the neutral shadcn tokens (#130, #132). Fills are opaque mixes, so a glyph
-     drawn in --color-primary-light on a --color-primary box (library checkbox) stays visible. */
+  /* Excalidraw's own violets follow the neutral shadcn tokens (#130, #132). Fills are opaque mixes of --primary
+     over --background. Glyphs on a --primary box (library checkbox, "+") are redrawn in --primary-foreground below. */
   --color-primary: var(--primary);
   --color-primary-hover: color-mix(in oklab, var(--primary) 90%, var(--background));
   --color-primary-darker: color-mix(in oklab, var(--primary) 80%, var(--background));
@@ -60,17 +60,17 @@
 .excalidraw.excalidraw .library-unit__adder svg {
   color: var(--primary-foreground);
 }
-/* Hover and press on --primary fills (text-to-diagram button, toggled Switch). Without these the 80% mix
-   of --primary-darker and the old press colour looked identical to rest on near-white dark primary. */
+/* Hover and press on --primary fills (text-to-diagram button, toggled Switch) reuse the 90% and 70% steps above.
+   Without these the stock hover and press colours looked identical to rest on near-white dark primary. */
 .excalidraw.excalidraw .ttd-dialog-panel-button.excalidraw-button:hover:not(:disabled),
 .excalidraw.excalidraw .Switch.toggled:hover {
-  background-color: color-mix(in oklab, var(--primary) 90%, var(--background));
-  border-color: color-mix(in oklab, var(--primary) 90%, var(--background));
+  background-color: var(--color-primary-hover);
+  border-color: var(--color-primary-hover);
 }
 .excalidraw.excalidraw .ttd-dialog-panel-button.excalidraw-button:active:not(:disabled),
 .excalidraw.excalidraw .Switch.toggled:active {
-  background-color: color-mix(in oklab, var(--primary) 78%, var(--background));
-  border-color: color-mix(in oklab, var(--primary) 78%, var(--background));
+  background-color: var(--color-primary-darkest);
+  border-color: var(--color-primary-darkest);
 }
 .excalidraw.excalidraw .Switch.toggled:active::before {
   filter: brightness(0.92);

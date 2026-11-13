@@ -1,4 +1,4 @@
-import { Clock, Ellipsis } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
 import { IS_MAC } from './platform';
@@ -22,15 +22,14 @@ type Props = {
   pdfScope: 'selection' | 'document' | 'canvas';
   onPdf: () => void;
   disabled?: boolean;
-  /** Below md the trigger is a ⋯ button and the menu also holds 버전 기록. */
+  /** Below md the trigger is a 44px icon button (버전 기록 lives in the header's ⋯ menu). */
   narrow?: boolean;
-  onHistory?: () => void;
 };
 
 /** An option pill; picking one keeps the menu open (onSelect preventDefault). */
 const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[state=checked]:border-primary data-[state=checked]:bg-muted data-[state=checked]:font-semibold data-[state=checked]:text-foreground';
 
-export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled, narrow, onHistory }: Props) {
+export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled, narrow }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
   // The option pills come first in the DOM, so Radix's keyboard entry focus lands on "1배" and
   // Ctrl+E → Enter would change the PNG size. Move focus to the first export action once open.
@@ -58,8 +57,8 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
       <DropdownMenu open={open} onOpenChange={onOpen} modal={false}>
         <DropdownMenuTrigger asChild>
           {narrow ? (
-            <Button variant="outline" size="icon" disabled={disabled} aria-label="더 보기" className="size-11">
-              <Ellipsis />
+            <Button variant="outline" size="icon" disabled={disabled} aria-label="내보내기" title="내보내기" className="size-11">
+              <Download />
             </Button>
           ) : (
             <Button variant="outline" disabled={disabled} title={`내보내기 (${IS_MAC ? '⌘E' : 'Ctrl+E'})`} className="whitespace-nowrap">
@@ -77,7 +76,8 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
               <DropdownMenuSeparator />
             </>
           )}
-          <div data-export-options className="flex min-w-0 flex-col gap-1 p-1 text-sm">
+          <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
+            <legend className="sr-only">이미지 옵션</legend>
             <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
               const scale = SCALES.find((s) => String(s) === v);
               if (scale) onOptions({ ...options, scale });
@@ -100,7 +100,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-xs" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
               배경을 투명하게
             </DropdownMenuCheckboxItem>
-          </div>
+          </fieldset>
           <DropdownMenuSeparator />
           {items.map((it) => (
             <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start max-md:min-h-11">
