@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FileSession } from '../fileSession';
 import { useSession } from '../useSession';
-import { limitLine, startError, unansweredAsks, type PipelineStatus } from './planStripModel';
+import { PLAN_CHANGED_NOTICE, confirmSnapshot, isPlanChanged, limitLine, startBody, startError, unansweredAsks, type PipelineStatus, type PlanSnapshot } from './planStripModel';
 
 async function readStatus(path: string): Promise<PipelineStatus | null> {
   const res = await fetch(`/api/pipeline?path=${encodeURIComponent(path)}`);
@@ -21,8 +21,12 @@ export function PlanStrip({ session }: { session: FileSession }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  // The plan the dialog shows; 시작하기 sends this revision, never a later one.
+  const [shown, setShown] = useState<PlanSnapshot | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
+  const noticeId = useId();
 
   const refresh = useCallback(async () => {
     if (!path || !hasPlan) return setStatus(null);
@@ -60,22 +64,50 @@ export function PlanStrip({ session }: { session: FileSession }) {
   if (!path || !status || status.state !== 'plan') return null;
   const blocked = status.blockers.length > 0;
   const asks = unansweredAsks(document);
-  const limits = limitLine(status.limits);
+  const view = shown ?? status;
+  const viewLimits = limitLine(view.limits);
 
-  const start = async () => {
+  // Unsaved edits belong to the plan the person approves, so save first, then show what the server holds.
+  const open = async () => {
     setBusy(true);
     setError(null);
     try {
-      // Unsaved edits belong to the plan the person approves.
       await session.flush();
-      const rev = session.getState().file?.revision ?? status.revision;
+      const st = await readStatus(path);
+      if (!st || st.state !== 'plan') return void refresh();
+      setStatus(st);
+      setShown(confirmSnapshot(st));
+      setNotice(null);
+      setConfirming(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '시작하지 못했어요');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const start = async () => {
+    if (!shown) return;
+    setBusy(true);
+    setError(null);
+    try {
       const res = await fetch('/api/pipeline/start', {
         method: 'POST',
         headers: { 'x-drawing': '1', 'content-type': 'application/json' },
-        body: JSON.stringify({ path, revision: rev }),
+        body: JSON.stringify(startBody(path, shown)),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (isPlanChanged(res.status, body)) {
+          // Stay in the dialog with the new plan, so the person confirms what will really run.
+          const st = await readStatus(path).catch(() => null);
+          if (st && st.state === 'plan') {
+            setStatus(st);
+            setShown(confirmSnapshot(st));
+            setNotice(PLAN_CHANGED_NOTICE);
+            return;
+          }
+        }
         setError(startError(res.status, body));
         setConfirming(false);
         void refresh();
@@ -110,7 +142,7 @@ export function PlanStrip({ session }: { session: FileSession }) {
         title={blocked ? status.blockers.join('\n') : undefined}
         className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
         style={{ background: 'var(--primary)' }}
-        onClick={() => setConfirming(true)}
+        onClick={() => void open()}
       >
         시작하기
       </button>
@@ -125,9 +157,13 @@ export function PlanStrip({ session }: { session: FileSession }) {
         </h2>
         <div className="flex flex-col gap-1.5 px-4 py-3">
           <p>
-            세션 {status.sessions}개{limits ? ` · ${limits}` : ''}
+            세션 {view.sessions}개{viewLimits ? ` · ${viewLimits}` : ''}
           </p>
-          <p>바뀐 점: {status.changes.length ? status.changes.join(', ') : '없어요'}</p>
+          <p>바뀐 점: {view.changes.length ? view.changes.join(', ') : '없어요'}</p>
+          {/* Space is reserved (visibility, not display) so the buttons do not move under the pointer. */}
+          <p id={noticeId} role="alert" className="text-destructive" style={{ visibility: notice ? 'visible' : 'hidden' }}>
+            {notice ?? PLAN_CHANGED_NOTICE}
+          </p>
           {asks > 0 && <p className="text-destructive">물어볼 것 {asks}개에 답이 없어요. 그래도 시작할까요?</p>}
         </div>
         <form method="dialog" className="flex items-center justify-end gap-2 border-t px-4 py-2.5">
@@ -137,6 +173,7 @@ export function PlanStrip({ session }: { session: FileSession }) {
           <button
             type="button"
             disabled={busy}
+            aria-describedby={notice ? noticeId : undefined}
             className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
             style={{ background: 'var(--primary)' }}
             onClick={() => void start()}

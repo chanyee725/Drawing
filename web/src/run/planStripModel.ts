@@ -67,3 +67,22 @@ export function startError(status: number, body: { error?: string; blockers?: st
   if (status === 409 && body.revision !== undefined) return `${body.error ?? '계획이 바뀌었어요'} (지금 rev ${body.revision})`;
   return body.error ?? `시작하지 못했어요 (HTTP ${status})`;
 }
+
+/** What the confirm dialog showed: 시작하기 approves exactly this revision, whatever the file is by then. */
+export type PlanSnapshot = Pick<PipelineStatus, 'revision' | 'sessions' | 'changes' | 'limits'>;
+
+export function confirmSnapshot(status: PlanSnapshot): PlanSnapshot {
+  return { revision: status.revision, sessions: status.sessions, changes: [...status.changes], limits: status.limits };
+}
+
+/** The start request for the plan the person saw. */
+export function startBody(path: string, shown: PlanSnapshot): { path: string; revision: number } {
+  return { path, revision: shown.revision };
+}
+
+/** The server refused because the plan moved on since the dialog opened (409 with the current revision). */
+export function isPlanChanged(status: number, body: { blockers?: string[]; revision?: number }): boolean {
+  return status === 409 && !body.blockers?.length && body.revision !== undefined;
+}
+
+export const PLAN_CHANGED_NOTICE = '계획이 바뀌었어요. 새 계획을 확인하고 다시 시작해 주세요.';
