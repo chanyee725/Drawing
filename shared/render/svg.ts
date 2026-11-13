@@ -182,7 +182,9 @@ function monoRuns(line: string): string {
     run = '';
   };
   for (const ch of line) {
-    const w = isWideChar(ch.codePointAt(0) ?? 0);
+    const code = ch.codePointAt(0) ?? 0;
+    // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
+    const w = wide && isJoiner(code) ? true : isWideChar(code);
     if (w !== wide) {
       flush();
       wide = w;
@@ -191,6 +193,11 @@ function monoRuns(line: string): string {
   }
   flush();
   return out;
+}
+
+/** ZWJ, variation selector 16, keycap and tag characters: they belong to the emoji before them. */
+function isJoiner(code: number): boolean {
+  return code === 0x200d || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */

@@ -427,9 +427,9 @@ test('every diagram type asks for true glyph advances, so text drawn small has n
   }
 });
 
-test('sequence: a message label cuts the lifelines it crosses; self labels clear their loop (E60 follow-up)', async () => {
+test('sequence: a message label cuts the lifelines it crosses; self labels stay short of the next lifeline (E60 follow-up)', async () => {
   const { PLATE_PAD } = await import('../../shared/render/text.ts');
-  const { scene, svg } = await renderDiagram('A\nB\nC\nA > C: a long message label that crosses the lifeline of B\nB > B: a self note long enough to reach C', { type: 'sequence' });
+  const { scene, svg } = await renderDiagram('A\nB\nC\nA > C: a long message label that crosses the lifeline of B\nB > B: a long self note next to the lifeline of C', { type: 'sequence' });
   const lifelines = scene.items.filter((it) => it.kind === 'line' && it.points[0]!.x === it.points[1]!.x);
   assert.equal(lifelines.length, 3);
   assert.ok(lifelines.every((l) => l.kind === 'line' && l.cut === true), 'every lifeline takes the label cut');
@@ -442,12 +442,15 @@ test('sequence: a message label cuts the lifelines it crosses; self labels clear
   const bx = lifelines[1]!.kind === 'line' ? lifelines[1]!.points[0]!.x : NaN;
   assert.ok(label?.kind === 'text' && label.plate);
   assert.ok(Math.abs(label.x - bx) < textWidth(label.lines[0]!, label.size, label.font) / 2, 'the label spans B');
-  // The self-message label is a plate too; its cut (PLATE_PAD + 1 left of the text) stays clear of the loop's right side.
-  const self = scene.items.find((it) => it.kind === 'text' && it.lines.join('').startsWith('a self note'));
+  // The self-message label is plain text (no plate, no cut): the gap after B keeps it short of C's lifeline, and it
+  // starts 8px right of the loop.
+  const self = scene.items.find((it) => it.kind === 'text' && it.lines.join('').startsWith('a long self note'));
   const loop = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'elbow');
-  assert.ok(self?.kind === 'text' && self.plate && self.anchor === 'start' && loop);
+  assert.ok(self?.kind === 'text' && !self.plate && self.anchor === 'start' && loop);
   const loopRight = Math.max(...loop.points.map((p) => p.x));
-  assert.ok(self.x - PLATE_PAD - 1 > loopRight + 1, 'the cut does not reach the loop stroke');
+  assert.equal(self.x - loopRight, 8);
+  const cx = lifelines[2]!.kind === 'line' ? lifelines[2]!.points[0]!.x : NaN;
+  assert.ok(self.x + textWidth(self.lines[0]!, self.size, self.font) + PLATE_PAD < cx, 'the self label ends before C');
 });
 
 test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E60 follow-up)', async () => {
@@ -460,6 +463,11 @@ test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E6
   assert.match(svg, /<tspan x="[^"]+" y="[^"]+"><tspan style="font-size-adjust:none">문자열<\/tspan><\/tspan>/);
   assert.match(svg, />varchar\(<tspan style="font-size-adjust:none">이름<\/tspan>\)<\/tspan>/);
   assert.match(svg, /<tspan x="[^"]+" y="[^"]+">string<\/tspan>/, 'Latin mono text keeps the plain span');
+  // A ZWJ emoji stays one run, so it draws as one glyph.
+  const zwj = await renderDiagram('t {\n  note 👨\u200d💻 x\n}', { type: 'erd' });
+  assert.match(zwj.svg, /<tspan style="font-size-adjust:none">👨\u200d💻<\/tspan>/);
+  // A joiner after narrow text is not pulled into a wide run.
+  assert.doesNotMatch(zwj.svg, /font-size-adjust:none">\u200d/);
   // Clean text has no nested span: the ch-width scaling is only on mono text.
   const clean = await renderDiagram('A\n한글 > A: 메시지', { type: 'sequence' });
   assert.doesNotMatch(clean.svg, /font-size-adjust:none/);
