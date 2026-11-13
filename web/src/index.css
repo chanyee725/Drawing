@@ -271,6 +271,8 @@ body {
 .doc-diagram.is-selected .doc-diagram-pic { border-color: var(--primary); }
 .doc-diagram-pic:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .doc-diagram-pic img { max-width: 100%; height: auto; }
+/* Holds the picture button and, as its sibling, the run overlay (positioned over the img). */
+.doc-diagram-stage { position: relative; }
 .doc-diagram-wait, .doc-diagram-gone { color: var(--muted-foreground); font-size: 14px; padding: 1.5em; }
 .doc-diagram-gone { border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
 .doc-diagram-actions { display: flex; justify-content: center; gap: 0.4em; }
@@ -392,6 +394,8 @@ body {
   font-size: 12px; line-height: 16px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px;
   background: var(--background); color: var(--muted-foreground); white-space: nowrap;
 }
+/* In the document there is text right above the picture, so the switch sits in the frame's top-right corner. */
+.doc-diagram-stage .run-motion { bottom: auto; top: -8px; right: -8px; margin: 0; }
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
 

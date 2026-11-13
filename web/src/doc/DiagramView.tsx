@@ -1,12 +1,14 @@
 // How an embedded diagram looks in the document: the block's live picture, read-only.
 // Clicking it shows the block on the canvas, where its code is edited.
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import type { Block } from '../api';
 import type { ImageKind } from '../export/actions';
 import { layoutSig } from '../canvas/sync';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
+import { RunLayer } from '../run/RunLayer';
+import { useRunSteps } from '../run/runStore';
 import { DiagramEmbed } from './extensions';
 import type { CanvasEl } from './model';
 
@@ -42,13 +44,43 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [block?.id, block?.type, block?.code, layoutSig(block?.layout), theme]);
 
+  // The progress board sits over the picture as the button's sibling (not inside it: a button holding another button
+  // is invalid and its accessible name would swallow the step labels). It follows the img as the column resizes.
+  const steps = useRunSteps(block ? id : undefined);
+  const stage = useRef<HTMLDivElement>(null);
+  const img = useRef<HTMLImageElement>(null);
+  const [box, setBox] = useState<{ left: number; top: number; scale: number } | null>(null);
+  const scene = pic?.scene;
+  useEffect(() => {
+    const s = stage.current;
+    const i = img.current;
+    if (!steps || !scene || !pic || !s || !i) {
+      setBox(null);
+      return;
+    }
+    const place = () => {
+      const a = s.getBoundingClientRect();
+      const b = i.getBoundingClientRect();
+      const next = { left: b.left - a.left, top: b.top - a.top, scale: b.width / pic.width };
+      setBox((old) => (old && old.left === next.left && old.top === next.top && old.scale === next.scale ? old : next));
+    };
+    place();
+    const ro = new ResizeObserver(place);
+    ro.observe(s);
+    ro.observe(i);
+    return () => ro.disconnect();
+  }, [steps, scene, pic]);
+
   const label = block ? `${typeLabel(block.type)} 다이어그램` : '다이어그램';
   return (
     <NodeViewWrapper as="figure" className={`doc-diagram${selected ? ' is-selected' : ''}`} data-diagram="" data-block-id={id} contentEditable={false}>
       {block ? (
-        <button type="button" className="doc-diagram-pic" title="캔버스에서 보기" aria-label={`${label}, 캔버스에서 보기`} onClick={() => onShow(id)}>
-          {pic ? <img src={pic.dataURL} alt={label} width={pic.width} height={pic.height} draggable={false} /> : <span className="doc-diagram-wait">그리는 중이에요…</span>}
-        </button>
+        <div ref={stage} className="doc-diagram-stage">
+          <button type="button" className="doc-diagram-pic" title="캔버스에서 보기" aria-label={`${label}, 캔버스에서 보기`} onClick={() => onShow(id)}>
+            {pic ? <img ref={img} src={pic.dataURL} alt={label} width={pic.width} height={pic.height} draggable={false} /> : <span className="doc-diagram-wait">그리는 중이에요…</span>}
+          </button>
+          {steps && scene && box && <RunLayer scene={scene} steps={steps} left={box.left} top={box.top} scale={box.scale} />}
+        </div>
       ) : (
         <p className="doc-diagram-gone">캔버스에서 지운 다이어그램이에요. 이 줄을 지워도 돼요.</p>
       )}
