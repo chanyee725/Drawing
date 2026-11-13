@@ -3,11 +3,12 @@
 //
 // Stacking: Excalidraw's static canvas is z 1, its text editor 3 and its UI layer (toolbar, menus) 4, and `.excalidraw`
 // makes no stacking context. This layer is z 3 and comes later in the DOM: above the drawing, under the toolbar and
-// menus, so it never covers or blocks them (#186). It takes no pointer events except its own motion switch.
-import { useEffect, useRef, useState } from 'react';
+// menus, so it never covers or blocks them (#186). It takes no pointer events except its own motion switch and the
+// legend's fold toggle; the legend sits beside the picture on the side with room, clamped inside this layer.
+import { Fragment, useEffect, useRef, useState } from 'react';
 import type { AppState, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
-import { RunLayer } from '../run/RunLayer';
+import { CanvasLegend, RunLayer } from '../run/RunLayer';
 import { useRunBlocks } from '../run/runStore';
 import { placeRuns, samePlaced, type Pic, type PlaceEl, type Placed } from './runPlace';
 
@@ -28,6 +29,18 @@ export function RunOverlay({ api, wrap, pictureOf, hide }: Props) {
   const runs = useRunBlocks();
   const [placed, setPlaced] = useState<Placed[]>([]);
   const frame = useRef(0);
+  const box = useRef<HTMLDivElement>(null);
+  const [area, setArea] = useState({ width: 0, height: 0 });
+  const shown = placed.length > 0;
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => setArea((old) => (old.width === el.clientWidth && old.height === el.clientHeight ? old : { width: el.clientWidth, height: el.clientHeight }));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [shown]);
   useEffect(() => {
     if (!runs.size) {
       setPlaced([]);
@@ -54,12 +67,17 @@ export function RunOverlay({ api, wrap, pictureOf, hide }: Props) {
       frame.current = 0;
     };
   }, [api, wrap, runs, pictureOf, hide]);
-  if (!placed.length) return null;
+  if (!shown) return null;
   return (
-    <div className="pointer-events-none absolute inset-0 z-[3] overflow-hidden" data-run-overlay="">
+    <div ref={box} className="pointer-events-none absolute inset-0 z-[3] overflow-hidden" data-run-overlay="">
       {placed.map((p) => {
         const steps = runs.get(p.blockId);
-        return steps ? <RunLayer key={p.blockId} scene={p.scene} steps={steps} left={p.left} top={p.top} scale={p.scale} motionInside={p.top < MOTION_ROOM} /> : null;
+        return steps ? (
+          <Fragment key={p.blockId}>
+            <RunLayer scene={p.scene} steps={steps} left={p.left} top={p.top} scale={p.scale} motionInside={p.top < MOTION_ROOM} />
+            <CanvasLegend scene={p.scene} steps={steps} left={p.left} top={p.top} scale={p.scale} area={area} />
+          </Fragment>
+        ) : null;
       })}
     </div>
   );

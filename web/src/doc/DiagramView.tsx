@@ -1,6 +1,6 @@
 // How an embedded diagram looks in the document: the block's live picture, read-only.
 // Clicking it shows the block on the canvas, where its code is edited.
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { NodeViewWrapper, ReactNodeViewRenderer, type ReactNodeViewProps } from '@tiptap/react';
 import type { Block } from '../api';
 import type { ImageKind } from '../export/actions';
@@ -8,6 +8,7 @@ import { layoutSig } from '../canvas/sync';
 import { renderBlock, type BlockPicture } from '../canvas/render';
 import { DIAGRAM_TYPES } from '../dsl/templates';
 import { RunLayer, RunLegend } from '../run/RunLayer';
+import { boardShown } from '../run/overlayModel';
 import { useRunSteps } from '../run/runStore';
 import { DiagramEmbed } from './extensions';
 import type { CanvasEl } from './model';
@@ -51,6 +52,8 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
   const img = useRef<HTMLImageElement>(null);
   const [box, setBox] = useState<{ left: number; top: number; scale: number } | null>(null);
   const scene = pic?.scene;
+  // The legend shows exactly when the board draws (a step links to a node), the same rule as on the canvas.
+  const board = useMemo(() => (steps && scene && boardShown(scene, steps) ? { scene, steps } : null), [steps, scene]);
   useEffect(() => {
     const s = stage.current;
     const i = img.current;
@@ -79,12 +82,12 @@ function DiagramView({ node, selected }: ReactNodeViewProps) {
           <button type="button" className="doc-diagram-pic" title="캔버스에서 보기" aria-label={`${label}, 캔버스에서 보기`} onClick={() => onShow(id)}>
             {pic ? <img ref={img} src={pic.dataURL} alt={label} width={pic.width} height={pic.height} draggable={false} /> : <span className="doc-diagram-wait">그리는 중이에요…</span>}
           </button>
-          {steps && scene && box && <RunLayer scene={scene} steps={steps} left={box.left} top={box.top} scale={box.scale} legend={false} />}
+          {board && box && <RunLayer scene={board.scene} steps={board.steps} left={box.left} top={box.top} scale={box.scale} />}
         </div>
       ) : (
         <p className="doc-diagram-gone">캔버스에서 지운 다이어그램이에요. 이 줄을 지워도 돼요.</p>
       )}
-      {block && steps && scene && box && <RunLegend steps={steps} />}
+      {block && board && box && <RunLegend steps={board.steps} />}
       <figcaption>{block ? `${label} · 누르면 캔버스로 가요` : label}</figcaption>
       {block && (
         <div className="doc-diagram-actions" role="group" aria-label="다이어그램 내보내기">

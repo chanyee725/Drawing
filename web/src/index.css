@@ -408,14 +408,17 @@ body {
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
 /* Legend (E26): weighted progress, then the agents and states present. HTML in CSS px, so it stays readable at any
-   zoom. On the canvas it sits just outside the picture's top-right corner; in the document it flows under the picture.
+   zoom. On the canvas it sits beside the picture on the side with room, clamped inside the overlay, and lets clicks
+   through to the shapes under it except on its fold toggle; in the document it flows under the picture.
    Either way it never covers a node. */
 .run-legend {
-  position: absolute; top: 0; left: calc(100% + 12px); pointer-events: auto; inline-size: max-content; min-inline-size: 168px; max-inline-size: 280px;
+  inline-size: max-content; min-inline-size: 168px; max-inline-size: 280px;
   padding: 6px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background);
   color: var(--foreground); font: 400 12px/16px var(--font-sans);
 }
-.doc-diagram > .run-legend { position: static; align-self: center; }
+.run-legend[data-canvas] { position: absolute; pointer-events: none; }
+.run-legend[data-canvas] summary { pointer-events: auto; }
+.doc-diagram > .run-legend { align-self: center; }
 .run-legend-progress { margin: 0 0 4px; font-weight: 500; }
 .run-legend-dim { color: var(--muted-foreground); }
 .run-legend details { margin-top: 4px; }

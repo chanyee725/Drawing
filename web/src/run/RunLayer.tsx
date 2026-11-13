@@ -2,11 +2,11 @@
 // coordinates, so it scales with the picture. Draws rings, a glyph corner badge and a "state · agent" label per step
 // and traces active edges. Never touches the picture, the canvas elements or the file.
 // The same component draws on the canvas (RunOverlay) and in the document's diagram embed (DiagramView).
-import { useId, useMemo } from 'react';
+import { useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Ref } from 'react';
 import { progressLabel } from '../../../shared/dispatch/step-view.ts';
 import type { Scene } from '../../../shared/render/index.ts';
 import { badgeRect } from '../../../shared/render/badge.ts';
-import { legendOf, overlayModel, pathData, runProgress, type OverlayNode, type RunStep } from './overlayModel';
+import { boardShown, legendOf, legendSpot, overlayModel, pathData, runProgress, type OverlayNode, type RunStep, type Size } from './overlayModel';
 import { setStill, useStill } from './runStore';
 
 type Props = {
@@ -19,14 +19,14 @@ type Props = {
   scale: number;
   /** No room above the picture (it touches the top of a clipped view): the motion switch sits inside its corner. */
   motionInside?: boolean;
-  /** Draw the legend beside the picture (canvas). The document puts `RunLegend` under the picture itself. */
-  legend?: boolean;
 };
 
 /** Below this scale the labels are too small to read and hidden (§5 "hidden below 40 % zoom"). */
 const MIN_LABEL_SCALE = 0.4;
 const PAD = 5;
 const LABEL_FONT = 11;
+/** How far a step label reaches under its node (scene units): the room the canvas legend leaves under the picture. */
+const LABEL_REACH = PAD + 4 + 18;
 
 /** Rough text width for the label plate: Hangul and other wide characters about one em, the rest about 0.6 em. */
 export function textWidth(s: string, size = LABEL_FONT): number {
@@ -35,7 +35,7 @@ export function textWidth(s: string, size = LABEL_FONT): number {
   return Math.ceil(w);
 }
 
-export function RunLayer({ scene, steps, left, top, scale, motionInside, legend = true }: Props) {
+export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props) {
   const model = useMemo(() => overlayModel(scene, steps), [scene, steps]);
   const still = useStill();
   if (!model.nodes.length) return null;
@@ -51,7 +51,6 @@ export function RunLayer({ scene, steps, left, top, scale, motionInside, legend 
           <Step key={n.node} n={n} labels={labels} />
         ))}
       </svg>
-      {legend && <RunLegend steps={steps} />}
       {moving && (
         <button type="button" className="run-motion" onClick={() => setStill(!still)}>
           {still ? '움직임 켜기' : '움직임 멈추기'}
@@ -91,20 +90,43 @@ function Step({ n, labels }: { n: OverlayNode; labels: boolean }) {
 }
 
 /**
+ * The canvas legend: placed in overlay px on the side of the picture with room (`legendSpot`), measured after it
+ * renders so the clamp knows its size. Shown only when the board is (`boardShown`), like the document's.
+ */
+export function CanvasLegend({ scene, steps, left, top, scale, area }: Omit<Props, 'motionInside'> & { area: Size }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<Size | null>(null);
+  const shown = useMemo(() => boardShown(scene, steps), [scene, steps]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setSize((old) => (old && old.width === el.offsetWidth && old.height === el.offsetHeight ? old : { width: el.offsetWidth, height: el.offsetHeight }));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [shown]);
+  if (!shown) return null;
+  const pic = { left, top, width: scene.width * scale, height: scene.height * scale };
+  const at = size && area.width > 0 ? legendSpot(pic, size, area, 12, LABEL_REACH * scale) : null;
+  return <RunLegend ref={ref} steps={steps} canvas style={at ? { left: at.left, top: at.top } : { visibility: 'hidden' }} />;
+}
+
+/**
  * The board's legend (§5.1): the weighted progress bar and text, then a collapsible list of the agents and states in
- * the run. Beside the picture's top-right corner on the canvas and under the picture in the document, so it never
+ * the run. Beside the picture on the canvas (`CanvasLegend`) and under the picture in the document, so it never
  * covers a node.
  */
-export function RunLegend({ steps }: { steps: readonly RunStep[] }) {
+export function RunLegend({ steps, canvas, style, ref }: { steps: readonly RunStep[]; canvas?: boolean; style?: CSSProperties; ref?: Ref<HTMLDivElement> }) {
   const id = useId();
   const p = useMemo(() => runProgress(steps), [steps]);
   const legend = useMemo(() => legendOf(steps), [steps]);
   return (
-    <div className="run-legend" data-run-legend="">
+    <div ref={ref} className="run-legend" data-run-legend="" data-canvas={canvas ? '' : undefined} style={style}>
       <p id={id} className="run-legend-progress">
         {progressLabel(p)}
       </p>
-      <progress className="run-progress" value={p.percent} max={100} aria-labelledby={id} />
+      {p.total > 0 && <progress className="run-progress" value={p.percent} max={100} aria-labelledby={id} />}
       <details open>
         <summary>범례</summary>
         <ul aria-label="에이전트">

@@ -169,6 +169,33 @@ export function overlayModel(scene: Scene, steps: readonly RunStep[]): OverlayMo
   return { nodes, edges, missing, progress: runProgress(steps), legend: legendOf(steps, colors) };
 }
 
+/** The board draws only when at least one step links to a node of the picture; the legend follows the same rule. */
+export const boardShown = (scene: Scene, steps: readonly RunStep[]): boolean => overlayModel(scene, steps).nodes.length > 0;
+
+export type Box = { left: number; top: number; width: number; height: number };
+export type Size = { width: number; height: number };
+
+/** Margin kept between the canvas legend and the overlay's edges. */
+const EDGE = 8;
+
+/**
+ * Where the canvas legend goes, in overlay px (§5.1): under the picture (below the step labels), else left of it,
+ * else right, else above; the first side where it fits whole inside the overlay. When none does it goes under the
+ * picture. Either way it is clamped inside the overlay so the pane edge never cuts it.
+ */
+export function legendSpot(pic: Box, size: Size, area: Size, gap = 12, below = 0): { left: number; top: number } {
+  const sides = [
+    { left: pic.left, top: pic.top + pic.height + below + gap },
+    { left: pic.left - gap - size.width, top: pic.top },
+    { left: pic.left + pic.width + gap, top: pic.top },
+    { left: pic.left, top: pic.top - gap - size.height },
+  ];
+  const fits = (p: { left: number; top: number }) => p.left >= EDGE && p.top >= EDGE && p.left + size.width <= area.width - EDGE && p.top + size.height <= area.height - EDGE;
+  const p = sides.find(fits) ?? sides[0]!;
+  const clamp = (v: number, max: number) => Math.max(EDGE, Math.min(v, max - EDGE));
+  return { left: clamp(p.left, area.width - size.width), top: clamp(p.top, area.height - size.height) };
+}
+
 /** SVG path data through the edge's points (straight segments; the overlay traces, it does not redraw the connector). */
 export function pathData(points: readonly Point[]): string {
   return points.map((p, i) => `${i ? 'L' : 'M'}${Math.round(p.x * 10) / 10} ${Math.round(p.y * 10) / 10}`).join('');
