@@ -19,7 +19,7 @@
  * status/role colours are ours. Dark is designed first (Dispatch's old "monitor" theme folds into it); light is
  * derived from it. The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
  *
- * Naming: --brand is the one accent (shadcn default neutral, #130). shadcn's "accent" is a neutral hover colour, so Tailwind's
+ * Naming: --brand is the one accent (shadcn neutral, #130). shadcn's "accent" is a neutral hover colour, so Tailwind's
  * bg-accent reads --hover. The CSS variable --accent itself stays an alias of --brand (see "Legacy aliases").
  */
 :root, :root[data-theme="light"] {
@@ -41,9 +41,9 @@
   --text-4: oklch(0.68 0.01 280);
   /* Accent = shadcn/ui default (neutral) primary; no violet (#130). */
   --brand: oklch(0.205 0 0);
-  --brand-soft: oklch(0.205 0 0 / 7%);
+  --brand-soft: oklch(0.205 0 0 / 11%);
   --brand-foreground: oklch(0.985 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: oklch(0.556 0 0); /* shadcn's light ring is 0.708; darker here for 3:1 on panels */
   --destructive: oklch(0.55 0.21 25);
   --dot: oklch(0.86 0.004 280);
   --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 10%);
