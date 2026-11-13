@@ -32,13 +32,57 @@ export async function probe(port, path, timeoutMs = 800) {
   }
 }
 
-async function readHolder(file) {
+/** { raw, holder } for the lock at file; raw is null when there is no file, holder null when it is not ours to parse. */
+async function readLock(file) {
+  let raw;
   try {
-    const h = JSON.parse(await readFile(file, 'utf8'));
-    return h && typeof h === 'object' ? { pid: h.pid, port: h.port ?? null } : null;
+    raw = await readFile(file, 'utf8');
   } catch {
-    return null;
+    return { raw: null, holder: null };
   }
+  try {
+    const h = JSON.parse(raw);
+    return { raw, holder: h && typeof h === 'object' ? { pid: h.pid, port: h.port ?? null } : null };
+  } catch {
+    return { raw, holder: null };
+  }
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Removes the lock at `file` only if it still reads `raw` (the content judged stale). Removal runs
+ * under `<file>.break`, so two servers replacing the same stale lock cannot have the slower one
+ * delete the lock the faster one just took. A break file whose pid is gone is cleared.
+ */
+async function removeIfUnchanged(file, raw) {
+  const brk = `${file}.break`;
+  const tmp = `${brk}.${process.pid}.tmp`;
+  for (let i = 0; i < 200; i++) {
+    await writeTemp(tmp, { pid: process.pid });
+    let got = false;
+    try {
+      await link(tmp, brk);
+      got = true;
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    } finally {
+      await rm(tmp, { force: true });
+    }
+    if (!got) {
+      const { holder } = await readLock(brk);
+      if (holder && !pidAlive(holder.pid)) await rm(brk, { force: true });
+      else await sleep(10);
+      continue;
+    }
+    try {
+      if ((await readLock(file)).raw === raw) await rm(file, { force: true });
+      return;
+    } finally {
+      await rm(brk, { force: true });
+    }
+  }
+  throw new Error('lock break timed out');
 }
 
 export class LockPathError extends Error {
@@ -85,7 +129,7 @@ export async function claimLock(file, { isLive, root }) {
   if (root) await ensureDirInside(root, dirname(file));
   else await mkdir(dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 5; attempt++) {
     // Write a temp file, then hard-link it into place: link fails with EEXIST if someone holds the
     // lock, and readers never see a half-written file.
     await writeTemp(tmp, { pid: process.pid, port: null });
@@ -97,11 +141,12 @@ export async function claimLock(file, { isLive, root }) {
     } finally {
       await rm(tmp, { force: true });
     }
-    const holder = await readHolder(file);
+    const { raw, holder } = await readLock(file);
+    if (raw === null) continue; // released meanwhile
     if (holder && holder.pid !== process.pid && (await isLive(holder))) return { ok: false, holder };
-    await rm(file, { force: true });
+    await removeIfUnchanged(file, raw);
   }
-  return { ok: false, holder: await readHolder(file) };
+  return { ok: false, holder: (await readLock(file)).holder };
 }
 
 function ownLock(file) {

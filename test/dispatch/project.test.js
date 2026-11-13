@@ -149,6 +149,42 @@ test('claimLock: takes a free lock, refuses a live holder, replaces a dead or im
   }
 });
 
+test('claimLock: processes racing to replace one stale lock end with exactly one holder', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e13-race-'));
+  const file = join(dir, 'x.lock');
+  const lockUrl = new URL('../../server/lock.js', import.meta.url).href;
+  // Each child claims, prints the result, then stays alive (holding or not) until killed. isLive
+  // waits a little so every child judges the same stale lock before anyone replaces it.
+  const script = `
+    const { claimLock, pidAlive } = await import(${JSON.stringify(lockUrl)});
+    const res = await claimLock(process.argv[1], {
+      isLive: async (h) => { await new Promise((r) => setTimeout(r, 150)); return pidAlive(h.pid); },
+    });
+    process.stdout.write(res.ok ? 'ok\\n' : 'busy\\n');
+    setInterval(() => {}, 1000);`;
+  try {
+    for (let round = 0; round < 3; round++) {
+      writeFileSync(file, JSON.stringify({ pid: await deadPid(), port: 1 }));
+      const kids = Array.from({ length: 6 }, () =>
+        spawn(process.execPath, ['--input-type=module', '-e', script, file], { stdio: ['ignore', 'pipe', 'inherit'] }));
+      const results = await Promise.all(kids.map((k) => new Promise((resolve) => {
+        let out = '';
+        k.stdout.on('data', (d) => { out += d; if (out.includes('\n')) resolve(out.trim()); });
+        k.on('exit', () => resolve(out.trim() || 'exit'));
+      })));
+      const holder = JSON.parse(readFileSync(file, 'utf8')).pid;
+      for (const k of kids) { k.kill(); }
+      await Promise.all(kids.map((k) => (k.exitCode !== null ? null : new Promise((r) => k.on('exit', r)))));
+      assert.equal(results.filter((r) => r === 'ok').length, 1, `round ${round}: ${results.join(',')}`);
+      assert.equal(results[kids.findIndex((k) => k.pid === holder)], 'ok', 'the file names the one that won');
+      rmSync(file, { force: true });
+    }
+    assert.deepEqual(readdirSync(dir), [], 'no temp or break files left behind');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('claimWorkspace / claimProject: a symlinked .drawing or .dispatch is refused and nothing is written through it', async () => {
   const { root, ws } = scratchRepo();
   const outside = realpathSync(mkdtempSync(join(tmpdir(), 'drawing-e13-out-')));
