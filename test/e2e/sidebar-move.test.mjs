@@ -108,7 +108,7 @@ test('refused sidebar drops do not move to the root', { skip: !ON && 'set DRAW_E
   assert.deepEqual(rootNow(), rootBefore);
 
   // Keyboard: row menu → 옮기기 → a project. The move is announced and focus lands on the moved row.
-  const trigger = page.getByRole('button', { name: '남길 문서 메뉴' });
+  const trigger = page.getByRole('navigation', { name: '사이드바' }).getByRole('button', { name: '남길 문서 메뉴' });
   await trigger.focus();
   await page.keyboard.press('Enter');
   const menu = page.getByRole('menu');
@@ -143,7 +143,7 @@ test('refused sidebar drops do not move to the root', { skip: !ON && 'set DRAW_E
       dialogs.push(d.message());
       void (answer === undefined ? d.accept() : d.accept(answer));
     });
-    await page.getByRole('button', { name: `${label} 메뉴` }).click();
+    await page.getByRole('navigation', { name: '사이드바' }).getByRole('button', { name: `${label} 메뉴` }).click();
     await page.getByRole('menuitem', { name: action }).click();
     await settle();
   };
