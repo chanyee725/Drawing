@@ -145,6 +145,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       y: Y(tx.y),
       text: tx.lines.join('\n'),
       fontSize: size,
+      fontFamily: CLEAN_FONT_FAMILY,
       strokeColor: tx.color ? strokeOf(tx.color, 'light') : tx.tone === 'muted' ? t.muted : t.text,
       textAlign: tx.anchor === 'middle' ? 'center' : tx.anchor === 'end' ? 'right' : 'left',
     });

@@ -19,7 +19,9 @@
 .excalidraw.excalidraw.theme--dark {
   --shadow-island: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
 }
-/* The usage hints ("double-click or press Enter to edit text", "to move the canvas…") are noise. */
+/* Usage hints stay visible (some are needed: how to pan, how to finish a multi-point arrow,
+   how to undo an erase), just smaller and quieter. */
 .excalidraw.excalidraw .HintViewer {
-  display: none;
+  font-size: 0.6875rem;
+  opacity: 0.6;
 }

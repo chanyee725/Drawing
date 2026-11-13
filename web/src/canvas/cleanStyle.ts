@@ -12,4 +12,5 @@ export const CLEAN_APP_STATE = {
   currentItemStrokeWidth: 1,
   currentItemRoundness: 'round' as const,
   currentItemFillStyle: 'solid' as const,
+  currentItemArrowType: 'sharp' as const,
 };

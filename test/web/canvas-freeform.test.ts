@@ -38,6 +38,7 @@ test('nodes become shapes with bound labels, edges arrows with labels, groups da
   assert.deepEqual(a.label, { text: 'A', fontSize: 28, fontFamily: 9, strokeColor: (a.label as { strokeColor: string }).strokeColor });
   assert.equal((b.label as { text: string }).text, 'B?');
   assert.equal(title.text, 'Group');
+  assert.equal(title.fontFamily, 9, 'loose text uses the clean font too');
   // Bent like the drawing, relative to its first point.
   assert.deepEqual(arrow.points, [[0, 0], [160, 0], [160, 4], [320, 4]]);
   assert.equal(arrow.strokeStyle, 'dashed');
