@@ -334,3 +334,12 @@ test('an icon name equal to any glyph name picks that glyph', async () => {
   for (const g of ['user', 'queue', 'balancer', 'bucket', 'placeholder', 'search'] as const) assert.equal(glyphFor(g), g);
   assert.equal(glyphFor('  Queue '), 'queue');
 });
+
+test('arrows, dashes and math signs are measured near their real width in the clean face', async () => {
+  const { textWidth } = await import('../../shared/render/text.ts');
+  // Drawing Sans advance widths in em (hmtx of the bundled subset).
+  for (const [ch, em] of [['→', 0.913], ['—', 0.957], ['…', 0.762], ['+', 0.627], ['=', 0.627], ['&', 0.609]] as const) {
+    const w = textWidth(ch, 100, 'clean');
+    assert.ok(w >= em * 100 * 0.95 && w <= em * 100 * 1.05, `${ch} measured ${w}, real ${em * 100}`);
+  }
+});

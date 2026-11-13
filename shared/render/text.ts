@@ -22,6 +22,12 @@ export const FONT_SIZE: Record<TextSize, number> = { small: 13, medium: 16, larg
 const NARROW = new Set([...'iljI.,:;|!\'`']);
 const SEMI = new Set([...'frt()[]{}/\\-"']);
 const WIDE = new Set([...'mwMW@%']);
+// Symbols the classes above measure 10% or more too narrow, at their Drawing Sans advance widths (em). Arrows and
+// dashes are near 1em, so a label with a few of them would overflow its box.
+const SYMBOL: Record<string, number> = {
+  '←': 0.91, '↑': 0.91, '→': 0.91, '↓': 0.91, '—': 0.96, '…': 0.76, '₩': 0.91, '©': 0.83, '®': 0.64, '€': 0.63,
+  '+': 0.63, '<': 0.63, '=': 0.63, '>': 0.63, '~': 0.63, '±': 0.63, '×': 0.63, '÷': 0.63, '−': 0.63, '&': 0.61, '$': 0.61,
+};
 
 function isWideChar(code: number): boolean {
   return (
@@ -41,6 +47,7 @@ function charEm(ch: string, font: Typeface): number {
   if (font === 'mono') return 0.6;
   let w: number;
   if (ch === ' ') w = 0.28;
+  else if (SYMBOL[ch] !== undefined) w = SYMBOL[ch];
   else if (NARROW.has(ch)) w = 0.27;
   else if (SEMI.has(ch)) w = 0.38;
   else if (WIDE.has(ch)) w = 0.86;
