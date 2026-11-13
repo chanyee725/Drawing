@@ -20,6 +20,8 @@ export interface Session {
   name: string;
   role: string;
   roleName: string;
+  /** Agent cursor colour (E56), one of server/dispatch/colors.js, picked at random when the session is created. */
+  color?: string;
   provider: Provider;
   model: string;
   modelLabel: string;

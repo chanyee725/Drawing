@@ -9,6 +9,8 @@ export type CursorEvent = {
   gone?: boolean;
   name?: string;
   role?: string;
+  /** The session's cursor colour (`#rrggbb`), picked when the session was created (server/dispatch/colors.js). */
+  color?: string;
   file?: string;
   x?: number;
   y?: number;
@@ -20,6 +22,8 @@ export type Cursor = {
   sid: string;
   name: string;
   role: string;
+  /** `#rrggbb`, or '' (the stylesheet's fallback colour). */
+  color: string;
   file: string;
   from: Pt;
   to: Pt;
@@ -69,6 +73,9 @@ export const moving = (c: Cursor, now: number, reduced: boolean) => !reduced && 
 
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
+/** A colour from the event goes into an inline style: only plain `#rrggbb` passes. */
+export const cursorColor = (v: unknown): string => (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v) ? v : '');
+
 /**
  * Apply one event; returns a new map (or the same one when nothing changed). A new place glides from wherever the
  * cursor is drawn now; a cursor that moved to another file, or a first appearance, starts at its target.
@@ -87,7 +94,7 @@ export function applyCursor(cursors: ReadonlyMap<string, Cursor>, e: CursorEvent
   if (!hasPlace && !sameFile) return cursors; // nothing to show yet
   const next = new Map(cursors);
   if (!hasPlace) {
-    next.set(e.sid, { ...old!, editAt: now });
+    next.set(e.sid, { ...old!, color: cursorColor(e.color) || old!.color, editAt: now });
     return next;
   }
   const to = { x: e.x!, y: e.y! };
@@ -96,6 +103,7 @@ export function applyCursor(cursors: ReadonlyMap<string, Cursor>, e: CursorEvent
     sid: e.sid,
     name: e.name ?? old?.name ?? '',
     role: e.role ?? old?.role ?? '',
+    color: cursorColor(e.color) || old?.color || '',
     file: e.file ?? old?.file ?? '',
     from,
     to,

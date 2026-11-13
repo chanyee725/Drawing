@@ -12,6 +12,7 @@ import { effectiveRoles, teamSettings } from "./settings.js";
 import { codexLimits, geminiResetFrom, isQuotaError, SharedLimits } from "./limits.js";
 import { recordState, trimToWindow, WINDOW_MS } from "../../shared/dispatch/timeline.js";
 import { asksUser, attentionOf, checkKey, ctxOver, ctxShare, longOver, mtokens, recordCheck, sessionState, sessionStuck, stuckSig, taskStuck } from "./state.js";
+import { AGENT_COLORS, pickColor } from "./colors.js";
 
 const badRequest = msg => Object.assign(new Error(msg), { status: 400 });
 
@@ -123,6 +124,8 @@ export class Hub extends EventEmitter {
     // Sessions from a previous run have no process. Ones cut off mid-turn are resumed by resumeInterrupted().
     for (const s of Object.values(store.data.sessions)) {
       if (s.status === "running" || s.status === "waiting" || s.status === "starting") { s.status = "idle"; s.interrupted = true; }
+      // Sessions from before cursor colours (E56) get theirs now.
+      if (!AGENT_COLORS.includes(s.color)) s.color = pickColor(this.sessions.map(x => x.color));
     }
   }
 
@@ -493,6 +496,7 @@ export class Hub extends EventEmitter {
         const wd = await prepareWorkdir(this.root, slug, worktree, { shareDeps: this.team().shareDeps });
         const s = {
           id: randomUUID(), n, name: this.pickName(n), role: role.id, roleName: role.name,
+          color: pickColor(this.sessions.map(x => x.color)),
           provider: model.provider, model: model.id, modelLabel: model.label,
           effort: it.effort || null, perm: it.perm || role.perm,
           prompt: it.prompt ?? role.prompt, canSpawn: !!role.canSpawn,

@@ -15,7 +15,8 @@
 /*
  * App chrome tokens: the shadcn/ui default theme, base colour neutral (doc 6 §4.1), so web/src/components/ui/*
  * works unchanged. No hue anywhere except the status colours (--ok, --warn, --bad, --idle, --destructive) and the
- * agent role colours (--role-*), which only the run overlay uses. Our only changes to
+ * agent role colours (--role-*), which only the run overlay uses, and the per-session agent cursor colours
+ * (server/dispatch/colors.js). Our only changes to
  * the defaults: light --muted-foreground is oklch(0.5 0 0) for contrast (doc 6 §5), light --ring is 0.556 so
  * focus indicators keep 3:1 (#131), and dark --sidebar-primary is neutral instead of blue. Focus rings use
  * --primary (lib/focus.ts). The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
@@ -408,20 +409,16 @@ body {
 .run-motion:hover { color: var(--foreground); background: var(--accent); }
 .run-motion:focus-visible { color: var(--foreground); outline: 2px solid var(--primary); outline-offset: 2px; }
 
-/* Live agent cursor (E56): pointer + name tag in the session's role colour. Placed with `translate` from JS (one
-   animation-frame loop, web/src/canvas/AgentCursors.tsx); fading is an opacity transition, kept under reduced motion. */
-.agent-cursor { --agent: var(--idle); position: absolute; left: -1px; top: -1px; color: var(--agent); transition: opacity 0.4s ease-out; }
-.agent-cursor[data-role='lead'] { --agent: var(--role-lead); }
-.agent-cursor[data-role='impl'] { --agent: var(--role-impl); }
-.agent-cursor[data-role='review'] { --agent: var(--role-review); }
-.agent-cursor[data-role='test'] { --agent: var(--role-test); }
-.agent-cursor[data-role='design'] { --agent: var(--role-design); }
-.agent-cursor[data-role='docs'] { --agent: var(--role-docs); }
+/* Live agent cursor (E56): pointer + name tag in the session's colour (inline --agent, picked when the session was
+   created from server/dispatch/colors.js; white text on each passes 4.5:1, so one value serves both themes). Placed
+   with `translate` from JS (web/src/canvas/AgentCursors.tsx); fading is an opacity transition, kept under reduced
+   motion. */
+.agent-cursor { --agent: #475569; position: absolute; left: -1px; top: -1px; color: var(--agent); transition: opacity 0.4s ease-out; }
 .agent-cursor[data-phase='fading'], .agent-cursor[data-phase='gone'] { opacity: 0; }
-.agent-cursor-pointer { display: block; fill: currentColor; stroke: var(--background); stroke-width: 1.25; stroke-linejoin: round; }
+.agent-cursor-pointer { display: block; fill: currentColor; stroke: #fff; stroke-width: 1.25; stroke-linejoin: round; }
 .agent-cursor-tag {
   position: absolute; left: 13px; top: 15px; display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
-  padding: 1px 7px; border-radius: 6px; background: var(--agent); color: var(--background);
+  padding: 1px 7px; border-radius: 6px; background: var(--agent); color: #fff;
   font: 600 12px/16px var(--font-sans); box-shadow: var(--shadow-pop);
 }
 .agent-cursor-dots { display: none; gap: 2px; }

@@ -74,3 +74,15 @@ test('toScreen follows Excalidraw scroll, zoom and offset', () => {
   const st = { scrollX: 10, scrollY: -20, zoom: { value: 2 }, offsetLeft: 100, offsetTop: 50 };
   assert.deepEqual(toScreen({ x: 0, y: 20 }, st, { left: 100, top: 40 }), { x: 20, y: 10 });
 });
+
+test('the session colour rides on the cursor; only #rrggbb is taken, and a later event without one keeps it (#249)', () => {
+  let m = applyCursor(new Map(), ev(0, 0, { color: '#0f766e' }), 0, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  m = applyCursor(m, ev(10, 0), 10, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  m = applyCursor(m, ev(undefined, undefined), 20, false);
+  assert.equal(m.get('s1')!.color, '#0f766e');
+  for (const bad of ['red', '#fff', 'url(x)', '#0f766e; x: y', 7]) {
+    assert.equal(applyCursor(new Map(), ev(0, 0, { color: bad }), 0, false).get('s1')!.color, '', String(bad));
+  }
+});
