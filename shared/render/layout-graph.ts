@@ -12,7 +12,7 @@ import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
 import { routeEdges, straightPorts } from './layout-routes.ts';
-import { ROUTE_GAP, routeAround } from './route-around.ts';
+import { ROUTE_GAP, alongLine, routeAround } from './route-around.ts';
 import type { Point, Scene, SceneBadge, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -1378,11 +1378,23 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     }
     return false;
   };
-  /** Routes found by detour, by unordered pair: a parallel edge keeps off them. */
-  const routedPairs = new Map<string, Point[][]>();
+  /** Whether an orthogonal `points` runs along one of `lines` (crossing is fine). */
+  const runsAlong = (points: Point[], lines: Point[][]): boolean => points.some((q, k) => k > 0 && alongLine(lines, points[k - 1]!, q));
+  /**
+   * Routes already known when an edge is rerouted: those drawn so far, and the base routes of edges not
+   * drawn yet whose ends did not move. A reroute keeps off them (never along them).
+   */
+  const knownLines = (id: string): Point[][] => {
+    const out = new Map<string, Point[]>();
+    for (const o of base.edges) if (isZero(deltaOf(o.edge.from)) && isZero(deltaOf(o.edge.to))) out.set(o.edge.id, o.points);
+    for (const o of edgeItems) out.set(o.id, o.points);
+    out.delete(id);
+    return [...out.values()];
+  };
   /**
    * A route around the other nodes for an edge whose rerouted elbow cuts one (#255): first near its two
-   * ends, then across the whole picture. Undefined when there is none (the elbow stays).
+   * ends, then across the whole picture, kept off `lines`; last, allowed along them. Undefined when there
+   * is none (the elbow stays).
    */
   const detour = (from: string, to: string, lines: Point[][]): Point[] | undefined => {
     const a = rects.get(from)!;
@@ -1397,8 +1409,23 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     const meets = (r: Rect, o: Rect): boolean => r.x < o.x + o.w && o.x < r.x + r.w && r.y < o.y + o.h && o.y < r.y + r.h;
     const near = growRect(span([a, b]), 4 * ROUTE_GAP);
     const all = growRect(span([...rects.values()]), 4 * ROUTE_GAP);
-    for (const bounds of [near, all]) {
-      const route = routeAround(a, b, blocks.filter((r) => meets(r, bounds)), bands.filter((r) => meets(r, bounds)), bounds, lines);
+    const box = (line: Point[]): Rect => {
+      let x0 = Infinity;
+      let y0 = Infinity;
+      let x1 = -Infinity;
+      let y1 = -Infinity;
+      for (const p of line) {
+        x0 = Math.min(x0, p.x);
+        y0 = Math.min(y0, p.y);
+        x1 = Math.max(x1, p.x);
+        y1 = Math.max(y1, p.y);
+      }
+      return { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    };
+    const boxes = lines.map(box);
+    for (const [bounds, keepOff] of [[near, true], [all, true], [all, false]] as const) {
+      const along = keepOff ? lines.filter((_, k) => meets(boxes[k]!, bounds)) : [];
+      const route = routeAround(a, b, blocks.filter((r) => meets(r, bounds)), bands.filter((r) => meets(r, bounds)), bounds, along);
       if (route) return route.map((p) => ({ x: round(p.x), y: round(p.y) }));
     }
     return undefined;
@@ -1439,12 +1466,9 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
           const horizontal = Math.abs(b.x + b.w / 2 - a.x - a.w / 2) >= Math.abs(b.y + b.h / 2 - a.y - a.h / 2);
           const room = horizontal ? b.y >= a.y + a.h + 2 * ROUTE_GAP || a.y >= b.y + b.h + 2 * ROUTE_GAP : b.x >= a.x + a.w + 2 * ROUTE_GAP || a.x >= b.x + b.w + 2 * ROUTE_GAP;
           const flipped = room ? routeElbow(a, b, offset, true) : undefined;
-          const pair = [e.from, e.to].sort().join('\u0000');
-          const around = flipped && !cutsOthers(flipped, e.from, e.to) ? flipped : detour(e.from, e.to, routedPairs.get(pair) ?? []);
-          if (around) {
-            points = around;
-            routedPairs.set(pair, [...(routedPairs.get(pair) ?? []), around]);
-          }
+          const lines = knownLines(e.id);
+          const around = flipped && !cutsOthers(flipped, e.from, e.to) && !runsAlong(flipped, lines) ? flipped : detour(e.from, e.to, lines);
+          if (around) points = around;
         }
       }
       if (points.length >= 2 && e.from !== e.to) {

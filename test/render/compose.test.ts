@@ -152,8 +152,21 @@ test('compose: a dragged elbow edge goes around the nodes its elbow would cut (#
   const c = baseCentre(base, 'C');
   const b = baseCentre(base, 'B');
   // A dropped right of C on its row (its elbow to B runs through C), below B, and just off C's row.
+  /** Length two segments share on one line (both horizontal or both vertical, within a pixel). */
+  const shared = (p: Point, q: Point, r: Point, t: Point): number => {
+    const flat = p.y === q.y && r.y === t.y;
+    if (flat ? Math.abs(p.y - r.y) > 1 : !(p.x === q.x && r.x === t.x && Math.abs(p.x - r.x) <= 1)) return 0;
+    const [lo, hi, lo2, hi2] = flat ? [p.x, q.x, r.x, t.x] : [p.y, q.y, r.y, t.y];
+    return Math.min(Math.max(lo, hi), Math.max(lo2, hi2)) - Math.max(Math.min(lo, hi), Math.min(lo2, hi2));
+  };
   for (const at of [{ x: c.x + 260, y: c.y }, { x: b.x, y: b.y + 220 }, { x: c.x + 260, y: c.y + 8 }]) {
     const scene = composeGraph(d, base, layoutOf({ A: { cx: at.x, cy: at.y, parent: '' } }));
+    // The rerouted A > B keeps off B > C, whose ends did not move.
+    const ab = edgeBetween(d, scene, 'A', 'B').points;
+    const bc = edgeBetween(d, scene, 'B', 'C').points;
+    for (let k = 1; k < ab.length; k++) {
+      for (let m = 1; m < bc.length; m++) assert.ok(shared(ab[k - 1]!, ab[k]!, bc[m - 1]!, bc[m]!) <= 1, `A at ${JSON.stringify(at)}: A>B runs along B>C: ${JSON.stringify([ab, bc])}`);
+    }
     for (const e of edges(scene)) {
       assert.ok(orthogonal(e.points), `${e.from}>${e.to} orthogonal`);
       assert.ok(onBorder(e.points[0]!, handle(scene, e.from)), `${e.from}>${e.to} starts on ${e.from}`);

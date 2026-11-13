@@ -48,7 +48,7 @@ function ports(r: Rect): Port[] {
 }
 
 /** Whether the axis-aligned move p-q runs along (not across) one of `lines` for more than a pixel. */
-function alongLine(lines: readonly Point[][], p: Point, q: Point): boolean {
+export function alongLine(lines: readonly Point[][], p: Point, q: Point): boolean {
   const flat = p.y === q.y;
   const lo = flat ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
   const hi = flat ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
