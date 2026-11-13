@@ -369,8 +369,10 @@ export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
     CLEAN_BOLD_TEXT.test(body) ? CLEAN_BOLD_FONT_FACE : '',
   ].join('');
   const style = faces ? `<style>${faces}</style>` : '';
+  // `geometricPrecision`: glyphs keep their true advances at any size. Without it a picture drawn small (the canvas
+  // zoomed out) has each advance rounded to a whole pixel, which opens gaps inside words ("identi fied") (E63).
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.width}" height="${scene.height}" viewBox="0 0 ${scene.width} ${scene.height}" ` +
-    `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`
+    `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" text-rendering="geometricPrecision" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`
   );
 }

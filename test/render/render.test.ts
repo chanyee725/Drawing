@@ -418,3 +418,11 @@ test('arrows, dashes and math signs are measured near their real width in the cl
     assert.ok(w >= em * 100 * 0.95 && w <= em * 100 * 1.05, `${ch} measured ${w}, real ${em * 100}`);
   }
 });
+
+test('every diagram type asks for true glyph advances, so text drawn small has no gaps inside words (E63)', async () => {
+  for (const name of FIXTURES) {
+    const { svg, scene } = await renderDiagram(fixture(name));
+    assert.match(svg.slice(0, svg.indexOf('>')), /\stext-rendering="geometricPrecision"/, name);
+    assert.match(sceneToSvg(scene, { theme: 'dark' }).slice(0, 400), /\stext-rendering="geometricPrecision"/, `${name} dark`);
+  }
+});
