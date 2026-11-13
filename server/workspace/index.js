@@ -41,8 +41,17 @@ function toStoreError(err) {
 
 export async function setup(ctx) {
   if (!ctx.workspaceDir) return {};
+  // In-process listeners for content changes of a file (API saves, plan patches, outside edits); the live agent
+  // cursor (server/cursor/) diffs them. SSE clients still get only what they got before.
+  const changeListeners = new Set();
+  const changed = (path) => {
+    for (const fn of changeListeners) fn(path);
+  };
   const store = createStore(ctx.workspaceDir, {
-    onExternalChange: (e) => ctx.hub.broadcast('workspace', e),
+    onExternalChange: (e) => {
+      ctx.hub.broadcast('workspace', e);
+      if (e.kind === 'change' || e.kind === 'create') changed(e.path);
+    },
   });
   await store.startWatching();
 
@@ -73,6 +82,11 @@ export async function setup(ctx) {
 
   return {
     store,
+    /** fn(path) on each content change of a file; returns an unsubscribe function. */
+    onChange(fn) {
+      changeListeners.add(fn);
+      return () => changeListeners.delete(fn);
+    },
     close: () => store.close(),
     routes: [
       route('GET', '/api/tree', async () => ({ tree: await store.tree() })),
@@ -98,13 +112,18 @@ export async function setup(ctx) {
         return { on: b.on };
       }),
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
-      route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
+      route('PUT', '/api/file', async (p, b) => {
+        const r = await store.writeFile(need(p, 'path'), b);
+        changed(r.path);
+        return r;
+      }),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
       // Step-level plan edit (agents): re-read under the store lock, then announced like an outside change so an
       // open, clean tab reloads and a dirty one gets the 409 choice on its next save.
       route('PATCH', '/api/file/plan', async (p, b) => {
         const r = await store.patchPlan(need(p, 'path'), b);
         ctx.hub.broadcast('workspace', { kind: 'change', path: r.path, revision: r.revision });
+        changed(r.path);
         return r;
       }),
       // withSubdocs=1: the document's sub-documents folder goes to the trash with it.

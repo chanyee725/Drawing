@@ -168,6 +168,28 @@ export function resolvePaint(paint: Paint, theme: Theme, soft = false, shadow = 
   if (soft) return { fill: rgba(stroke, theme === 'light' ? 0.08 : 0.1), stroke, text: t.text };
   return { fill: paint.mode === 'bold' ? mix(stroke, t.background, 0.3) : pastelOf(paint.color, theme), stroke, text: t.text };
 }
+/** WCAG contrast ratio of two `#rrggbb` colours. */
+const ratioOf = (a: string, b: string): number => {
+  const [x, y] = [luminance(a), luminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+};
+
+/**
+ * Badge chip colours (§2.1, §2.3: the same solid fill in both themes). A palette name fills with its light
+ * border shade (Eraser's `#444CE7`, `#D92D20`, ...) and white text; when white would read under 4.5:1 on it
+ * (orange, green, blue, gray), the palette's darker text shade fills instead. A hex fills as written, with
+ * white or dark text, whichever reads better. No colour: indigo.
+ */
+export function badgeColors(color: string | undefined): { fill: string; text: string } {
+  const named = namedOf(color ?? 'indigo');
+  if (named) {
+    const [, border, strong] = named.light;
+    return { fill: ratioOf(border, '#ffffff') >= 4.5 ? border : strong, text: '#ffffff' };
+  }
+  const hex = color!.length === 4 ? toHex(hexToRgb(color!)) : color!;
+  return { fill: hex, text: contrastText(hex) };
+}
+
 /**
  * Muted text (a subtitle) on `fill`: `muted` itself when it reads at 4.5:1 or better, otherwise moved toward
  * `text` in 10% steps until it does. Pale tinted fills need a slightly darker grey than white does.

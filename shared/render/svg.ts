@@ -5,10 +5,11 @@
 
 import { round } from './common.ts';
 import { iconFor } from './icons.ts';
-import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
+import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
+import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
 import { FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
-import { THEMES, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
+import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
 export interface SvgOptions {
@@ -286,7 +287,17 @@ function edgeMarkup(e: SceneEdge, { theme, t, c }: Ctx, mask: string): string {
 
 function lineMarkup(l: SceneLine, { t, c }: Ctx): string {
   const dash = l.dashed ? DASH : '';
-  return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${SOFT_W}"${dash}/>`;
+  return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
+}
+
+/** A solid pill with its text centred (shared/render/badge.ts): the same fill and white text in both themes (§2.3). */
+function badgeMarkup(b: SceneBadge, { c }: Ctx): string {
+  const { fill, text } = badgeColors(b.color);
+  const ty = b.y + b.h / 2 + BADGE_FONT_SIZE * 0.35;
+  return (
+    `<g data-badge="${esc(b.of)}"><rect x="${n(b.x)}" y="${n(b.y)}" width="${n(b.w)}" height="${n(b.h)}" rx="${n(b.h / 2)}" fill="${c(fill)}"/>` +
+    `<text x="${n(b.x + b.w / 2)}" y="${n(ty)}" font-size="${BADGE_FONT_SIZE}" font-weight="${BADGE_FONT_WEIGHT}" fill="${c(text)}" text-anchor="middle" xml:space="preserve">${esc(b.text)}</text></g>`
+  );
 }
 
 function itemMarkup(it: SceneItem, ctx: Ctx, mask: string): string {
@@ -301,6 +312,8 @@ function itemMarkup(it: SceneItem, ctx: Ctx, mask: string): string {
       return edgeMarkup(it, ctx, mask);
     case 'line':
       return lineMarkup(it, ctx);
+    case 'badge':
+      return badgeMarkup(it, ctx);
   }
 }
 

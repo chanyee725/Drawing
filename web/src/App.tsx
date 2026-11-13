@@ -19,6 +19,8 @@ import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
 import { RunStrip } from './run/RunStrip';
 import { onRunEvent, reloadRun, watchRun } from './run/runData';
+import { applyCursorEvent, clearCursors } from './canvas/cursorStore';
+import type { CursorEvent } from './canvas/agentCursor';
 import type { RunEvent } from './run/runModel';
 // The run view (E22) loads when it is first shown.
 const RunView = lazy(() => import('./run/RunView'));
@@ -51,6 +53,7 @@ import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { COPY_IMAGE_SHORTCUT, EXPORT_MENU_QUERY, IS_MAC } from './platform';
 import { PlanStrip } from './run/PlanStrip';
+import { events } from './lib/events';
 
 const NARROW = '(max-width: 767px)';
 
@@ -405,15 +408,7 @@ export function App() {
 
   // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    const es = new EventSource('/api/events');
-    es.addEventListener('workspace', (m) => {
-      let e: WorkspaceEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
-      } catch {
-        return;
-      }
+    const offWorkspace = events.subscribeJson<WorkspaceEvent>('workspace', (e) => {
       // This tab's own move already renames the open file; the echo must not close it.
       if (e.kind === 'tree' && e.from !== undefined && ownMoves.current.delete(e.from)) {
         void refreshTree();
@@ -427,19 +422,26 @@ export function App() {
       void refreshTree();
     });
     // Runs of the open file; a run starting or ending also changes its tree badge.
-    es.addEventListener('run', (m) => {
-      let e: RunEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as RunEvent;
-      } catch {
-        return;
-      }
+    const offRun = events.subscribeJson<RunEvent>('run', (e) => {
       onRunEvent(e);
       if (e.run) void refreshTree();
+      // A run that ended: no agent is editing its file any more.
+      if (e.run?.endedAt) clearCursors(e.file);
     });
-    // Events missed while the stream was down: read the run again.
-    es.onopen = () => void reloadRun();
-    return () => es.close();
+    // Live agent cursors (E56): where an agent session is editing a diagram. A malformed event moves nothing.
+    const offCursor = events.subscribeJson<CursorEvent>('cursor', applyCursorEvent);
+    // Events missed while the stream was down: read the run again. Cursors from before the gap are stale.
+    const offOpen = events.onConnection((online) => {
+      if (!online) return;
+      clearCursors();
+      void reloadRun();
+    });
+    return () => {
+      offWorkspace();
+      offRun();
+      offCursor();
+      offOpen();
+    };
   }, [session, load, refreshTree]);
 
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
@@ -588,6 +590,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      // A native modal <dialog> (settings) owns the keyboard: no palette, G P or export behind it.
+      if (document.querySelector('dialog:modal')) return;
       // Mac uses only Cmd, everything else only Ctrl, so Mac's Ctrl+E/K stay with text fields.
       const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       const k = e.code;
@@ -676,7 +680,8 @@ export function App() {
       { id: 'settings-models', title: '모델 연결 열기', icon: Plug, keywords: ['models', 'connect', 'login', 'claude', 'codex', 'gemini', '모델', '연결', '로그인'], run: () => openSettings('models') },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
       { id: 'view-doc', title: '보기: 문서', group: 'view', icon: PanelLeft, run: () => setView('doc'), keywords: ['view', '보기'] },
-      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, run: () => setView('both'), keywords: ['view', '보기'] },
+      // A narrow screen fits one pane (the header has no 둘 다 there either).
+      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, disabled: narrow, hint: narrow ? '넓은 화면에서' : undefined, run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', group: 'view', icon: PanelRight, run: () => setView('canvas'), keywords: ['view', '보기'] },
       { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', group: 'view', icon: theme === 'dark' ? Sun : Moon, run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
       canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구'], MousePointer2),
@@ -856,7 +861,8 @@ export function App() {
               onProject={goProject}
               onOpen={openFile}
               onCreate={(k, project) => void newFile(project, k)}
-              onDelete={(p, t) => void remove({ type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
+              // The projects view has the document's sub-documents, so the confirm can say they go too.
+              onDelete={(p, t) => void remove(docPlace(projects, p).node ?? { type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
             />
           ) : (
             <>

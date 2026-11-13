@@ -134,6 +134,10 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   busy = true;
   await dialog.getByRole('button', { name: '다시 확인' }).click();
   await gemini.getByRole('button', { name: 'Gemini 취소' }).waitFor();
+  // 다시 확인 starts polling again while the login runs (#228 review).
+  polls = 0;
+  await page.waitForTimeout(2500);
+  assert.ok(polls >= 1, `polling restarted after 다시 확인: ${polls}`);
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'detached' });
   for (let i = 0; i < 50 && !posts.includes('/api/providers/gemini/cancel'); i++) await page.waitForTimeout(50);
@@ -186,11 +190,25 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   assert.equal(await current(), '일반');
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'detached' });
+  // Opened from the command menu (gone by now): focus lands on the 설정 row, not on <body> (#242).
+  assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-settings-trigger')), true);
   await page.locator('body').click({ position: { x: 600, y: 400 } });
   await page.keyboard.press('Comma');
   await dialog.waitFor();
   // "," typed inside the dialog does not reopen or close anything.
   await page.keyboard.press('Comma');
+  assert.equal(await dialog.count(), 1);
+  // Ctrl+K and G P stay quiet behind the open dialog (#228 review).
+  await page.keyboard.press('Control+k');
+  await page.keyboard.press('g');
+  await page.keyboard.press('p');
+  await page.waitForTimeout(200);
+  assert.equal(await page.getByRole('combobox', { name: '명령 찾기' }).count(), 0, 'no command menu over the settings dialog');
+  assert.equal(await dialog.count(), 1);
+  // The dashboard's create keys stay quiet too: the native <dialog> has no role attribute (#242).
+  for (const k of ['d', 'c', 'p', '/']) await page.keyboard.press(k);
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('main[data-screen="dashboard"]').count(), 1, 'no new file behind the settings dialog');
   assert.equal(await dialog.count(), 1);
 
   // 6. 390px: dialog fits, section and action targets are at least 44px tall.
@@ -217,6 +235,10 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   await dialog.waitFor();
   assert.equal(await current(), '모델 연결');
   await drawer.waitFor({ state: 'detached' });
+  // The opener went away with the drawer: closing returns focus to the menu button, not <body> (#230 review).
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('aria-label')), '메뉴 열기', await page.evaluate(() => document.activeElement?.outerHTML.slice(0, 300)));
 
   // Only fakes ran, and none of them was asked to log out of the CLI itself.
   assert.ok(fake.calls().every((c) => !(c.bin === 'claude' && c.args.join(' ') === 'auth logout')));

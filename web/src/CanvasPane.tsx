@@ -44,7 +44,7 @@ export function CanvasPane({ fileKey, canvas, blocks, focus, dark, onChange, han
           </p>
         }
       >
-        <ExcalidrawCanvas key={fileKey} canvas={asCanvas(canvas)} blocks={blocks} focus={focus} dark={dark} onChange={onChange} handle={handle} />
+        <ExcalidrawCanvas key={fileKey} path={fileKey.slice(0, fileKey.lastIndexOf('#'))} canvas={asCanvas(canvas)} blocks={blocks} focus={focus} dark={dark} onChange={onChange} handle={handle} />
       </Suspense>
       </LazyBoundary>
     </main>

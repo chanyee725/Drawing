@@ -4,6 +4,7 @@
 // The same component draws on the canvas (RunOverlay) and in the document's diagram embed (DiagramView).
 import { useMemo } from 'react';
 import type { Scene } from '../../../shared/render/index.ts';
+import { badgeRect } from '../../../shared/render/badge.ts';
 import { overlayModel, pathData, type OverlayNode, type RunStep } from './overlayModel';
 import { setStill, useStill } from './runStore';
 
@@ -62,12 +63,14 @@ function Step({ n, labels }: { n: OverlayNode; labels: boolean }) {
   const tw = textWidth(text) + 12;
   const cx = x + w / 2;
   const ly = y + h + PAD + 4;
+  // The same chip as a diagram node's `badge:` (shared/render/badge.ts), drawn as an outline in the step colour.
+  const chip = badgeRect(x + w + PAD, y - PAD, textWidth(n.glyph));
   return (
     <g role="img" aria-label={n.label} data-step={n.step} data-view={n.view} style={{ color: n.color }}>
       <rect className={`run-ring${n.live ? ' is-live' : ''}`} data-view={n.view} x={x - PAD} y={y - PAD} width={w + PAD * 2} height={h + PAD * 2} rx={10} />
       <g className="run-corner" aria-hidden="true">
-        <circle cx={x + w + PAD} cy={y - PAD} r={9} />
-        <text x={x + w + PAD} y={y - PAD} textAnchor="middle" dominantBaseline="central">
+        <rect x={chip.x} y={chip.y} width={chip.w} height={chip.h} rx={chip.h / 2} />
+        <text x={chip.x + chip.w / 2} y={chip.y + chip.h / 2} textAnchor="middle" dominantBaseline="central">
           {n.glyph}
         </text>
       </g>

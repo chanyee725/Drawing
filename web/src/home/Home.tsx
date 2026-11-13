@@ -1,15 +1,16 @@
 // Dashboard ("모든 파일") and project home: data loading, tabs, quick-create chips. Layout B of
 // docs/design/dispatch-integration/6-app-shell-projects.md §3.1. Built from shadcn Tabs / Button / DropdownMenu.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, FilePlus2, FileText, Folder, FolderClosed, Layers, Menu, PenTool, Plus, Search, Workflow } from 'lucide-react';
 import { projectsApi, type ProjectDoc, type ProjectInfo, type ProjectsResponse } from '../api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { SidebarTrigger } from '../components/ui/sidebar';
 import { Kbd } from '../components/ui/kbd';
+import { cn } from '../lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ColumnHead, DocList, FileList } from './DocList';
-import { CHORD_MS, RECENT_LIMIT, allDocs, badgeOf, chord, filterDocs, flatFiles, flattenRows, matchesQuery, relativeTime, runningIn, type DashTab } from './model';
+import { CHORD_MS, RECENT_LIMIT, allDocs, badgeOf, chord, filterDocs, flatFiles, matchesQuery, pollWhileVisible, relativeTime, runningIn, type DashTab } from './model';
 
 export type CreateKind = 'doc' | 'canvas' | 'plan' | 'template';
 export type HomeProps = {
@@ -46,22 +47,24 @@ function useProjects(version: unknown) {
   return { data, failed };
 }
 
-/** Files with a run going now. Refetched with the list and every 10s (a run starting does not change the tree). */
+/**
+ * Files with a run going now. Refetched with the list and every 10s while the page is visible (a run starting does
+ * not change the tree); a hidden page stops polling and catches up as soon as it shows again.
+ */
 const RUNNING_POLL_MS = 10_000;
 function useRunning(version: unknown) {
   const [files, setFiles] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     let live = true;
     const load = () =>
-      projectsApi
+      void projectsApi
         .running()
         .then((f) => live && setFiles((old) => (old.size === f.length && f.every((x) => old.has(x)) ? old : new Set(f))))
         .catch(() => {});
-    void load();
-    const timer = setInterval(() => document.visibilityState === 'visible' && void load(), RUNNING_POLL_MS);
+    const stop = pollWhileVisible(load, RUNNING_POLL_MS);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [version]);
   return files;
@@ -80,8 +83,10 @@ function useCreateKeys(on: boolean, run: (k: CreateKind) => void, focusSearch: (
     if (!on) return;
     const h = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      // A native modal <dialog> (settings) has no role attribute but owns the keyboard: nothing is created behind it.
+      if (document.querySelector('dialog:modal')) return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.closest('input, textarea, select, [contenteditable], [role=dialog], [role=menu]') || t.isContentEditable)) return;
+      if (t && (t.closest('input, textarea, select, [contenteditable], dialog, [role=dialog], [role=menu]') || t.isContentEditable)) return;
       const key = e.key.toLowerCase();
       if (key === 'p' && Date.now() - chord.g < CHORD_MS) return; // G P belongs to the project menu
       if (key === '/') {
@@ -196,10 +201,11 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
   const [tab, setTab] = useState<DashTab>('projects');
   const { collapsed, toggle } = useCollapse();
   const files = useMemo(() => flatFiles(data.projects, data.unfiled), [data]);
-  const empty = files.length === 0;
+  // Projects without documents still get the 프로젝트별 tab (their groups and + buttons); only a bare workspace is empty.
+  const empty = files.length === 0 && data.projects.length === 0;
   const found = files.filter((f) => matchesQuery(f.title, query));
-  const noMatch = <Empty>맞는 파일이 없어요</Empty>;
-  const tree = (docs: ProjectDoc[], label: string) => <DocList rows={flattenRows(filterDocs(docs, query), collapsed)} label={label} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />;
+  const noMatch = <Empty>{query.trim() || files.length > 0 ? '맞는 파일이 없어요' : '아직 파일이 없어요. 위에서 새 문서를 만들어 보세요.'}</Empty>;
+  const tree = (docs: ProjectDoc[], label: string) => <DocList docs={filterDocs(docs, query)} collapsed={collapsed} label={label} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />;
   const unfiled = () => {
     const shown = filterDocs(data.unfiled, query);
     return shown.length > 0 && (
@@ -240,16 +246,18 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
             key={kind}
             variant="outline"
             size="sm"
-            disabled={soon}
-            title={soon ? '준비 중이에요' : `새 ${label} (${key})`}
+            // Not `disabled`: aria-disabled keeps the chip focusable so keyboard and screen reader users meet
+            // "준비 중" too; the click is ignored instead (#216 review).
+            aria-disabled={soon || undefined}
+            title={soon ? undefined : `새 ${label} (${key})`}
             aria-keyshortcuts={soon ? undefined : key}
             data-create={kind}
-            onClick={() => p.onCreate(kind, null)}
-            className="shrink-0 border-dashed font-medium text-muted-foreground hover:border-solid hover:text-foreground"
+            onClick={() => !soon && p.onCreate(kind, null)}
+            className={cn('shrink-0 border-dashed font-medium text-muted-foreground', soon ? 'cursor-default opacity-60' : 'hover:border-solid hover:text-foreground')}
           >
             {/* The row reads "새로 만들기", so the chip shows only the kind; the name keeps "새 …" (visible text stays inside it). */}
             <Icon /> <span className="sr-only">새 </span>
-            {label} <Kbd>{key}</Kbd>
+            {label} {soon ? <span className="text-xs">준비 중</span> : <Kbd>{key}</Kbd>}
           </Button>
         ))}
       </div>
@@ -300,13 +308,14 @@ type PTab = 'docs' | 'pipelines' | 'overview';
 
 /** Project head (layout B): icon badge, title, description, then 문서 수 · 실행 중 · 폴더. */
 function ProjectHeader({ project, running }: { project: ProjectInfo; running: number }) {
+  const titleId = useId();
   return (
-    <section aria-labelledby="project-title" className="flex items-start gap-4 border-b px-4 pt-6 pb-4 max-sm:pt-4">
+    <section aria-labelledby={titleId} className="flex items-start gap-4 border-b px-4 pt-6 pb-4 max-sm:pt-4">
       <span aria-hidden className="grid size-[39px] shrink-0 place-items-center rounded-xl bg-muted text-[17px] font-bold text-foreground">
         {project.icon}
       </span>
       <div className="min-w-0">
-        <h1 id="project-title" className="m-0 truncate text-[22px] leading-[30px] font-semibold">{project.name}</h1>
+        <h1 id={titleId} className="m-0 truncate text-[22px] leading-[30px] font-semibold">{project.name}</h1>
         {project.description && <p className="mt-1 mb-0 text-sm text-muted-foreground">{project.description}</p>}
         <ul aria-label="프로젝트 정보" className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[13px] text-muted-foreground">
           <li className="inline-flex items-center gap-1.5 tabular-nums">
@@ -339,7 +348,7 @@ function ProjectHeader({ project, running }: { project: ProjectInfo; running: nu
 function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & { info: ProjectInfo }) {
   const [tab, setTab] = useState<PTab>('docs');
   const { collapsed, toggle } = useCollapse();
-  const rows = flattenRows(filterDocs(project.docs, query), collapsed);
+  const docs = filterDocs(project.docs, query);
   return (
     <Tabs value={tab} onValueChange={(v) => setTab(v as PTab)} className="gap-0">
       <header className="flex min-h-12 flex-wrap items-center gap-3 border-b px-4 py-2">
@@ -374,12 +383,12 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
               <FilePlus2 className="mx-auto mb-2 size-5" aria-hidden />
               이 프로젝트에는 아직 문서가 없어요. 새 문서를 만들어 보세요.
             </Empty>
-          ) : rows.length === 0 ? (
+          ) : docs.length === 0 ? (
             <Empty>맞는 문서가 없어요</Empty>
           ) : (
             <>
               <ColumnHead />
-              <DocList rows={rows} label={`${project.name} 문서`} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />
+              <DocList docs={docs} collapsed={collapsed} label={`${project.name} 문서`} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />
             </>
           )}
         </TabsContent>

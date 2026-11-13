@@ -156,7 +156,8 @@ function SidebarMenuAction({ className, showOnHover = false, ...props }: React.C
         'absolute top-[3px] right-1 flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none max-md:top-0 max-md:size-11 [&>svg]:size-[15px]',
         C.hover,
         FOCUS_RING,
-        showOnHover && 'md:opacity-0 md:group-hover/menu-item:opacity-100 md:group-focus-within/menu-item:opacity-100 md:data-[state=open]:opacity-100',
+        // Hidden until the row is hovered or focused, only where a pointer can hover (touch screens always show it).
+        showOnHover && 'md:pointer-fine:opacity-0 md:pointer-fine:group-hover/menu-item:opacity-100 md:pointer-fine:group-focus-within/menu-item:opacity-100 md:pointer-fine:data-[state=open]:opacity-100',
         className,
       )}
       {...props}
