@@ -3,9 +3,11 @@
 // §2-3 and 4-operations-and-rules.md G2.
 //
 // Approval state lives in the Dispatch state file as metadata only:
-//   store.data.pipelines[path] = { lead, state: 'plan' | 'running', draftRevision, approvedRevision, approvedAt,
-//                                  runId, steps, links }
-// `steps` is the approved step ids and `links` maps a session id to its step. The lead's draft plan (for the
+//   store.data.pipelines[path] = { lead, state: 'plan' | 'running' | 'paused', draftRevision, approvedRevision,
+//                                  approvedAt, runId, steps, links, pause?, carry? }
+// `steps` is the approved step ids and `links` maps a session id to its step. E27: `pause` is { by: 'limit' |
+// 'stop', at, resetAt? } while paused; `carry` is { from: runId, steps: [ids] } after 계획 다시 열기, the steps the
+// stopped run finished, so the next 시작하기 marks them done instead of running them again. The lead's draft plan (for the
 // "바뀐 점" list) is kept in memory only, so after a restart the list is empty.
 import { StoreError } from '../workspace/store.js';
 import { FILE_EXT } from '../workspace/model.js';
@@ -80,14 +82,24 @@ export async function setup(ctx) {
   };
   const leadEntries = (lead, state) =>
     Object.entries(entries() ?? {})
-      .filter(([, e]) => e.lead === lead && (!state || e.state === state))
+      .filter(([, e]) => e.lead === lead && (!state || (Array.isArray(state) ? state.includes(e.state) : e.state === state)))
       .sort((a, b) => (b[1].approvedAt ?? 0) - (a[1].approvedAt ?? 0));
 
   // ---- hub hooks ----
   const d0 = dispatch();
   if (d0) {
     const hub = d0.hub;
-    hub.createGate = (parent) => (leadEntries(parent, 'plan').length ? '계획 승인 전이에요. 사용자가 시작하기를 누르면 [계획 승인] 메시지가 와요' : null);
+    hub.createGate = (parent) => {
+      if (leadEntries(parent, 'plan').length) return '계획 승인 전이에요. 사용자가 시작하기를 누르면 [계획 승인] 메시지가 와요';
+      if (leadEntries(parent, 'paused').length && !leadEntries(parent, 'running').length) return '계획이 멈춰 있어요. 이어서 하기를 기다려 주세요';
+      return null;
+    };
+    hub.holdTeam = (lead) => leadEntries(lead, 'paused').some(([, e]) => e.pause?.by === 'stop');
+    hub.ticketNote = (lead) =>
+      leadEntries(lead, 'paused')
+        .filter(([, e]) => e.pause?.by === 'limit')
+        .map(([path, e]) => `[계획 이어서 하기 · rev ${e.approvedRevision}] ${path}\n끝나지 않은 단계: ${openSteps(e).join(', ') || '(없음)'}`)
+        .join('\n');
     hub.taskStepCheck = (lead, step) => {
       const running = leadEntries(lead, 'running');
       if (!running.length) return '실행 중인 계획이 없어요';
@@ -97,7 +109,7 @@ export async function setup(ctx) {
     // Session metadata goes to the run record of its lead's running plan, under the step its task names.
     const follow = (s) => {
       if (!s?.parent) return;
-      for (const [, e] of leadEntries(s.parent, 'running')) {
+      for (const [, e] of leadEntries(s.parent, ['running', 'paused'])) {
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
@@ -117,8 +129,11 @@ export async function setup(ctx) {
     hub.on('session', follow);
     // A task that names a step and an owner links that owner's session (set_task often comes after create_sessions).
     hub.on('tasks', () => {
-      for (const s of hub.sessions) if (s.parent && leadEntries(s.parent, 'running').length) follow(hub.publicSession(s));
+      for (const s of hub.sessions) if (s.parent && leadEntries(s.parent, ['running', 'paused']).length) follow(hub.publicSession(s));
     });
+    // The usage-limit guard pauses running plans and resumes the ones it paused once the window clears (G1).
+    hub.on('limits', () => syncLimit());
+    hub.on('tickets', () => syncLimit());
   }
 
   // File moves carry the approval state along (a folder move moves every file under it).
@@ -197,7 +212,8 @@ export async function setup(ctx) {
     if (!file) throw new StoreError(404, 'not found');
     const entry = entries()?.[path] ?? null;
     const state = entry?.state ?? (file.plan ? 'plan' : null);
-    const { blockers, sessions } = state === 'running' ? { blockers: [], sessions: 0 } : check(path, file, entry);
+    const { blockers, sessions } =
+      state === 'running' ? { blockers: [], sessions: 0 } : state === 'paused' ? { blockers: resumeBlockers(entry), sessions: 0 } : check(path, file, entry);
     const l = dispatch()?.hub.currentLimits() ?? null;
     return {
       path,
@@ -208,6 +224,7 @@ export async function setup(ctx) {
       approvedRevision: entry?.approvedRevision ?? null,
       approvedAt: entry?.approvedAt ?? null,
       runId: entry?.runId ?? null,
+      pause: state === 'paused' ? (entry.pause ?? null) : null,
       blockers,
       changes: state === 'plan' && entry ? planChanges(drafts.get(path), file.plan) : [],
       sessions,
@@ -242,6 +259,7 @@ export async function setup(ctx) {
       path = own ? own[0] : null;
     }
     const existing = path ? all[path] : null;
+    if (existing?.state === 'paused') throw new StoreError(409, '멈춘 계획이에요. 사용자가 계획 다시 열기를 누르면 고칠 수 있어요');
     if (existing?.state === 'running') throw new StoreError(409, '실행 중인 계획은 바꿀 수 없어요. 바뀐 점은 note_step으로 남겨 주세요');
     if (existing && existing.lead !== lead.id) throw new StoreError(409, '다른 관리자가 쓴 계획이에요');
     const current = path ? await readOrNull(path) : null;
@@ -262,7 +280,7 @@ export async function setup(ctx) {
       path = r.path;
       revision = r.revision;
     }
-    all[path] = { lead: lead.id, state: 'plan', draftRevision: revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} };
+    all[path] = { lead: lead.id, state: 'plan', draftRevision: revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {}, ...(existing?.carry && { carry: existing.carry }) };
     drafts.set(path, built.plan);
     save();
     ctx.hub.broadcast('workspace', { kind: 'change', path, revision });
@@ -284,26 +302,32 @@ export async function setup(ctx) {
     if (!Number.isInteger(body.revision)) throw new StoreError(400, 'revision is required');
     const entry = entries()[path];
     if (entry?.state === 'running') throw new StoreError(409, '이미 실행 중이에요');
+    if (entry?.state === 'paused') throw new StoreError(409, '멈춘 계획이에요. 이어서 하기나 계획 다시 열기를 눌러 주세요');
     const file = await readOrNull(path);
     if (!file) throw new StoreError(404, 'not found');
     if (file.revision !== body.revision) throw new StoreError(409, '계획이 바뀌었어요. 다시 확인해 주세요', { revision: file.revision });
     const { blockers } = check(path, file, entry);
     if (blockers.length) throw new StoreError(409, blockers[0], { blockers });
     const changes = planChanges(drafts.get(path), file.plan);
-    const record = await recorder.startRun({ file: path, plan: file.plan, revision: file.revision });
+    const carry = await carryOf(path, entry);
+    const record = await recorder.startRun({ file: path, plan: file.plan, revision: file.revision, carry });
+    const carried = Object.keys(record.steps).filter((id) => record.steps[id].carried);
+    const prevCarry = entry.carry;
+    delete entry.carry;
     Object.assign(entry, { state: 'running', approvedRevision: file.revision, approvedAt: Date.now(), runId: record.id, steps: Object.keys(record.steps), links: {} });
     save();
     const lines = [
       `[계획 승인 · rev ${file.revision}] ${path}`,
       auto ? '단계 하나짜리 계획이라 바로 시작했다.' : '사용자가 이 계획으로 시작하기를 눌렀다.',
       changes.length ? `바뀐 점(네 초안 이후 사용자가 고친 것):\n${changes.map((c) => `- ${c}`).join('\n')}` : '바뀐 점: 없음',
+      ...(carried.length ? [`지난 실행에서 끝난 단계(다시 하지 마라): ${carried.join(', ')}`] : []),
       `승인된 리비전을 따른다. 단계마다 create_sessions로 팀원을 만들고, set_task에 step(${record && Object.keys(record.steps).join(', ')})과 owner(세션 이름)를 넣는다. 단계에 남길 한 줄은 note_step으로 남긴다.`,
     ];
     try {
       d.hub.send(entry.lead, lines.join('\n'));
     } catch (err) {
       // The lead never heard of it: the run did not really start.
-      Object.assign(entry, { state: 'plan', approvedRevision: null, approvedAt: null, runId: null, steps: [] });
+      Object.assign(entry, { state: 'plan', approvedRevision: null, approvedAt: null, runId: null, steps: [], ...(prevCarry && { carry: prevCarry }) });
       save();
       await recorder.endRun(record.id, 'stopped').catch(() => {});
       throw new StoreError(409, err.message);
@@ -311,6 +335,180 @@ export async function setup(ctx) {
     changed(path);
     return { path, state: 'running', runId: record.id, revision: file.revision, changes };
   }
+
+  // ---- 멈추기 · 이어서 하기 · 계획 다시 열기 (E27) ----
+
+  /** Steps of a running or paused plan the board has not closed yet, in plan order. */
+  function openSteps(e) {
+    const d = dispatch();
+    const done = new Set((d?.hub.tasks ?? []).filter((t) => t.lead === e.lead && t.step && t.stage === 'done').map((t) => t.step));
+    return (e.steps ?? []).filter((id) => !done.has(id));
+  }
+
+  const clock = (t) => {
+    const d = new Date(t);
+    return `${d.getHours()}시 ${String(d.getMinutes()).padStart(2, '0')}분`;
+  };
+
+  /** Why a paused plan cannot continue now (empty when it can). */
+  function resumeBlockers(e) {
+    const d = dispatch();
+    if (!d) return ['Dispatch가 꺼져 있어요'];
+    if (!d.hub.get(e.lead) || d.hub.get(e.lead).status === 'done') return ['계획을 쓴 관리자 세션이 없어요'];
+    const hit = d.hub.limitHit();
+    if (hit) return [`한도에 걸려 있어요 (${hit.reason}).${hit.resetAt ? ` ${clock(hit.resetAt)}에 초기화돼요` : ''}`];
+    return [];
+  }
+
+  const entryAt = (body) => {
+    if (!dispatch()) throw new StoreError(409, 'Dispatch가 꺼져 있어요');
+    if (typeof body?.path !== 'string') throw new StoreError(400, 'path is required');
+    const path = ws.runs.fileRel(body.path);
+    const e = entries()[path];
+    if (!e) throw new StoreError(404, '관리자가 쓴 계획이 아니에요');
+    return [path, e];
+  };
+
+  // The run record may be gone (deleted, or a restart lost a run that never wrote): the plan state still changes.
+  const quietly = (p) => p.catch((err) => {
+    if (!(err instanceof StoreError)) console.error('pipeline run record:', err?.code ?? err?.name);
+    return null;
+  });
+
+  /** Running -> paused. `by`: 'stop' (멈추기) or 'limit' (usage-limit guard, which interrupts sessions itself). */
+  async function pauseEntry(path, e, by, resetAt = null) {
+    e.state = 'paused';
+    e.pause = { by, at: Date.now(), ...(Number.isFinite(resetAt) && resetAt > 0 && { resetAt }) };
+    save();
+    changed(path);
+    if (e.runId) await quietly(recorder.pauseRun(e.runId, { by, resetAt, file: path }));
+  }
+
+  /** The lead and its teammates that are mid-turn, interrupted through their CLI's own control (no shell). */
+  function interruptTeam(lead) {
+    const d = dispatch();
+    if (!d) return;
+    const team = d.hub.sessions.filter((s) => s.id === lead || s.parent === lead);
+    for (const s of team) if (['running', 'starting', 'waiting'].includes(s.status)) d.hub.interrupt(s.id);
+  }
+
+  async function stop(body) {
+    const [path, e] = entryAt(body);
+    if (e.state !== 'running') throw new StoreError(409, e.state === 'paused' ? '이미 멈췄어요' : '실행 중인 계획이 아니에요');
+    // Paused first, so the reports the interrupted teammates hand over are held until 이어서 하기.
+    await pauseEntry(path, e, 'stop');
+    interruptTeam(e.lead);
+    return status(path);
+  }
+
+  /** Paused -> running, and tell the lead which steps are left. */
+  async function resumeEntry(path, e, { auto = false } = {}) {
+    const d = dispatch();
+    const pause = e.pause ?? { by: 'stop', at: 0 };
+    const mine = (t) => t.lead === e.lead;
+    // A limit ticket of this lead already says what to do; its resume message carries this plan's steps through
+    // hub.ticketNote, which reads paused entries, so it goes out before the state flips.
+    const open = pause.by === 'limit' ? d.hub.tickets.find((t) => mine(t) && t.status === 'open') : null;
+    const ticketTold = open ? d.hub.resumeTicket(open.id) : pause.by === 'limit' && d.hub.tickets.some((t) => mine(t) && t.status === 'resumed' && t.updatedAt >= pause.at);
+    e.state = 'running';
+    delete e.pause;
+    save();
+    if (e.runId) await quietly(recorder.resumeRun(path, e.runId));
+    if (!ticketTold) {
+      const why = pause.by === 'limit' ? '한도가 초기화돼서' : '사용자가 이어서 하기를 눌러서';
+      const text = [
+        `[계획 이어서 하기 · rev ${e.approvedRevision}] ${path}`,
+        `${why} 멈췄던 계획을 이어서 진행한다. 브랜치·git log로 상태를 다시 확인하라.`,
+        `끝나지 않은 단계: ${openSteps(e).join(', ') || '(없음)'}`,
+        '멈춘 팀원 세션에는 지시를 보내면 이어진다. 팀원이 정리됐으면 필요한 만큼 다시 만들어라.',
+      ].join('\n');
+      try {
+        d.hub.send(e.lead, text);
+      } catch (err) {
+        if (!auto) {
+          await pauseEntry(path, e, pause.by, pause.resetAt);
+          throw new StoreError(409, err.message);
+        }
+      }
+    }
+    // Reports held while stopped go out now (the watchdog would also deliver them).
+    for (const s of d.hub.sessions) if (s.parent === e.lead) d.hub.deliverReport(s);
+    changed(path);
+  }
+
+  async function resume(body) {
+    const [path, e] = entryAt(body);
+    if (e.state !== 'paused') throw new StoreError(409, '멈춘 계획이 아니에요');
+    const blockers = resumeBlockers(e);
+    if (blockers.length) throw new StoreError(409, blockers[0], { blockers });
+    await resumeEntry(path, e);
+    return status(path);
+  }
+
+  /** Paused -> plan: the run ends (stopped) and the steps the board closed carry over to the next 시작하기. */
+  async function reopen(body) {
+    const [path, e] = entryAt(body);
+    if (e.state === 'running') throw new StoreError(409, '실행 중이에요. 먼저 멈추기를 눌러 주세요');
+    if (e.state !== 'paused') throw new StoreError(409, '멈춘 계획이 아니에요');
+    const file = await readOrNull(path);
+    if (!file) throw new StoreError(404, 'not found');
+    const d = dispatch();
+    const done = (e.steps ?? []).filter((id) => !openSteps(e).includes(id));
+    const runId = e.runId;
+    if (runId) await quietly(recorder.endPaused(path, runId, 'stopped'));
+    Object.assign(e, { state: 'plan', draftRevision: file.revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} });
+    delete e.pause;
+    if (runId && done.length) e.carry = { from: runId, steps: done };
+    else delete e.carry;
+    drafts.set(path, file.plan);
+    save();
+    changed(path);
+    const text = [
+      `[계획 다시 열림] ${path}`,
+      '사용자가 계획을 다시 열었다. 시작하기를 다시 누를 때까지 팀원을 새로 만들거나 새 일을 시키지 마라. 고칠 게 있으면 write_plan(path 그대로)으로 고친다.',
+      `이미 끝난 단계: ${done.join(', ') || '(없음)'}`,
+    ].join('\n');
+    try {
+      d.hub.send(e.lead, text);
+    } catch {
+      /* the lead hears it with the next [계획 승인] */
+    }
+    return status(path);
+  }
+
+  /** What the next run takes over from the run 계획 다시 열기 stopped. */
+  async function carryOf(path, e) {
+    if (!e?.carry?.from || !e.carry.steps?.length) return null;
+    const old = await recorder.read(path, e.carry.from).catch(() => null);
+    if (!old) return null;
+    const steps = {};
+    for (const id of e.carry.steps) if (old.steps?.[id]) steps[id] = old.steps[id];
+    return { from: e.carry.from, steps };
+  }
+
+  /** The limit guard pauses running plans; once no window is over its threshold, the plans it paused go on. */
+  let syncing = false;
+  async function syncLimit() {
+    const d = dispatch();
+    if (!d || syncing) return;
+    syncing = true;
+    try {
+      const hit = d.hub.limitHit();
+      for (const [path, e] of Object.entries(entries() ?? {})) {
+        if (hit && e.state === 'running') await pauseEntry(path, e, 'limit', hit.resetAt);
+        else if (!hit && e.state === 'paused' && e.pause?.by === 'limit' && d.hub.get(e.lead) && d.hub.get(e.lead).status !== 'done') {
+          await resumeEntry(path, e, { auto: true });
+        }
+      }
+    } catch (err) {
+      console.error('pipeline limit sync:', err?.message);
+    } finally {
+      syncing = false;
+    }
+  }
+  // A window can reset without any new event (time passes): look again now and then.
+  const limitTimer = setInterval(() => void syncLimit(), 30_000);
+  limitTimer.unref?.();
 
   // ---- note_step ----
   function note(body) {
@@ -343,7 +541,14 @@ export async function setup(ctx) {
     writePlan,
     start,
     note,
-    close: () => unsubscribe(),
+    stop,
+    resume,
+    reopen,
+    syncLimit,
+    close: () => {
+      clearInterval(limitTimer);
+      unsubscribe();
+    },
     routes: [
       route('GET', '/api/pipeline', (_b, q) => {
         const p = q.get('path');
@@ -353,6 +558,9 @@ export async function setup(ctx) {
       route('POST', '/api/pipeline/plan', (b) => writePlan(b)),
       route('POST', '/api/pipeline/start', (b) => start(b)),
       route('POST', '/api/pipeline/note', (b) => note(b)),
+      route('POST', '/api/pipeline/stop', (b) => stop(b)),
+      route('POST', '/api/pipeline/resume', (b) => resume(b)),
+      route('POST', '/api/pipeline/reopen', (b) => reopen(b)),
     ],
   };
 }

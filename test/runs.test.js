@@ -147,7 +147,7 @@ test('runs: list newest first and read; API shape', async () => {
     const r2 = await recorder.startRun({ file: 'a', plan: PLAN });
     const { runs } = await recorder.list('a');
     assert.deepEqual(runs.map((r) => [r.id, r.state]), [[r2.id, 'running'], [r1.id, 'failed']]);
-    assert.deepEqual(Object.keys(runs[0]), ['id', 'startedAt', 'endedAt', 'state', 'totals']);
+    assert.deepEqual(Object.keys(runs[0]), ['id', 'startedAt', 'endedAt', 'state', 'totals', 'pause']);
     assert.equal((await recorder.read('a.dpx.json', r1.id)).state, 'failed');
     await assert.rejects(recorder.read('a', '1763000000000-deadbeef'), { status: 404 });
     await assert.rejects(recorder.read('a', '../x'), { status: 400 });
@@ -346,4 +346,68 @@ test('runs: a trash runs folder that links outside the workspace is refused and 
   } finally {
     await rm(outside, { recursive: true, force: true });
   }
+});
+
+test('runs: pause keeps the run in memory as paused, resume brings it back, also from disk after a restart (E27)', async () => {
+  await withRecorder({}, async ({ ws, store, recorder, events }) => {
+    await store.createFile('p');
+    const { id } = await recorder.startRun({ file: 'p', plan: PLAN });
+    recorder.updateSession(id, 'impl', { sid: 's1', state: 'working' });
+    events.length = 0;
+    await recorder.pauseRun(id, { by: 'limit', resetAt: 1_763_000_600_000, reason: '5시간 한도 92%' });
+    let disk = await readJson(runFile(ws, 'p.dpx.json', id));
+    assert.equal(disk.state, 'paused');
+    assert.deepEqual(disk.pause, { by: 'limit', at: disk.pause.at, resetAt: 1_763_000_600_000 });
+    assert.ok(!JSON.stringify(disk).includes('5시간'), 'only metadata: no reason text on disk');
+    assert.equal(events.at(-1)[1].run.state, 'paused');
+    assert.equal(events.at(-1)[1].run.pause.by, 'limit');
+    // Paused is not running: no 실행 중 count, the tree shows it paused.
+    assert.deepEqual(recorder.runningFiles(), []);
+    assert.deepEqual(await recorder.markOf('p.dpx.json'), { state: 'paused' });
+    // Sessions still report while paused.
+    recorder.updateSession(id, 'impl', { sid: 's1', state: 'resting' });
+    await assert.rejects(recorder.pauseRun(id, { by: 'nope' }), /invalid pause/);
+
+    await recorder.resumeRun('p.dpx.json', id);
+    disk = await eventually(async () => {
+      const r = await readJson(runFile(ws, 'p.dpx.json', id));
+      assert.equal(r.state, 'running');
+      return r;
+    });
+    assert.equal(disk.pause, null);
+    assert.deepEqual(recorder.runningFiles(), ['p.dpx.json']);
+
+    // A server stop drops memory; resume reads the record back.
+    await recorder.pauseRun(id, { by: 'stop' });
+    await recorder.close();
+    const again = createRecorder({ runs: store.runs, hub: null, writeDelayMs: 20, eventGapMs: 0 });
+    try {
+      assert.deepEqual(again.runningFiles(), []);
+      const r = await again.resumeRun('p.dpx.json', id);
+      assert.equal(r.state, 'running');
+      assert.equal(r.steps.impl.sessions[0].state, 'resting');
+      again.updateSession(id, 'review', { sid: 's2', state: 'working' });
+      const ended = await again.endRun(id, 'stopped');
+      assert.equal(ended.steps.review.sessions[0].sid, 's2');
+      await assert.rejects(again.resumeRun('p.dpx.json', id), /not paused/);
+    } finally {
+      await again.close();
+    }
+  });
+});
+
+test('runs: a new run can carry finished steps over from an earlier one (E27 계획 다시 열기)', async () => {
+  await withRecorder({}, async ({ store, recorder }) => {
+    await store.createFile('c');
+    const first = await recorder.startRun({ file: 'c', plan: PLAN });
+    recorder.updateSession(first.id, 'impl', { sid: 's1', name: 'Juno', state: 'done', cost: 1 });
+    const old = await recorder.endRun(first.id, 'stopped');
+    const next = await recorder.startRun({ file: 'c', plan: PLAN, carry: { from: first.id, steps: { impl: old.steps.impl, gone: old.steps.impl } } });
+    assert.equal(next.steps.impl.state, 'done');
+    assert.equal(next.steps.impl.carried, first.id);
+    assert.equal(next.steps.impl.sessions[0].name, 'Juno');
+    assert.equal(next.steps.review.state, 'pending');
+    assert.equal(next.steps.gone, undefined);
+    assert.equal(next.totals.cost, 1);
+  });
 });

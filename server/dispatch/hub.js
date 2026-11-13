@@ -117,6 +117,10 @@ export class Hub extends EventEmitter {
     // waits for approval may not create teammates. taskStepCheck(lead, step) -> refusal text or null.
     this.createGate = null;
     this.taskStepCheck = null;
+    // E27: holdTeam(lead) -> true while the person stopped that lead's plan (멈추기): its team's reports and
+    // restart resumes wait. ticketNote(lead) -> text added to a limit ticket's resume message, or "".
+    this.holdTeam = null;
+    this.ticketNote = null;
 
     // Transcripts live in memory only (a ring buffer per session); nothing is written to disk, so a
     // restart starts every session with an empty transcript. Resuming uses the CLI's own session id.
@@ -744,6 +748,7 @@ export class Hub extends EventEmitter {
   resumeInterrupted() {
     for (const s of this.sessions) {
       if (!s.interrupted || !this.isConnected(s.provider) || this.paused) continue; // paused: the ticket resumes it
+      if (this.holdTeam?.(s.parent ?? s.id)) continue; // a stopped plan: 이어서 하기 resumes it
       s.interrupted = false;
       try { this.send(s.id, RESUME_TEXT); } catch { /* resumes on the next message instead */ }
     }
@@ -827,7 +832,8 @@ export class Hub extends EventEmitter {
       ? t.items.map(i => `- ${i.title} (${i.stage}${i.owner ? `, ${i.owner}` : ""})${i.note ? `: ${i.note}` : ""}`).join("\n")
       : "(보드에 올린 작업 없음 — 아래 마지막 메모를 보고 이어 가라)";
     const team = t.team.length ? `\n\n[당시 팀원]\n${t.team.map(c => `- ${c.name} (${c.status}${c.branch ? `, ${c.branch}` : ""})${c.last ? `: ${c.last}` : ""}`).join("\n")}` : "";
-    const text = `[Dispatch 티켓 재개] ${t.reason}에서 멈췄던 작업이다. 한도가 초기화됐으니 이어서 진행하라. 브랜치·git log로 상태를 다시 확인하고, 팀원이 정리됐으면 필요한 만큼 다시 만들어라.\n\n[남은 작업]\n${list}${team}\n\n[멈출 때 내 마지막 메모]\n${t.leadLast || "(없음)"}`;
+    const note = this.ticketNote?.(t.lead) || "";
+    const text = `[Dispatch 티켓 재개] ${t.reason}에서 멈췄던 작업이다. 한도가 초기화됐으니 이어서 진행하라. 브랜치·git log로 상태를 다시 확인하고, 팀원이 정리됐으면 필요한 만큼 다시 만들어라.\n\n[남은 작업]\n${list}${team}\n\n[멈출 때 내 마지막 메모]\n${t.leadLast || "(없음)"}${note ? `\n\n${note}` : ""}`;
     if (lead && lead.status !== "done") {
       try { this.send(lead.id, text, { force: true }); } catch { return false; }
     }
@@ -886,6 +892,7 @@ export class Hub extends EventEmitter {
     const r = this.live.get(s.id), parent = s.parent && this.get(s.parent);
     if (!r?.pendingReport || !parent || parent.status === "done") return;
     if (this.paused) return; // kept; delivered after the reset
+    if (this.holdTeam?.(parent.id)) return; // kept; delivered after 이어서 하기
     try { this.send(parent.id, r.pendingReport + this.boardNote(parent.id)); r.pendingReport = null; } catch { /* retried by checkTeams */ }
   }
 
