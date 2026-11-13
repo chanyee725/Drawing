@@ -118,7 +118,7 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
                   setGroup(undefined);
                   input.current?.focus();
                 }}
-                className="mr-1.5 inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                className="mr-1.5 inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-[Highlight]"
               >
                 프로젝트만
                 <X aria-hidden className="size-3" />

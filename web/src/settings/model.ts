@@ -115,13 +115,17 @@ const canFocus = (el: unknown): el is Focusable =>
 /**
  * After the settings dialog closes: the browser returns focus to the opener, but on a phone the drawer that held
  * the opener has already closed, so focus would drop to <body>. Then focus the opener if it is still on screen,
- * else the visible sidebar (menu) button (#230 review). Leaves focus alone when it already landed somewhere.
+ * else the visible 설정 row, else the visible sidebar (menu) button (#230 review, #242). Leaves focus alone when it already landed somewhere.
  */
 export function focusAfterClose(opener: unknown, dialog: { contains: (n: never) => boolean } | null, root: FocusRoot = document): void {
   const now = root.activeElement;
   // At the close event a focus left inside the closed dialog has not moved on yet: that counts as lost too.
   if (now && now !== root.body && !dialog?.contains(now as never)) return;
-  const target = canFocus(opener) ? opener : Array.from(root.querySelectorAll('[data-slot="sidebar-trigger"]')).find(canFocus);
+  // The 설정 row first (desktop: the palette that opened the dialog is gone), then the menu button (phone).
+  const target = canFocus(opener)
+    ? opener
+    : (Array.from(root.querySelectorAll('[data-settings-trigger]')).find(canFocus) ??
+      Array.from(root.querySelectorAll('[data-slot="sidebar-trigger"]')).find(canFocus));
   target?.focus();
 }
 
