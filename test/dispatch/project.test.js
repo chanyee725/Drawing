@@ -396,3 +396,51 @@ test('real server: outside git Dispatch is off with a reason, and a stale lock f
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test('claimProject: a live .break holder that never lets go turns Dispatch off instead of throwing', async () => {
+  const { root } = scratchRepo();
+  const child = liveChild();
+  try {
+    mkdirSync(join(root, '.dispatch'));
+    // A stale lock (dead pid) forces a break; a live process holds .break the whole time.
+    writeFileSync(join(root, '.dispatch', 'drawing.lock'), JSON.stringify({ pid: 2 ** 22 + 12345 }));
+    writeFileSync(join(root, '.dispatch', 'drawing.lock.break'), JSON.stringify({ pid: child.pid }));
+    assert.deepEqual(await claimProject(root), { ok: false, reason: 'lock-busy', port: null });
+  } finally {
+    child.kill();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('claimProject: a dead .break holder is cleared and the stale lock is taken', async () => {
+  const { root } = scratchRepo();
+  try {
+    mkdirSync(join(root, '.dispatch'));
+    writeFileSync(join(root, '.dispatch', 'drawing.lock'), JSON.stringify({ pid: 2 ** 22 + 12345 }));
+    writeFileSync(join(root, '.dispatch', 'drawing.lock.break'), JSON.stringify({ pid: 2 ** 22 + 54321 }));
+    const res = await claimProject(root);
+    assert.equal(res.ok, true);
+    await res.lock.release();
+    assert.equal(existsSync(join(root, '.dispatch', 'drawing.lock.break')), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('git calls ignore GIT_DIR / GIT_WORK_TREE inherited from the server environment', async () => {
+  const { root } = scratchRepo();
+  const other = scratchRepo();
+  execFileSync('git', ['-C', other.root, 'checkout', '-q', '-b', 'other-branch']);
+  const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE };
+  try {
+    process.env.GIT_DIR = join(other.root, '.git');
+    process.env.GIT_WORK_TREE = other.root;
+    const { currentBranch, projectRoot } = await import('../../server/dispatch/git.js');
+    assert.equal(await currentBranch(root), 'develop');
+    assert.equal(await projectRoot(root), root);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+    rmSync(root, { recursive: true, force: true });
+    rmSync(other.root, { recursive: true, force: true });
+  }
+});
