@@ -9,6 +9,7 @@ import { PLATE_PAD } from './text.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
+import { routeEdges } from './layout-routes.ts';
 import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -772,6 +773,8 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     vertical,
   );
   for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+  // Spec §1.8 step 6: even ports, straight lines first, at most two bends, shared buses.
+  routeEdges(rects, parent, baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points, keep: be.forcedElbow })));
 
   return { nodes, groups, parent, rects, edges: baseEdges };
 }
