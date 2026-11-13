@@ -101,6 +101,8 @@ export interface SceneEdge {
   from?: string;
   /** Graph types: DSL id of the target node or group. */
   to?: string;
+  /** Drawn lighter (straight connectors in graph diagrams, spec §1.7). */
+  soft?: boolean;
 }
 
 export interface SceneLine {

@@ -28,6 +28,8 @@ type Deps = {
   saveFile: (path: string, f: DpxFile, keepalive: boolean) => Promise<{ revision: number }>;
   /** After each successful save (the file list shows the new title/revision). */
   onSaved?: () => void;
+  /** A save got 404: the file or its folder was removed (another tab) and the SSE event was missed. The file is already closed. */
+  onGone?: () => void;
 };
 
 export type FileSession = ReturnType<typeof createFileSession>;
@@ -95,7 +97,10 @@ export function createFileSession(deps: Deps) {
         if (state.path !== p) return;
         // A retry or refusal must not hide the notice that the reload was stopped.
         const problem = (text: string) => setStatus(saveProblemText(text, reloadStopped), true);
-        if (e instanceof ApiError && e.status === 409) {
+        if (e instanceof ApiError && e.status === 404) {
+          close();
+          deps.onGone?.();
+        } else if (e instanceof ApiError && e.status === 409) {
           clearTimer();
           conflicted = true;
           set({ conflict: { revision: e.revision } });
