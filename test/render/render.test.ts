@@ -441,3 +441,18 @@ test('sequence: a message label cuts the lifelines it crosses; self labels clear
   const loopRight = Math.max(...loop.points.map((p) => p.x));
   assert.ok(self.x - PLATE_PAD - 1 > loopRight + 1, 'the cut does not reach the loop stroke');
 });
+
+test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E60 follow-up)', async () => {
+  const { textWidth } = await import('../../shared/render/text.ts');
+  assert.equal(textWidth('문자열', 12, 'mono'), 36);
+  assert.equal(textWidth('varchar(이름)', 12, 'mono'), (9 * 0.6 + 2) * 12);
+  // Korean families come after `monospace`, so they only ever supply the Hangul.
+  assert.match(FONT_FAMILY.mono, /monospace, 'Noto Sans KR'/);
+  const { svg } = await renderDiagram('users {\n  id 문자열 pk\n  name varchar(이름)\n  email string\n}', { type: 'erd' });
+  assert.match(svg, /<tspan x="[^"]+" y="[^"]+"><tspan style="font-size-adjust:none">문자열<\/tspan><\/tspan>/);
+  assert.match(svg, />varchar\(<tspan style="font-size-adjust:none">이름<\/tspan>\)<\/tspan>/);
+  assert.match(svg, /<tspan x="[^"]+" y="[^"]+">string<\/tspan>/, 'Latin mono text keeps the plain span');
+  // Clean text has no nested span: the ch-width scaling is only on mono text.
+  const clean = await renderDiagram('A\n한글 > A: 메시지', { type: 'sequence' });
+  assert.doesNotMatch(clean.svg, /font-size-adjust:none/);
+});

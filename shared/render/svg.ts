@@ -9,7 +9,7 @@ import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
 import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, isWideChar, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -154,8 +154,9 @@ function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
   // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
   if (tx.plate) fill = edge;
   if (tx.color) fill = strokeOf(tx.color, theme);
+  const content = tx.font === 'mono' ? monoRuns : esc;
   const spans = tx.lines
-    .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
+    .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${content(line)}</tspan>`)
     .join('');
   const weight = tx.weight === 600 ? ' font-weight="600"' : '';
   // No mono face is embedded, so whichever monospace the viewer has is scaled to the 0.6em advance the layout
@@ -164,6 +165,32 @@ function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
   const adjust = tx.font === 'mono' ? ' style="font-size-adjust:ch-width 0.6"' : '';
   const family = tx.font === 'clean' ? '' : ` font-family="${esc(FONT_FAMILY[tx.font])}"${adjust}`;
   return `<text font-size="${tx.size}"${weight}${family} fill="${c(fill)}" text-anchor="${tx.anchor}" xml:space="preserve">${spans}</text>`;
+}
+
+/**
+ * Mono text content with each run of wide characters (Hangul, CJK, emoji) in its own `font-size-adjust:none` span.
+ * The adjust on the <text> scales the whole font size by the primary mono face's ratio, so a narrow mono (0.5em,
+ * x1.2) would also blow the Hangul fallback up past the 1em the layout measured (text.ts). The wide run keeps the
+ * plain size and draws at its own width, at most about 1em.
+ */
+function monoRuns(line: string): string {
+  let out = '';
+  let run = '';
+  let wide = false;
+  const flush = (): void => {
+    if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
+    run = '';
+  };
+  for (const ch of line) {
+    const w = isWideChar(ch.codePointAt(0) ?? 0);
+    if (w !== wide) {
+      flush();
+      wide = w;
+    }
+    run += ch;
+  }
+  flush();
+  return out;
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */
