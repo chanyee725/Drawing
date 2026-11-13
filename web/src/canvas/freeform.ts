@@ -1,7 +1,7 @@
 // Turn a graph block's drawing into plain Excalidraw shapes (ticket #38), without DOM or Excalidraw.
 // Input is the composed scene (layout applied); output is element skeletons for convertToExcalidrawElements
 // plus the arrow bindings to set afterwards. Icons are left out: nodes keep their labels only.
-import type { Point, Scene, SceneBox, SceneEdge, SceneText, ShapeKind } from '../../../shared/render/scene.ts';
+import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneText, ShapeKind } from '../../../shared/render/scene.ts';
 import { THEMES, resolvePaint, strokeOf } from '../../../shared/render/theme.ts';
 
 /** Where the block image sits on the canvas, and the picture width it was drawn at. */
@@ -53,6 +53,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
   const nodes = boxes.filter((b) => b.role === 'node');
   const edges = scene.items.filter((i): i is SceneEdge => i.kind === 'edge');
   const texts = scene.items.filter((i): i is SceneText => i.kind === 'text');
+  const icons = scene.items.filter((i): i is SceneIcon => i.kind === 'icon');
 
   // Each text goes to the smallest node it sits in, else to the nearest edge (a label plate), else stays free.
   const nodeLabel = new Map<SceneBox, SceneText[]>();
@@ -133,9 +134,12 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
   for (const tx of free) {
     const size = Math.round(tx.size * k);
     const w = Math.max(...tx.lines.map((l) => l.length)) * size * 0.6;
-    const left = tx.anchor === 'middle' ? tx.x - w / 2 / kx : tx.anchor === 'end' ? tx.x - w / kx : tx.x;
     // A title that sits in a group box moves with it.
     const owner = groupBoxes.filter((g) => inside({ x: tx.x, y: tx.y }, g)).sort((a, b) => area(a) - area(b))[0];
+    // Icons are left out, so a title drawn after its group's icon starts where the icon was instead of after a gap.
+    const slot = owner && tx.anchor === 'start' ? iconBefore(tx, owner, icons) : undefined;
+    const start = slot ? slot.x : tx.x;
+    const left = tx.anchor === 'middle' ? tx.x - w / 2 / kx : tx.anchor === 'end' ? tx.x - w / kx : start;
     skeletons.push({
       id: newId(),
       type: 'text',
@@ -149,6 +153,28 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
     });
   }
   return { skeletons, bindings };
+}
+
+/** The icon drawn just left of a title on the same row inside `group` (a group header's icon slot). */
+function iconBefore(tx: SceneText, group: SceneBox, icons: SceneIcon[]) {
+  const top = tx.y;
+  const bottom = tx.y + tx.lines.length * tx.lineHeight;
+  return icons
+    .filter((i) => inside({ x: i.x, y: i.y }, group) && i.x + i.size <= tx.x + 1 && tx.x - (i.x + i.size) <= 16 && i.y < bottom && i.y + i.size > top)
+    .sort((a, b) => b.x - a.x)[0];
+}
+
+type Rect = { id: string; type: string; x: number; y: number; width: number; height: number; isDeleted?: boolean; frameId?: string | null };
+
+/**
+ * The frame converted shapes belong to: the image's own frame, else the smallest live frame that holds the whole
+ * image (block images are rebuilt with no frameId on load, so a block that sits in a frame may not be marked as in it).
+ */
+export function frameFor(img: Rect, elements: readonly Rect[]): string | null {
+  if (img.frameId) return img.frameId;
+  const holds = (f: Rect) => img.x >= f.x && img.y >= f.y && img.x + img.width <= f.x + f.width && img.y + img.height <= f.y + f.height;
+  const frames = elements.filter((e) => !e.isDeleted && (e.type === 'frame' || e.type === 'magicframe') && holds(e));
+  return frames.sort((a, b) => a.width * a.height - b.width * b.height)[0]?.id ?? null;
 }
 
 type El = { id: string; type: string; boundElements?: readonly { id: string; type: string }[] | null; [k: string]: unknown };

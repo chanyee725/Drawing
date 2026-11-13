@@ -8,6 +8,7 @@
 
 import type { BlockLayout, LayoutBasis, LayoutItem, Point, SceneHandle } from '../../../shared/render/index.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
+import type { EditAction } from './layoutSession.ts';
 
 export type Box = { x: number; y: number; w: number; h: number };
 /** A draggable element in layout coordinates. */
@@ -193,9 +194,32 @@ export function nudgeFor(key: string, shift: boolean): { dx: number; dy: number 
   }
 }
 
-/** Why a block image cannot enter layout edit mode on the canvas side (the code side is `editReason`), or null. */
-export function imageReason(img: { angle?: number; locked?: boolean }): string | null {
-  if (img.locked) return '잠긴 블록은 옮길 수 없어요';
-  if (img.angle) return '돌린 블록은 옮길 수 없어요';
+export type ImageReasonCode = 'locked' | 'rotated' | 'cropped';
+
+const IMAGE_TEXT: Record<EditAction, Record<ImageReasonCode, string>> = {
+  move: {
+    locked: '잠긴 블록은 옮길 수 없어요',
+    rotated: '돌린 블록은 옮길 수 없어요',
+    cropped: '자른 블록은 옮길 수 없어요',
+  },
+  freeform: {
+    locked: '잠긴 블록은 자유 도형으로 바꿀 수 없어요',
+    rotated: '돌린 블록은 자유 도형으로 바꿀 수 없어요. 회전을 풀고 다시 해 주세요',
+    cropped: '자른 블록은 자유 도형으로 바꿀 수 없어요. 자르기를 풀고 다시 해 주세요',
+  },
+};
+
+/** Why a block image cannot be used for `action` on the canvas side (the code side is `editReasonCode`), or null. */
+export function imageReasonCode(img: { angle?: number; locked?: boolean; crop?: unknown }, action: EditAction = 'move'): ImageReasonCode | null {
+  if (img.locked) return 'locked';
+  if (img.angle) return 'rotated';
+  // Layout edit draws over the uncropped picture as before; converting would place shapes the crop hides.
+  if (action === 'freeform' && img.crop) return 'cropped';
   return null;
+}
+
+/** The canvas-side reason as text for an action, or null. */
+export function imageReason(img: { angle?: number; locked?: boolean; crop?: unknown }, action: EditAction = 'move'): string | null {
+  const code = imageReasonCode(img, action);
+  return code ? IMAGE_TEXT[action][code] : null;
 }
