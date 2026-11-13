@@ -31,8 +31,7 @@ export function Splitter({ ratio, onRatio, left, right }: Props) {
           if (e.key === 'ArrowLeft') onRatio(clamp(ratio - 0.02));
           if (e.key === 'ArrowRight') onRatio(clamp(ratio + 0.02));
         }}
-        className="w-1.5 shrink-0 cursor-col-resize touch-none hover:opacity-100"
-        style={{ background: 'var(--border)' }}
+        className="w-1.5 shrink-0 cursor-col-resize touch-none bg-border hover:opacity-100"
       />
       <div className="min-w-0 flex-1 overflow-auto">{right}</div>
     </div>
