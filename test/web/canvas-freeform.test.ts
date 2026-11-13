@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bindArrows, frameFor, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
+import { CLEAN_APP_STATE, CLEAN_FONT_FAMILY, cleanElements, cleanSkeleton } from '../../web/src/canvas/cleanStyle.ts';
+import { shapeSkeleton } from '../../web/src/canvas/insert.ts';
 import type { Scene } from '../../shared/render/scene.ts';
 import { layoutDiagram } from '../../shared/render/index.ts';
 import { parseArchitecture, parseFlowchart } from '../../shared/dsl/index.ts';
@@ -166,4 +168,55 @@ test('frameFor: the image keeps its own frame, else the smallest live frame that
   // The image's own frame only counts while that frame is live (#83).
   assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small, r('own', 'frame', 900, 900, 10, 10, { isDeleted: true })]), 'small');
   assert.equal(frameFor({ ...img, frameId: 'missing' }, [img, big]), 'big');
+});
+
+// Clean lines only (E58).
+test('new arrows are elbowed and new shapes are not hand-drawn', () => {
+  assert.equal(CLEAN_APP_STATE.currentItemArrowType, 'elbow');
+  assert.equal(CLEAN_APP_STATE.currentItemRoughness, 0);
+  assert.equal(CLEAN_APP_STATE.currentItemFontFamily, CLEAN_FONT_FAMILY);
+});
+
+test('insert-menu skeletons get the clean style instead of the hand-drawn defaults', () => {
+  for (const kind of ['rectangle', 'ellipse', 'diamond', 'arrow', 'line', 'text', 'frame'] as const) {
+    const sk = cleanSkeleton(shapeSkeleton(kind, { x: 0, y: 0 }));
+    assert.equal(sk.roughness, 0, kind);
+    assert.equal(sk.strokeWidth, 1, kind);
+  }
+  assert.equal(cleanSkeleton({ type: 'text', text: 'a' }).fontFamily, CLEAN_FONT_FAMILY);
+  assert.equal(cleanSkeleton({ type: 'arrow' }).elbowed, true);
+  assert.equal(cleanSkeleton({ type: 'line' }).elbowed, undefined);
+  assert.deepEqual(cleanSkeleton({ type: 'rectangle' }).roundness, { type: 3 });
+  // What the skeleton sets itself wins.
+  assert.equal(cleanSkeleton({ type: 'rectangle', strokeWidth: 4 }).strokeWidth, 4);
+});
+
+test('hand-drawn shapes from an old file open clean; block images and clean shapes are untouched', () => {
+  const rough = { id: 'r', type: 'rectangle', roughness: 1, version: 3 };
+  const cartoon = { id: 'd', type: 'diamond', roughness: 2, version: 1 };
+  const hand = { id: 't', type: 'text', roughness: 1, fontFamily: 5, version: 2 };
+  const virgil = { id: 'v', type: 'text', roughness: 0, fontFamily: 1, version: 2 };
+  const code = { id: 'c', type: 'text', roughness: 0, fontFamily: 8, version: 2 };
+  const image = { id: 'i', type: 'image', roughness: 1, version: 1 };
+  const clean = { id: 'k', type: 'arrow', roughness: 0, version: 1 };
+  const out = cleanElements([rough, cartoon, hand, virgil, code, image, clean]);
+  assert.equal(out.changed, true);
+  assert.equal(out.fonts, true);
+  assert.deepEqual(out.elements.map((e) => e.roughness), [0, 0, 0, 0, 0, 1, 0]);
+  assert.deepEqual(out.elements.map((e) => (e as { fontFamily?: number }).fontFamily), [undefined, undefined, CLEAN_FONT_FAMILY, CLEAN_FONT_FAMILY, 8, undefined, undefined]);
+  // Versions stay as saved: opening a file alone must not look like an edit (nothing is written).
+  assert.deepEqual(out.elements.map((e) => e.version), [3, 1, 2, 2, 2, 1, 1]);
+  assert.equal(out.elements[4], code);
+  assert.equal(out.elements[5], image);
+  assert.equal(out.elements[6], clean);
+});
+
+test('a clean scene comes back as the same array, and a live change goes through the given builder', () => {
+  const els = [{ id: 'a', type: 'rectangle', roughness: 0 }, { id: 'i', type: 'image', roughness: 1 }];
+  const same = cleanElements(els);
+  assert.equal(same.elements, els);
+  assert.equal(same.changed, false);
+  const bumped = cleanElements([{ id: 'p', type: 'ellipse', roughness: 1, version: 1 }], (e, patch) => ({ ...e, ...patch, version: e.version + 1 }));
+  assert.deepEqual(bumped.elements, [{ id: 'p', type: 'ellipse', roughness: 0, version: 2 }]);
+  assert.equal(bumped.fonts, false);
 });
