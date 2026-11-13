@@ -21,6 +21,8 @@ import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, h
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
+import { CLEAN_APP_STATE } from './cleanStyle';
+import './clean.css';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -285,7 +287,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         placed.map((b, i) => blockImageSkeleton(b, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
       );
-      return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), scrollToContent: true };
+      return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), appState: CLEAN_APP_STATE, scrollToContent: true };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

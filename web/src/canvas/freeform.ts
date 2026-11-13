@@ -3,6 +3,7 @@
 // plus the arrow bindings to set afterwards. Icons are left out: nodes keep their labels only.
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneText, ShapeKind } from '../../../shared/render/scene.ts';
 import { THEMES, resolvePaint, strokeOf } from '../../../shared/render/theme.ts';
+import { CLEAN_FONT_FAMILY } from './cleanStyle.ts';
 
 /** Where the block image sits on the canvas, and the picture width it was drawn at. */
 export type Placement = { x: number; y: number; width: number; height?: number };
@@ -101,7 +102,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       roughness: 0,
       roundness: SHAPE[b.shape] ? null : { type: 3 },
       ...(group ? { groupIds: [groupOf.get(b)!] } : {}),
-      ...(label ? { label: { text: label, fontSize: sizeOf(nodeLabel.get(b)), strokeColor: p.text } } : {}),
+      ...(label ? { label: { text: label, fontSize: sizeOf(nodeLabel.get(b)), fontFamily: CLEAN_FONT_FAMILY, strokeColor: p.text } } : {}),
     });
   }
 
@@ -124,7 +125,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       roundness: e.route === 'arc' ? { type: 2 } : null,
       startArrowhead: e.start === 'none' ? null : 'arrow',
       endArrowhead: e.end === 'none' ? null : 'arrow',
-      ...(label ? { label: { text: label, fontSize: sizeOf(edgeLabel.get(e)), strokeColor: color } } : {}),
+      ...(label ? { label: { text: label, fontSize: sizeOf(edgeLabel.get(e)), fontFamily: CLEAN_FONT_FAMILY, strokeColor: color } } : {}),
     });
     const s = nodeAt(o, nodes);
     const d = nodeAt(e.points[e.points.length - 1], nodes);
@@ -148,6 +149,7 @@ export function sceneToFreeform(scene: Scene, at: Placement, newId: () => string
       y: Y(tx.y),
       text: tx.lines.join('\n'),
       fontSize: size,
+      fontFamily: CLEAN_FONT_FAMILY,
       strokeColor: tx.color ? strokeOf(tx.color, 'light') : tx.tone === 'muted' ? t.muted : t.text,
       textAlign: tx.anchor === 'middle' ? 'center' : tx.anchor === 'end' ? 'right' : 'left',
     });
