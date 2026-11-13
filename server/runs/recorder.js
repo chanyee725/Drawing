@@ -306,5 +306,12 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     for (const run of active.values()) if (run.dirty || run.writeTimer) await writeQuietly(run);
   }
 
-  return { startRun, updateSession, setStepState, endRun, list, read, close, get active() { return [...active.keys()]; } };
+  /** Workspace-relative paths of files with a run going now (not in the trash), sorted, no repeats. */
+  function runningFiles() {
+    const out = new Set();
+    for (const run of active.values()) if (!run.loc.trashId && run.record.state === 'running') out.add(run.loc.path);
+    return [...out].sort();
+  }
+
+  return { startRun, updateSession, setStepState, endRun, list, read, runningFiles, close, get active() { return [...active.keys()]; } };
 }

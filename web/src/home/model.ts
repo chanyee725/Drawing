@@ -66,3 +66,7 @@ export function recentFiles(projects: ProjectInfo[], unfiled: ProjectDoc[], limi
     .sort((a, b) => b.modifiedAt - a.modifiedAt)
     .slice(0, limit);
 }
+
+/** Files with a run going now that sit in `project` (its folder or any sub-folder). */
+export const runningIn = (project: Pick<ProjectInfo, 'path'>, running: ReadonlySet<string>) =>
+  [...running].filter((f) => f.startsWith(`${project.path}/`)).length;

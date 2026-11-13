@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INDENT, ROW_HEIGHT, filterDocs, flattenRows, relativeTime } from '../../web/src/home/model.ts';
+import { INDENT, ROW_HEIGHT, filterDocs, flattenRows, relativeTime, runningIn } from '../../web/src/home/model.ts';
 import type { ProjectDoc } from '../../web/src/api.ts';
 
 const d = (path: string, title: string, children: ProjectDoc[] = []): ProjectDoc => ({ path, name: path, title, bundle: false, createdAt: 1, modifiedAt: 2, children });
@@ -29,4 +29,10 @@ test('relativeTime in Korean, and row metrics match the spec (41px rows, 24px in
   assert.equal(relativeTime(0, now), '-');
   assert.equal(ROW_HEIGHT, 41);
   assert.equal(INDENT, 24);
+});
+
+test('runningIn counts running files inside the project folder only', () => {
+  const running = new Set(['pay/a.dpx.json', 'pay/a/b.dpx.json', 'payroll/c.dpx.json', 'loose.dpx.json']);
+  assert.equal(runningIn({ path: 'pay' }, running), 2);
+  assert.equal(runningIn({ path: 'other' }, running), 0);
 });
