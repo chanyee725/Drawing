@@ -2,13 +2,14 @@
 // keeps metadata only (no prompt, CLI error, task note or ticket item note).
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { MASK, redact } from "../../server/dispatch/redact.js";
 import { Hub } from "../../server/dispatch/hub.js";
 import { diskView, Store } from "../../server/dispatch/dispatch-store.js";
 import { SharedLimits } from "../../server/dispatch/limits.js";
+import { fakeCliBin, fakeSpawner, until } from "../fixtures/fake-cli/index.mjs";
 
 const dirs = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
@@ -95,4 +96,38 @@ test("state.json drops prompt, error, task notes and ticket item notes", async (
   assert.equal(Object.values(again.data.tasks)[0].note, "");
   const hub2 = new Hub({ root, store: again, models: MODELS, roles: ROLES, port: 0, limits: new SharedLimits(path.join(root, "limits.json")) });
   assert.match(hub2.systemPrompt(again.data.sessions.s1), /^ROLE PROMPT/);
+});
+
+test("a CLI that leaks a key and an email: masked in memory, absent from disk", async () => {
+  const leakKey = ["sk", "test", "FAKE0000"].join("-");
+  const leakMail = ["someone", "example.invalid"].join("@");
+  const bin = fakeCliBin({ scenario: [
+    { type: "system", subtype: "init", session_id: "fake-claude-session" },
+    { type: "assistant", message: { id: "m1", content: [{ type: "text", text: `found ${leakKey} for ${leakMail}` }], usage: { input_tokens: 1, output_tokens: 1 } } },
+    { type: "assistant", message: { id: "m2", content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: `echo ${leakKey}` } }] } },
+    { type: "result", subtype: "error", is_error: true, result: `auth failed for ${leakMail}`, total_cost_usd: 0 },
+  ] });
+  dirs.push(bin.dir);
+  const root = mkdtempSync(path.join(tmpdir(), "drawing-redact-leak-"));
+  dirs.push(root);
+  const store = new Store(root);
+  await store.load();
+  store.save = () => {};
+  const hub = new Hub({ root, store, models: MODELS, roles: ROLES, port: 0, limits: new SharedLimits(path.join(root, "limits.json")), spawnCli: fakeSpawner(bin) });
+  after(() => hub.stopAll());
+  const [pub] = await hub.create({ items: [{ role: "impl" }], commonPrompt: `say hi to ${leakMail}`, worktree: false });
+  await until(() => hub.transcript(pub.id).some(e => e.kind === "tool"));
+  await new Promise(r => setTimeout(r, 100));
+  const s = store.data.sessions[pub.id];
+  const memory = JSON.stringify({ transcript: hub.transcript(pub.id), session: hub.publicSession(s), tasks: hub.tasks });
+  assert.doesNotMatch(memory, /FAKE0000|example\.invalid/);
+  assert.match(memory, /\[가림\]/);
+
+  await store.flush();
+  const files = [];
+  const walk = d => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); e.isDirectory() ? walk(p) : files.push(p); } };
+  walk(path.join(root, ".dispatch"));
+  assert.ok(files.length > 0);
+  for (const f of files) assert.doesNotMatch(readFileSync(f, "utf8"), /FAKE0000|example\.invalid/, f);
+  assert.equal(existsSync(path.join(root, ".dispatch", "transcripts")), false);
 });

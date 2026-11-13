@@ -976,7 +976,7 @@ export class Hub extends EventEmitter {
           this.checkCtx(s); this.checkLong(s);
         }
         for (const c of msg.content || []) {
-          if (c.type === "text" && c.text.trim()) { this.push(s, { kind: "assistant", text: c.text }); s.last = clip(c.text, 400); r.lastText = c.text; }
+          if (c.type === "text" && c.text.trim()) { this.push(s, { kind: "assistant", text: c.text }); s.last = redact(clip(c.text, 400)); r.lastText = c.text; }
           else if (c.type === "tool_use") {
             this.push(s, { kind: "tool", name: c.name, text: clip(JSON.stringify(c.input), 600) });
             const key = c.name === "Bash" && checkKey(c.input?.command);
@@ -1065,7 +1065,7 @@ export class Hub extends EventEmitter {
         break;
       case "item.completed": {
         const it = m.item || {};
-        if (it.type === "agent_message") { this.push(s, { kind: "assistant", text: it.text }); s.last = clip(it.text, 400); this.rt(s.id).lastText = it.text; }
+        if (it.type === "agent_message") { this.push(s, { kind: "assistant", text: it.text }); s.last = redact(clip(it.text, 400)); this.rt(s.id).lastText = it.text; }
         else if (it.type === "command_execution") {
           this.push(s, { kind: "tool", name: "shell", text: clip(it.command, 600) });
           if (it.aggregated_output) this.push(s, { kind: "tool_result", text: clip(it.aggregated_output, 1500), error: it.exit_code !== 0 });
@@ -1134,7 +1134,7 @@ export class Hub extends EventEmitter {
         if (su.step_type === "agent_response") {
           if (su.text_delta && su.text_delta.trim()) {
             this.push(s, { kind: "assistant", text: su.text_delta });
-            s.last = clip(su.text_delta, 400);
+            s.last = redact(clip(su.text_delta, 400));
             this.rt(s.id).lastText = su.text_delta;
           }
           if (su.usage) {
@@ -1159,7 +1159,7 @@ export class Hub extends EventEmitter {
       case "result": {
         const res = m.result || {};
         if (res.response && res.response.trim()) {
-          s.last = clip(res.response, 400);
+          s.last = redact(clip(res.response, 400));
           this.rt(s.id).lastText = res.response;
         }
         if (res.status === "ERROR") {

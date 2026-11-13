@@ -8,7 +8,7 @@ const PATTERNS = [
   // Emails (not SSH remotes like git@github.com:owner/repo).
   /(?<![A-Za-z0-9._%+-])(?!git@)[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
   // Provider keys and tokens with a known prefix (Anthropic, OpenAI, GitHub, Slack, AWS, Google, npm).
-  /\b(?:sk|pk|rk)-(?:ant-|proj-|live-|test-)?[A-Za-z0-9_-]{16,}/g,
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{10,}/g,
   /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
   /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
   /\bxox[abposr]-[A-Za-z0-9-]{10,}/g,
