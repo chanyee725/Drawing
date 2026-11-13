@@ -124,7 +124,7 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
     <LazyBoundary key={key} onFail={onFail}>
       <Suspense
         fallback={
-          <p className="p-6 text-sm" style={{ color: 'var(--text-muted)' }}>
+          <p className="p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
             문서를 불러오는 중이에요…
           </p>
         }
@@ -212,7 +212,7 @@ export function App() {
 
   // The open file and its saving (debounce, retry, conflict) live outside React; App reads only the
   // slices it shows, never blocks, canvas or document.
-  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree() }));
+  const [session] = useState(() => createFileSession({ saveFile: (p, f, keepalive) => api.saveFile(p, f, keepalive), onSaved: () => void refreshTree(), onGone: () => { setHashPath(null); setError('열어 둔 파일이 지워졌거나 옮겨졌어요'); void refreshTree(); } }));
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
@@ -738,7 +738,7 @@ export function App() {
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
           {paletteOpen && <CommandPalette commands={registry.list()} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
               <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
                 다시 불러오기
@@ -746,8 +746,8 @@ export function App() {
               <button
                 type="button"
                 disabled={conflict.revision === undefined}
-                className="h-7 rounded-md px-3 font-medium text-brand-foreground disabled:opacity-50"
-                style={{ background: 'var(--brand)' }}
+                className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
+                style={{ background: 'var(--primary)' }}
                 onClick={overwrite}
               >
                 내 것으로 덮어쓰기
@@ -755,7 +755,7 @@ export function App() {
             </div>
           )}
           {error && (
-            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
+            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span>{error}</span>
               <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
                 닫기

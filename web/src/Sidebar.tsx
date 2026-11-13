@@ -376,7 +376,7 @@ export function Sidebar(p: Props) {
         <button type="button" className={ICON_BUTTON} aria-label="찾기 (Ctrl K)" title="찾기 (Ctrl K)" onClick={p.onCommands}>
           <Search />
         </button>
-        <button type="button" className={cn(ICON_BUTTON, 'border bg-background text-text-2')} aria-label="새 파일 (N)" title="새 파일 (N)" onClick={p.onNewFile}>
+        <button type="button" className={cn(ICON_BUTTON, 'border bg-background text-sidebar-foreground/80')} aria-label="새 파일 (N)" title="새 파일 (N)" onClick={p.onNewFile}>
           <SquarePen />
         </button>
       </SidebarHeader>

@@ -416,3 +416,21 @@ test('hold: an edit during a slow move is saved to the new path, not the old one
   assert.equal(server.calls[0].file.revision, 5);
   assert.equal(server.calls[0].file.title, 'during the move');
 });
+
+test('a save that gets 404 (folder deleted in another tab, event missed) drops the file and tells the tab', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const server = fakeServer();
+  let gone = 0;
+  const s = createFileSession({ saveFile: server.saveFile, onGone: () => gone++ });
+  s.load('a/b.dpx', file());
+  s.edit({ title: 'x' });
+  t.mock.timers.tick(SAVE_DELAY);
+  await settle();
+  server.fail(new ApiError(404, 'file not found'));
+  await settle();
+  assert.equal(s.getState().path, null);
+  assert.equal(gone, 1);
+  t.mock.timers.tick(RETRY_MAX * 2);
+  await settle();
+  assert.equal(server.calls.length, 1);
+});
