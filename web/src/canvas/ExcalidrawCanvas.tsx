@@ -9,6 +9,8 @@ import type { Block } from '../api';
 import type { BlockLayout } from '../../../shared/render/index.ts';
 import { BlockEditor } from '../BlockEditor';
 import { BlockProps } from '../BlockProps';
+import { Button } from '../components/ui/button';
+import { NativeSelect } from '../components/ui/native-select';
 import { CanvasInsertMenu } from './CanvasInsertMenu';
 import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../dsl/templates';
 import { analyzeDiagram, prunedLayout } from '../dsl/adapter';
@@ -787,55 +789,48 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       {block && (
         <aside
           aria-label="다이어그램 코드"
-          className="absolute right-3 top-16 bottom-3 z-10 flex w-[min(28rem,calc(100%-1.5rem))] flex-col gap-2 rounded-lg border p-3 shadow-lg"
-          style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+          className="absolute right-3 top-16 bottom-3 z-10 flex w-[min(28rem,calc(100%-1.5rem))] flex-col gap-2 rounded-lg border border-border bg-popover p-3 text-popover-foreground shadow-(--shadow-pop)"
           // CodeMirror marks Escape it already used (closing the autocomplete popup) as handled; leave the panel open then.
           onKeyDown={(e) => e.key === 'Escape' && !e.defaultPrevented && setEditing(null)}
         >
           <div className="flex items-center gap-2 text-sm">
-            <span className="font-medium">다이어그램 코드</span>
-            <select
-              aria-label="종류"
-              value={block.type}
-              onChange={(e) => patchBlock({ type: e.target.value })}
-              className="h-8 rounded-md border px-2"
-              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-            >
+            <span className="text-sm font-semibold">다이어그램 코드</span>
+            <NativeSelect aria-label="종류" value={block.type} onChange={(e) => patchBlock({ type: e.target.value })}>
               {!isDiagramType(block.type) && <option value={block.type}>{block.type}</option>}
               {DIAGRAM_TYPES.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.label}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
             {isDiagramType(block.type) && (
-              <button
-                type="button"
-                className="h-8 rounded-md border px-3"
-                style={{ borderColor: 'var(--border)' }}
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-input"
                 onClick={() => {
                   const t = TEMPLATES[block.type as DiagramType];
                   if (!block.code.trim() || block.code === t || window.confirm('지금 코드를 예시로 바꿀까요?')) patchBlock({ code: t });
                 }}
               >
                 예시 넣기
-              </button>
+              </Button>
             )}
-            <button type="button" className="ml-auto h-8 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => setEditing(null)}>
+            <Button variant="ghost" size="sm" className="ml-auto" onClick={() => setEditing(null)}>
               닫기
-            </button>
+            </Button>
           </div>
           <BlockProps type={block.type} code={block.code} onChange={(code) => patchBlock({ code })} />
           <div className="min-h-0 flex-1 overflow-auto">
             <BlockEditor key={block.id} code={block.code} type={block.type} dark={dark} onChange={(code) => patchBlock({ code })} />
           </div>
           {resets.has(block.id) && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs text-muted-foreground">
               코드가 많이 바뀌어서 자동 배치로 그려요. 패널을 닫으면 옮긴 배치가 지워져요
             </p>
           )}
           {!analyzeDiagram(block.type, block.code).parsed && (
-            <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            <p className="text-xs text-muted-foreground">
               이 종류는 아직 문법 검사를 지원하지 않아요.
             </p>
           )}
