@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
 import { IS_MAC } from './platform';
 import { SCALES, describeExport, type ExportOptions } from './export/options';
@@ -30,6 +31,14 @@ const keep = (fn: () => void) => (e: Event) => {
 };
 
 export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled }: Props) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  // The option pills come first in the DOM, so Radix's keyboard entry focus lands on "1배" and
+  // Ctrl+E → Enter would change the PNG size. Move focus to the first export action once open.
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => contentRef.current?.querySelector<HTMLElement>('[data-export]:not([data-disabled])')?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [open]);
   const scope = selected ? '선택한 것' : '캔버스 전체';
   const items: { label: string; hint: string; kbd?: string; off: boolean; run: () => void; id: string }[] = [
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
@@ -52,7 +61,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             내보내기
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" aria-label="내보내기" className="w-72">
+        <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
           <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
             <legend className="sr-only">이미지 옵션</legend>
             <div className="flex items-center gap-1" role="group" aria-label="PNG 크기">
