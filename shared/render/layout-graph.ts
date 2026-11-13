@@ -33,6 +33,15 @@ const NODE_TWO_LINE_H = 56;
 /** Space a box node keeps around its content: left + right, top + bottom. */
 const NODE_PAD_X = 32;
 const NODE_PAD_Y = 12;
+/**
+ * Box card (spec §2.1, issue #114): an architecture node with an icon draws as a box with the icon on the
+ * left, CARD_INSET from the edge, and its text centred in the room right of the icon (CARD_RIGHT from the edge).
+ */
+const CARD_INSET = 20;
+const CARD_RIGHT = 16;
+/** Subtitle (`subtitle:`) size relative to the title (Eraser 10.44 / 13.05), and the gap above it. */
+const SUBTITLE_SCALE = 0.8;
+const SUBTITLE_GAP = 2;
 /** Shapes that get width buckets and one size per group. The rest keep shape-specific sizing. */
 const BUCKETED: ReadonlySet<ShapeKind> = new Set(['rectangle', 'cylinder', 'document']);
 const SPACING = {
@@ -68,9 +77,13 @@ interface NodeGeom {
   style: ElementStyle;
   label: Label;
   shape: ShapeKind;
-  /** Architecture nodes with an icon draw as a big icon with the label underneath, no box. */
+  /** `nodeStyle icon`: architecture nodes with an icon draw as a big icon with the label underneath, no box. */
   iconOnly: boolean;
+  /** Box card: icon on the left, text centred in the rest (architecture nodes with an icon, the default). */
+  card: boolean;
   iconSize: number;
+  /** Second line from `subtitle:`, smaller and muted. */
+  sub?: Label;
   w: number;
   h: number;
 }
@@ -84,23 +97,38 @@ interface GroupGeom {
   minW: number;
 }
 
+const subtitleOf = (node: GraphNode): string | undefined => node.attrs.subtitle?.trim() || undefined;
+
+/** The subtitle label, wrapped to `maxWidth`. */
+function measureSub(node: GraphNode, style: ElementStyle, maxWidth: number): Label | undefined {
+  const text = subtitleOf(node);
+  return text === undefined ? undefined : measureLabel(text, round(fontSize(style) * SUBTITLE_SCALE), style.typeface, style.wrap, maxWidth);
+}
+
+/** Height of the title plus the subtitle under it. */
+const textHeight = (label: Label, sub: Label | undefined): number => label.h + (sub ? SUBTITLE_GAP + sub.h : 0);
+
 function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
   const style = styleFor(d, node.attrs, node.span.line);
   const size = fontSize(style);
   const icon = node.attrs.icon;
   const shapeAttr = node.attrs.shape?.toLowerCase();
   const shape = (SHAPES as readonly string[]).includes(shapeAttr ?? '') ? (shapeAttr as ShapeKind) : 'rectangle';
-  if (d.type === 'cloud-architecture' && icon && !node.attrs.shape) {
+  const card = d.type === 'cloud-architecture' && !!icon && !node.attrs.shape;
+  if (card && d.styles.nodeStyle === 'icon') {
     const label = measureLabel(node.label, size, style.typeface, style.wrap, 120);
+    const sub = measureSub(node, style, 120);
     const iconSize = Math.round(size * 3);
-    return { node, style, label, shape, iconOnly: true, iconSize, w: Math.ceil(Math.max(iconSize, label.w) + 8), h: Math.ceil(iconSize + 6 + label.h) };
+    const w = Math.ceil(Math.max(iconSize, label.w, sub?.w ?? 0) + 8);
+    return { node, style, label, sub, shape, iconOnly: true, card: false, iconSize, w, h: Math.ceil(iconSize + 6 + textHeight(label, sub)) };
   }
   const iconSize = icon ? Math.round(size * 1.5) : 0;
   const iconW = icon ? iconSize + 8 : 0;
-  if (BUCKETED.has(shape)) return measureBucketed(node, style, shape, iconSize);
+  if (BUCKETED.has(shape)) return measureBucketed(node, style, shape, iconSize, card);
   const label = measureLabel(node.label, size, style.typeface, style.wrap, NODE_TEXT_MAX);
-  const cw = label.w + iconW;
-  const ch = Math.max(label.h, iconSize);
+  const sub = measureSub(node, style, NODE_TEXT_MAX);
+  const cw = Math.max(label.w, sub?.w ?? 0) + iconW;
+  const ch = Math.max(textHeight(label, sub), iconSize);
   let w = Math.max(cw + 32, 96);
   let h = Math.max(ch + 22, 44);
   switch (shape) {
@@ -133,32 +161,35 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
     default:
       break;
   }
-  return { node, style, label, shape, iconOnly: false, iconSize, w: Math.ceil(w), h: Math.ceil(h) };
+  return { node, style, label, sub, shape, iconOnly: false, card: false, iconSize, w: Math.ceil(w), h: Math.ceil(h) };
 }
 
 /** Label, width and height of a box node whose text wraps to fit `width`. */
-function sizeBox(g: Pick<NodeGeom, 'node' | 'style' | 'shape' | 'iconSize'>, width: number): Pick<NodeGeom, 'label' | 'w' | 'h'> {
+function sizeBox(g: Pick<NodeGeom, 'node' | 'style' | 'shape' | 'iconSize' | 'card'>, width: number): Pick<NodeGeom, 'label' | 'sub' | 'w' | 'h'> {
   const size = fontSize(g.style);
   const iconW = g.iconSize ? g.iconSize + 8 : 0;
-  const label = measureLabel(g.node.label, size, g.style.typeface, g.style.wrap, width - NODE_PAD_X - iconW);
-  const w = Math.max(width, Math.ceil(label.w + iconW + NODE_PAD_X));
-  const least = label.lines.length >= 2 ? NODE_TWO_LINE_H : NODE_MIN_H;
-  let h = Math.max(least, Math.ceil(Math.max(label.h, g.iconSize) + NODE_PAD_Y));
+  const padX = g.card ? CARD_INSET + CARD_RIGHT : NODE_PAD_X;
+  const room = width - padX - iconW;
+  const label = measureLabel(g.node.label, size, g.style.typeface, g.style.wrap, room);
+  const sub = measureSub(g.node, g.style, room);
+  const w = Math.max(width, Math.ceil(Math.max(label.w, sub?.w ?? 0) + iconW + padX));
+  const least = label.lines.length + (sub?.lines.length ?? 0) >= 2 ? NODE_TWO_LINE_H : NODE_MIN_H;
+  let h = Math.max(least, Math.ceil(Math.max(textHeight(label, sub), g.iconSize) + NODE_PAD_Y));
   if (g.shape === 'cylinder') h += 18;
   else if (g.shape === 'document') h += 10;
-  return { label, w, h };
+  return { label, sub, w, h };
 }
 
 /**
  * Box nodes (spec §1.1): the smallest width bucket whose wrap stays within MAX_LINES lines; failing that,
  * the widest (a long word or unwrapped line widens it).
  */
-function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind, iconSize: number): NodeGeom {
-  const base = { node, style, shape, iconSize };
-  let pick: Pick<NodeGeom, 'label' | 'w' | 'h'> | undefined;
+function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind, iconSize: number, card: boolean): NodeGeom {
+  const base = { node, style, shape, iconSize, card };
+  let pick: Pick<NodeGeom, 'label' | 'sub' | 'w' | 'h'> | undefined;
   for (const b of WIDTH_BUCKETS) {
     pick = sizeBox(base, b);
-    if (pick.w === b && pick.label.lines.length <= MAX_LINES) break;
+    if (pick.w === b && pick.label.lines.length <= MAX_LINES && (pick.sub?.lines.length ?? 0) <= MAX_LINES) break;
   }
   return { ...base, ...pick!, iconOnly: false };
 }
@@ -1025,20 +1056,39 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     const r = rects.get(g.node.id)!;
     handle(g.node.id, 'node');
     const { style, label } = g;
+    const { sub } = g;
+    // The subtitle is muted, kept readable on the node's fill (svg.ts); on a bold fill it takes the contrast colour.
+    const subItem = (x: number, y: number, anchor: 'start' | 'middle', on?: ElementStyle['paint']): SceneItem =>
+      textItem(sub!.lines, x, y, { size: sub!.size, font: style.typeface, anchor, tone: 'muted', ...(on ? { on } : {}) });
     if (g.iconOnly) {
       nodeItems.push({ kind: 'icon', name: g.node.attrs.icon!, x: r.x + r.w / 2 - g.iconSize / 2, y: r.y, size: g.iconSize, paint: style.paint });
       nodeItems.push(textItem(label.lines, r.x + r.w / 2, r.y + g.iconSize + 6, { size: label.size, font: style.typeface }));
+      if (sub) nodeItems.push(subItem(r.x + r.w / 2, r.y + g.iconSize + 6 + label.h + SUBTITLE_GAP, 'middle'));
       continue;
     }
     nodeItems.push({ kind: 'box', id: g.node.id, role: 'node', shape: g.shape, x: r.x, y: r.y, w: r.w, h: r.h, paint: style.paint, shadow: style.styleMode !== 'plain' && style.paint.mode !== 'outline' });
     const cy = g.shape === 'triangle' ? r.y + r.h * 0.64 : g.shape === 'cylinder' ? r.y + r.h / 2 + 5 : r.y + r.h / 2;
-    const contentW = label.w + (g.iconSize ? g.iconSize + 8 : 0);
+    const top = cy - textHeight(label, sub) / 2;
+    const subY = top + label.h + SUBTITLE_GAP;
+    if (g.card) {
+      // Box card: icon at the left edge, title and subtitle centred in the room right of it.
+      const ix = r.x + CARD_INSET;
+      nodeItems.push({ kind: 'icon', name: g.node.attrs.icon!, x: ix, y: cy - g.iconSize / 2, size: g.iconSize, paint: style.paint, inside: true });
+      const tx = (ix + g.iconSize + 8 + r.x + r.w - CARD_RIGHT) / 2;
+      nodeItems.push(textItem(label.lines, tx, top, { size: label.size, font: style.typeface, on: style.paint }));
+      if (sub) nodeItems.push(subItem(tx, subY, 'middle', style.paint));
+      continue;
+    }
+    const contentW = Math.max(label.w, sub?.w ?? 0) + (g.iconSize ? g.iconSize + 8 : 0);
     let x = r.x + r.w / 2 - contentW / 2;
     if (g.iconSize) {
       nodeItems.push({ kind: 'icon', name: g.node.attrs.icon!, x, y: cy - g.iconSize / 2, size: g.iconSize, paint: style.paint, inside: true });
       x += g.iconSize + 8;
     }
-    nodeItems.push(textItem(label.lines, g.iconSize ? x : r.x + r.w / 2, cy - label.h / 2, { size: label.size, font: style.typeface, anchor: g.iconSize ? 'start' : 'middle', on: style.paint }));
+    const anchor = g.iconSize ? 'start' : 'middle';
+    const tx = g.iconSize ? x : r.x + r.w / 2;
+    nodeItems.push(textItem(label.lines, tx, top, { size: label.size, font: style.typeface, anchor, on: style.paint }));
+    if (sub) nodeItems.push(subItem(tx, subY, anchor, style.paint));
   }
 
   // Spec §1.7: straight connectors join side ports dealt out at (i + 1) / (n + 1), as soft diagonal lines.

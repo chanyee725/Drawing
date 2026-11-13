@@ -16,6 +16,7 @@ export const PROPS: PropDef[] = [
   { key: 'typeface', label: '글꼴', types: ALL, options: [{ value: 'clean', label: '깔끔' }, { value: 'rough', label: '손글씨' }, { value: 'mono', label: '고정폭' }] },
   { key: 'textSize', label: '글자 크기', types: ALL, options: [{ value: 'small', label: '작게' }, { value: 'medium', label: '보통' }, { value: 'large', label: '크게' }] },
   { key: 'connectorStyle', label: '연결선', types: GRAPH, options: [{ value: 'elbow', label: '꺾은선' }, { value: 'straight', label: '직선' }, { value: 'arc', label: '곡선' }] },
+  { key: 'nodeStyle', label: '노드 모양', types: ['architecture'], options: [{ value: 'box', label: '상자' }, { value: 'icon', label: '아이콘' }] },
 ];
 
 /** Defaults the parser/renderer assume when a line is absent. direction's default depends on the type. */
