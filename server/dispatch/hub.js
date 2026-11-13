@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnCli } from "./cli.js";
+import { redact } from "./redact.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
 import { CHILD_PROMPT, NAMES, PERMS, SPAWN_PROMPT } from "./roles.js";
@@ -174,6 +175,8 @@ export class Hub extends EventEmitter {
       patch.asksUser = patch.status === "idle" && asksUser(this.live.get(s.id)?.lastText);
     }
     const prev = s.status;
+    // Error and reply clips reach the UI and memory only after key- and email-shaped parts are masked.
+    for (const k of ["error", "last"]) if (typeof patch[k] === "string") patch[k] = redact(patch[k]);
     Object.assign(s, patch, { updatedAt: Date.now() });
     // A removed session's process exits a moment after remove(); its late "done" must not reach the
     // UI, which would add the session back until the page is reloaded.
@@ -191,6 +194,8 @@ export class Hub extends EventEmitter {
 
   push(s, entry) {
     const r = this.rt(s.id);
+    // Everything in the ring buffer (and so everything the UI and the lead get) is masked first.
+    if (typeof entry.text === "string") entry.text = redact(entry.text);
     entry.at = Date.now();
     r.lastEventAt = entry.at;
     if (s.stuck?.reason === "silent") this.refreshStuck(s, entry.at);
@@ -294,7 +299,8 @@ export class Hub extends EventEmitter {
       ] },
       // Shown on its own once a Fable turn has reported it; null until then.
       fable: c.fable == null ? null : { windows: [{ label: "Fable 주간", used: c.fable, reset: c.fableReset }] },
-      openai: await codexLimits(),
+      // ~/.codex/sessions is read only once the user has connected OpenAI in Dispatch.
+      openai: this.isConnected("openai") ? await codexLimits() : null,
       gemini: { reached: geminiReached, reset: geminiReached ? g.reset ?? null : null },
     };
   }
@@ -321,7 +327,7 @@ export class Hub extends EventEmitter {
   async setTask(lead, input) {
     const STAGES = ["plan", "impl", "review", "test", "merge", "done", "blocked"];
     const all = (this.store.data.tasks ||= {});
-    const title = String(input.title || "").trim().slice(0, 120);
+    const title = redact(String(input.title || "").trim()).slice(0, 120);
     let t = (input.id && all[input.id]) || Object.values(all).find(x => x.lead === lead && x.title === title && x.stage !== "done");
     if (!t) {
       if (!title) throw new Error("title이 필요해요");
@@ -353,7 +359,7 @@ export class Hub extends EventEmitter {
       t.etaSetAt = t.etaAt ? Date.now() : null;
     }
     if (t.stage === "done") t.etaAt = null;
-    if (input.note !== undefined) t.note = String(input.note || "").slice(0, 200);
+    if (input.note !== undefined) t.note = redact(String(input.note || "")).slice(0, 200);
     t.updatedAt = Date.now();
     t.stuck = this.taskStuckOf(t);
     this.store.save();
@@ -876,7 +882,9 @@ export class Hub extends EventEmitter {
     const where = s.canSpawn && s.worktree
       ? `\n\n[병합 위치] 너의 작업 폴더는 ${s.cwd} (브랜치 ${s.branch})이고 통합 브랜치가 아니다. 병합은 프로젝트 폴더 ${this.root}에서 한다: git -C ${this.root} merge --no-ff <브랜치> (또는 --ff-only). 병합 뒤 git -C ${this.root} log --oneline -1 로 통합 브랜치 HEAD를 확인하고 보고에 적는다.`
       : "";
-    return [s.prompt, (s.canSpawn ? SPAWN_PROMPT : CHILD_PROMPT) + where, this.team().replyStyle ? replyStyle() : ""].filter(Boolean).join("\n\n");
+    // The role prompt is not saved (state.json keeps metadata only): after a restart it comes from the role.
+    const prompt = s.prompt ?? effectiveRoles(this.roles, this.store).find(r => r.id === s.role)?.prompt;
+    return [prompt, (s.canSpawn ? SPAWN_PROMPT : CHILD_PROMPT) + where, this.team().replyStyle ? replyStyle() : ""].filter(Boolean).join("\n\n");
   }
 
   start(s, prompt) {

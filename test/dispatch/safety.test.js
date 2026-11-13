@@ -193,3 +193,14 @@ test("resumeInterrupted resumes only sessions whose provider is connected", asyn
   assert.deepEqual(bin.calls().map(c => c.bin).sort(), ["claude", "codex"]);
   assert.equal(store.data.sessions.g.interrupted, true);
 });
+
+test("Codex limits (~/.codex/sessions) are read only while OpenAI is connected", async () => {
+  const bin = fakeCliBin();
+  dirs.push(bin.dir);
+  const { hub } = await makeHub(bin);
+  hub.isConnected = p => p !== "openai";
+  assert.equal((await hub.providerLimits()).openai, null);
+  // The only call site is behind the connection check.
+  const hubText = CODE.find(f => f.rel === "server/dispatch/hub.js").text;
+  assert.deepEqual(hubText.match(/.*codexLimits\(\).*/g).map(l => l.trim()), ['openai: this.isConnected("openai") ? await codexLimits() : null,']);
+});
