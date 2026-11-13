@@ -122,7 +122,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
           </button>
         </div>
         {message && (
-          <p role="alert" className="px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
+          <p role="alert" className="px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
             {message}
           </p>
         )}
@@ -145,7 +145,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
                   aria-pressed={picked === v.id}
                   onClick={() => setPicked(v.id)}
                   className="w-full px-3 py-2 text-left text-sm"
-                  style={picked === v.id ? { background: 'var(--accent-soft)', color: 'var(--accent)', fontWeight: 600 } : undefined}
+                  style={picked === v.id ? { background: 'var(--brand-soft)', color: 'var(--brand)', fontWeight: 600 } : undefined}
                 >
                   {when(v.time)}
                 </button>
@@ -176,7 +176,7 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
             disabled={!preview || busy}
             onClick={() => void restore()}
             className="h-8 rounded-md px-3 text-sm font-medium text-white disabled:opacity-50"
-            style={{ background: 'var(--accent)' }}
+            style={{ background: 'var(--brand)' }}
           >
             {busy ? '되돌리는 중이에요…' : '이 버전으로 되돌리기'}
           </button>

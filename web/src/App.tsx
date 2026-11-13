@@ -644,7 +644,7 @@ export function App() {
         {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
         {paletteOpen && <CommandPalette commands={commands()} onClose={() => setPaletteOpen(false)} />}
         {conflict && (
-          <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
+          <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
             <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
             <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
               다시 불러오기
@@ -653,7 +653,7 @@ export function App() {
               type="button"
               disabled={conflict.revision === undefined}
               className="h-7 rounded-md px-3 font-medium text-white disabled:opacity-50"
-              style={{ background: 'var(--accent)' }}
+              style={{ background: 'var(--brand)' }}
               onClick={overwrite}
             >
               내 것으로 덮어쓰기
@@ -661,7 +661,7 @@ export function App() {
           </div>
         )}
         {error && (
-          <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--accent-soft)' }}>
+          <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--brand-soft)' }}>
             <span>{error}</span>
             <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
               닫기
