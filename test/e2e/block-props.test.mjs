@@ -42,7 +42,7 @@ test('property pickers edit the code', { skip: !ON && 'set DRAW_E2E=1, CHROME an
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
   const call = async (m, u, b) => {
-    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) });
+    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
     return r.json();
   };
   const f = await call('POST', '/api/file', { path: 'props', title: 'Props' });

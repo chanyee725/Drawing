@@ -195,6 +195,9 @@ export class SharedLimits extends EventEmitter {
     return this.data;
   }
 
-  setClaude(l) { return this.write({ claude: { ...l, updatedAt: l.updatedAt ?? Date.now() } }); }
-  setGemini(g) { return this.write({ gemini: { ...g, at: g.at ?? Date.now() } }); }
+  // A stamp strictly after the one we hold: two updates within the same millisecond must not tie,
+  // or mergeLimits (newer wins) would drop the second one.
+  stamp(prev) { return Math.max(Date.now(), (prev ?? 0) + 1); }
+  setClaude(l) { return this.write({ claude: { ...l, updatedAt: l.updatedAt ?? this.stamp(this.data.claude?.updatedAt) } }); }
+  setGemini(g) { return this.write({ gemini: { ...g, at: g.at ?? this.stamp(this.data.gemini?.at) } }); }
 }

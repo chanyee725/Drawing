@@ -43,7 +43,7 @@ async function open(t, path, put) {
   // Another session's server may share ports: write only once the log names this workspace.
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
-  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) })).json();
+  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) })).json();
   const f = await call('POST', '/api/file', { path, title: '드래그' });
   await call('PUT', `/api/file?path=${path}`, put(f));
   const saved = async () => {

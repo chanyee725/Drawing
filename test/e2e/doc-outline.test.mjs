@@ -41,7 +41,7 @@ test('outline, heading link and wikilink in a headless browser', { skip: !ON && 
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
   const call = async (m, u, b) => {
-    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) });
+    const r = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
     return r.json();
   };
   const head = (level, text) => ({ type: 'heading', attrs: { level }, content: [{ type: 'text', text }] });

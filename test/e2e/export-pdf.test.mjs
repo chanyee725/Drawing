@@ -39,7 +39,7 @@ test('PDF export prints the document or one picture', { skip: !ON && 'set DRAW_E
   for (let i = 0; i < 100 && !log.includes('workspace'); i++) await new Promise((r) => setTimeout(r, 100));
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
-  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json' }, body: b && JSON.stringify(b) })).json();
+  const call = async (m, u, b) => (await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) })).json();
   let f = await call('POST', '/api/file', { path: 'pdf', title: 'PDF 시험' });
   f = await call('PUT', '/api/file?path=pdf', {
     ...f,

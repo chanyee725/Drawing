@@ -265,7 +265,7 @@ test('trash API: list and restore over HTTP', async () => {
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const call = async (method, path, body) => {
-    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
   };
   try {
@@ -292,7 +292,7 @@ test('history API: list, read, snapshot, traversal and bad ids are refused', asy
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const call = async (method, path, body) => {
-    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, body: await res.json() };
   };
   try {

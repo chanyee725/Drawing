@@ -8,6 +8,7 @@ import path from "node:path";
 import { checkEffort, checkPerm, Hub } from "../../server/dispatch/hub.js";
 import { diskView, Store } from "../../server/dispatch/dispatch-store.js";
 import { SharedLimits } from "../../server/dispatch/limits.js";
+import { FAKE_MARKER } from "../../server/dispatch/cli.js";
 
 const dirs = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
@@ -76,6 +77,7 @@ function fakeBin() {
   const script = `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(log)}, JSON.stringify(process.argv.slice(2)));\n`;
   writeFileSync(path.join(bin, "agy"), script);
   chmodSync(path.join(bin, "agy"), 0o755);
+  writeFileSync(path.join(bin, FAKE_MARKER), ""); // cli.js only starts agent CLIs from a fake folder under npm test
   return { bin, log };
 }
 

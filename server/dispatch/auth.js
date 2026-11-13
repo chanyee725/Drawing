@@ -1,7 +1,4 @@
-import { execFile, spawn } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { runCli as run, spawnCli } from "./cli.js";
 
 // Login itself is delegated to each CLI: it opens the browser OAuth flow and keeps its own credentials.
 // Dispatch never reads or stores tokens, keys, or account emails.
@@ -76,7 +73,9 @@ export function login(id, onChange, onDone = () => {}) {
   if (!cli || state[id].busy) return;
   Object.assign(state[id], { busy: true, url: null, error: null });
   onChange();
-  const p = spawn(cli.bin, cli.login, { stdio: ["ignore", "pipe", "pipe"] });
+  let p;
+  try { p = spawnCli(cli.bin, cli.login, { stdio: ["ignore", "pipe", "pipe"] }); }
+  catch (e) { Object.assign(state[id], { busy: false, error: e.message }); onChange(); return; }
   const scan = d => {
     const m = String(d).match(/https:\/\/\S+/);
     if (m && !state[id].url) { state[id].url = m[0]; onChange(); }

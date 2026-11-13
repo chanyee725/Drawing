@@ -2,12 +2,15 @@
 // Minimal MCP stdio server that lets a manager session drive Dispatch over its local HTTP API.
 // Spawned by Claude Code (--mcp-config) or Codex (mcp_servers.dispatch) with DISPATCH_URL / DISPATCH_PARENT.
 
-const BASE = process.env.DISPATCH_URL || "http://127.0.0.1:4330";
+// Only this machine's loopback: a DISPATCH_URL pointing anywhere else is refused, and there is no
+// default port to fall back to (the server passes its own URL when it starts a session).
+const BASE = /^http:\/\/127\.0\.0\.1:\d+$/.test(process.env.DISPATCH_URL || "") ? process.env.DISPATCH_URL : null;
 const PARENT = process.env.DISPATCH_PARENT || null;
 const SELF = process.env.DISPATCH_SELF || null;
 const CHILD = process.env.DISPATCH_MODE === "child";
 
 async function api(method, path, body) {
+  if (!BASE) throw new Error("DISPATCH_URL must be http://127.0.0.1:<port>");
   const res = await fetch(BASE + path, {
     method,
     headers: { "content-type": "application/json", "x-drawing": "1" },

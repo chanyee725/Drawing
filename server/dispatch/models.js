@@ -1,7 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
-const run = promisify(execFile);
+import { runCli as run } from "./cli.js";
 
 const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 

@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { runCli } from "./cli.js";
 import { appendFile, copyFile, link, mkdir, readFile, readdir, readlink, symlink } from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
 
-const run = promisify(execFile);
-const git = (cwd, ...args) => run("git", ["-C", cwd, ...args], { maxBuffer: 32 << 20 });
+const git = (cwd, ...args) => runCli("git", ["-C", cwd, ...args], { maxBuffer: 32 << 20 });
 
 export async function projectRoot(dir) {
   try { return (await git(dir, "rev-parse", "--show-toplevel")).stdout.trim(); } catch { return dir; }
