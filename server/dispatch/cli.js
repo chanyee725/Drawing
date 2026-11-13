@@ -50,3 +50,7 @@ export function spawnCli(bin, args = [], opts = {}) {
 export function runCli(bin, args = [], opts = {}) {
   try { return execFileP(bin, args, check(bin, opts)); } catch (e) { return Promise.reject(e); }
 }
+
+// The folder decides the project, not GIT_DIR / GIT_WORK_TREE inherited from whoever started us.
+export const GIT_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
+export const ownGitEnv = (env = process.env) => Object.fromEntries(Object.entries(env).filter(([k]) => !GIT_ENV.includes(k)));

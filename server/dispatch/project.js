@@ -3,7 +3,7 @@
 // server (a standalone Dispatch, or another Drawing server) already uses the project's `.dispatch/`.
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { claimLock, LockPathError, pidAlive, probe } from '../lock.js';
+import { claimLock, LockBreakTimeoutError, LockPathError, pidAlive, probe } from '../lock.js';
 
 /** Korean UI copy for each reason Dispatch is off. */
 export const OFF_MESSAGES = {
@@ -11,6 +11,7 @@ export const OFF_MESSAGES = {
   'not-git': '작업 공간이 git 저장소 밖이라 실행 기능은 꺼져 있어요. 그림 도구는 그대로 써요.',
   standalone: '이 프로젝트에서 다른 Dispatch 서버가 돌고 있어서 실행 기능을 껐어요. 그 서버를 멈추고 다시 시작해 주세요.',
   unsafe: '프로젝트의 .dispatch 폴더가 심볼릭 링크라서 실행 기능을 껐어요.',
+  'lock-busy': '프로젝트 잠금을 정리하지 못해서 실행 기능을 껐어요. 잠시 뒤에 서버를 다시 시작해 주세요.',
   'other-drawing': '이 프로젝트를 다른 Drawing 서버가 쓰고 있어서 실행 기능을 껐어요. 그 서버를 멈추고 다시 시작해 주세요.',
 };
 
@@ -64,6 +65,7 @@ export async function claimProject(root) {
     });
   } catch (err) {
     if (err instanceof LockPathError) return { ok: false, reason: 'unsafe', port: null };
+    if (err instanceof LockBreakTimeoutError) return { ok: false, reason: 'lock-busy', port: null };
     throw err;
   }
   if (res.ok) return res;

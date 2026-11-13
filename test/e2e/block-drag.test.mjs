@@ -183,7 +183,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   // Keys typed outside the canvas (a sidebar row, the page body) are not edit mode's: no nudge, no Escape exit.
   await page.mouse.click(n.DB.x, n.DB.y);
   await page.waitForTimeout(200);
-  await page.locator('aside [role="button"]').first().focus();
+  await page.locator('nav[aria-label="사이드바"] [data-slot="sidebar-menu-button"]').first().focus();
   for (const k of ['ArrowRight', 'Delete', 'Escape']) await page.keyboard.press(k);
   await page.evaluate(() => document.activeElement?.blur());
   for (const k of ['ArrowDown', 'Backspace', 'Escape']) await page.keyboard.press(k);
@@ -199,7 +199,7 @@ test('layout edit mode in a headless browser', { skip: !ON && 'set DRAW_E2E=1, C
   await codePanel.getByRole('button', { name: '닫기' }).click();
   await page.waitForTimeout(300);
   // A press outside the canvas (the sidebar) leaves edit mode.
-  await page.locator('aside').click({ position: { x: 5, y: 300 } });
+  await page.locator('nav[aria-label="사이드바"]').click({ position: { x: 5, y: 600 } });
   await overlay.waitFor({ state: 'detached', timeout: 5000 });
   // The block stays selected, so the palette enters again.
   await palette('레이아웃 편집');
