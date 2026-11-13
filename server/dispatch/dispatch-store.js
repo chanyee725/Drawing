@@ -13,7 +13,14 @@ export function diskView(data) {
     for (const k of MEMORY_ONLY) delete out[k];
     sessions[id] = out;
   }
-  return { ...data, sessions };
+  // Limit tickets carry clips of the lead's and teammates' last replies; those stay in memory too.
+  const tickets = {};
+  for (const [id, t] of Object.entries(data.tickets || {})) {
+    const { leadLast, ...out } = t;
+    if (Array.isArray(t.team)) out.team = t.team.map(({ last, ...m }) => m);
+    tickets[id] = out;
+  }
+  return data.tickets ? { ...data, sessions, tickets } : { ...data, sessions };
 }
 
 export class Store {

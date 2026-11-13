@@ -763,7 +763,7 @@ export class Hub extends EventEmitter {
     const list = t.items.length
       ? t.items.map(i => `- ${i.title} (${i.stage}${i.owner ? `, ${i.owner}` : ""})${i.note ? `: ${i.note}` : ""}`).join("\n")
       : "(보드에 올린 작업 없음 — 아래 마지막 메모를 보고 이어 가라)";
-    const team = t.team.length ? `\n\n[당시 팀원]\n${t.team.map(c => `- ${c.name} (${c.status}${c.branch ? `, ${c.branch}` : ""}): ${c.last}`).join("\n")}` : "";
+    const team = t.team.length ? `\n\n[당시 팀원]\n${t.team.map(c => `- ${c.name} (${c.status}${c.branch ? `, ${c.branch}` : ""})${c.last ? `: ${c.last}` : ""}`).join("\n")}` : "";
     const text = `[Dispatch 티켓 재개] ${t.reason}에서 멈췄던 작업이다. 한도가 초기화됐으니 이어서 진행하라. 브랜치·git log로 상태를 다시 확인하고, 팀원이 정리됐으면 필요한 만큼 다시 만들어라.\n\n[남은 작업]\n${list}${team}\n\n[멈출 때 내 마지막 메모]\n${t.leadLast || "(없음)"}`;
     if (lead && lead.status !== "done") {
       try { this.send(lead.id, text, { force: true }); } catch { return false; }
