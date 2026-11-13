@@ -678,7 +678,8 @@ export function App() {
       { id: 'settings-models', title: '모델 연결 열기', icon: Plug, keywords: ['models', 'connect', 'login', 'claude', 'codex', 'gemini', '모델', '연결', '로그인'], run: () => openSettings('models') },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
       { id: 'view-doc', title: '보기: 문서', group: 'view', icon: PanelLeft, run: () => setView('doc'), keywords: ['view', '보기'] },
-      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, run: () => setView('both'), keywords: ['view', '보기'] },
+      // A narrow screen fits one pane (the header has no 둘 다 there either).
+      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, disabled: narrow, hint: narrow ? '넓은 화면에서' : undefined, run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', group: 'view', icon: PanelRight, run: () => setView('canvas'), keywords: ['view', '보기'] },
       { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', group: 'view', icon: theme === 'dark' ? Sun : Moon, run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
       canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구'], MousePointer2),
@@ -858,7 +859,8 @@ export function App() {
               onProject={goProject}
               onOpen={openFile}
               onCreate={(k, project) => void newFile(project, k)}
-              onDelete={(p, t) => void remove({ type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
+              // The projects view has the document's sub-documents, so the confirm can say they go too.
+              onDelete={(p, t) => void remove(docPlace(projects, p).node ?? { type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
             />
           ) : (
             <>
