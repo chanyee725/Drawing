@@ -10,12 +10,14 @@ import type { ThemePref } from '../theme';
 import { MODELS_CHANGED } from './context';
 import {
   busyIds,
+  focusAfterClose,
   fractionFrom,
   LOGIN_ENDED_NOTE,
-  LOGIN_POLL_LIMIT_MS,
+  LOGIN_POLL_TIMEOUT_NOTE,
   loginsEndedUnconnected,
   loginUnlessClosed,
   oneAtATime,
+  pollLogins,
   providerRows,
   SECTIONS,
   THEME_CHOICES,
@@ -38,8 +40,11 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const panelId = useId();
+  // The element that opened the dialog, for focus return when the browser's own return lands on <body>.
+  const opener = useRef<Element | null>(null);
   useEffect(() => {
     const d = ref.current;
+    opener.current = document.activeElement;
     if (d && !d.open) d.showModal();
   }, []);
   // Logins still running when the dialog goes away are cancelled, so no CLI login is left behind unseen.
@@ -62,7 +67,10 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
       ref={ref}
       aria-labelledby={titleId}
       data-testid="settings-dialog"
-      onClose={onClose}
+      onClose={() => {
+        focusAfterClose(opener.current, ref.current);
+        onClose();
+      }}
       className="settings-dialog m-auto h-[min(560px,calc(100dvh-2rem))] w-[min(760px,calc(100vw-2rem))] max-w-none overflow-hidden rounded-lg border bg-background p-0 text-foreground shadow-md max-md:h-[calc(100dvh-1rem)] max-md:w-[calc(100vw-1rem)]"
     >
       <div className="flex h-full flex-col md:flex-row">
@@ -159,19 +167,12 @@ function ModelsPanel({ onLogins, isClosed }: { onLogins: (ids: ProviderId[]) => 
   }, [load]);
   // While a CLI login runs, check back every 2 s until it ends, and give up after LOGIN_POLL_LIMIT_MS.
   const busy = state.kind === 'ok' && busyIds(state.value.providers).length > 0;
+  // 다시 확인 bumps this, so a poll that gave up starts a new 10-minute window.
+  const [pollRound, setPollRound] = useState(0);
   useEffect(() => {
     if (!busy) return;
-    const started = Date.now();
-    const t = setInterval(() => {
-      if (Date.now() - started > LOGIN_POLL_LIMIT_MS) {
-        clearInterval(t);
-        setError('로그인을 너무 오래 기다렸어요. 다시 확인을 눌러 주세요.');
-        return;
-      }
-      void load();
-    }, 2000);
-    return () => clearInterval(t);
-  }, [busy, load]);
+    return pollLogins(() => void load(), () => setError(LOGIN_POLL_TIMEOUT_NOTE));
+  }, [busy, load, pollRound]);
 
   // One request at a time: a double click before the buttons turn disabled is dropped.
   const act = useMemo(
@@ -202,6 +203,7 @@ function ModelsPanel({ onLogins, isClosed }: { onLogins: (ids: ProviderId[]) => 
         try {
           await api.providerRefresh();
           await load();
+          setPollRound((n) => n + 1);
         } catch {
           setError('다시 확인하지 못했어요.');
         } finally {

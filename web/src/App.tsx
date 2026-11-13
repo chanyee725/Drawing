@@ -588,6 +588,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      // A native modal <dialog> (settings) owns the keyboard: no palette, G P or export behind it.
+      if (document.querySelector('dialog:modal')) return;
       // Mac uses only Cmd, everything else only Ctrl, so Mac's Ctrl+E/K stay with text fields.
       const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       const k = e.code;
