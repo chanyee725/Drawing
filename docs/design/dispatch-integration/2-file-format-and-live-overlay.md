@@ -185,14 +185,83 @@ So: a new `web/src/canvas/RunOverlay.tsx`, mounted next to `LayoutEditOverlay` (
 
 ### What is shown
 
-- **Node ring:** coloured outline per step state (working blue, waiting amber, stuck/failed red, done green,
-  pending grey). In dark mode, apply the same invert filter rule the edit overlay uses (`LayoutEditOverlay.tsx:47-48`)
-  or pick dark-safe colours directly; overlay HTML is not inverted by Excalidraw.
+- **Node ring:** state, colour and effect rules are in §5.1 (five display states, agent role colours, reduced
+  motion). An earlier draft used fixed colours per Dispatch state; §5.1 replaces it.
 - **Badge under the node** (one line, shrinks with zoom, hidden below 40 % zoom): model short name · `$1.84` ·
   `2.1M` tokens · branch chip · `#88` PR chip. `n > 1` shows a count with a hover list per session.
 - **Active edges:** optional later; needs connector ids in the scene, which it does not have yet.
 - **Click:** opens the session sheet (transcript read live from the Dispatch side, never from the run file).
 - **Run picker** in the file header: "실행 중" / past runs. Past runs render the same overlay from the sidecar.
+
+### 5.1 The diagram as the progress board (later stage, user direction 2026-11-13)
+
+Today runs are planned with tickets and the overlay shows badges. The direction is that **the drawn diagram itself
+becomes the progress board**: which nodes are done, in progress or not started, how far the whole run is, and
+which agent owns what, all readable on the diagram without opening another view.
+
+**Link key.** A step is tied to a node by the DSL node id (`steps[].node`, default `steps[].id`), the same key the
+layout overrides use (§3 "Step ↔ node link"). An edge between two step nodes is keyed by its `from`/`to` node ids,
+not by the renderer's `e1, e2…` order ids, so it survives code edits that reorder lines.
+
+**Step state (display).** Five values, derived on the server from the run record and the task board, sent in the
+`run` SSE patch as `step.view`:
+
+| Key | Label | Derived from | Glyph |
+|---|---|---|---|
+| `pending` | 대기 | no session yet, or board stage `plan` | ◌ hollow circle |
+| `active` | 진행 | stage `impl` / `test` / `merge` and no session `failed`/`stuck` | ● filled circle |
+| `review` | 리뷰 | stage `review` | ◐ half circle |
+| `done` | 완료 | stage `done` (merge check ok, or closed without a commit) | ✓ check |
+| `blocked` | 막힘 | stage `blocked`, a session `failed` or `stuck`, or the step paused by the limit guard | ⚠ triangle |
+
+A session waiting on a person keeps the step `active`/`review` and adds a small "사람 기다림" tag; it is not a
+progress state. The run record still keeps the raw per-session states (§4); `view` is computed, never stored.
+
+**Colour rules.**
+
+- Each agent's colour is its **Dispatch role colour** (`--role-*`, lead/impl/review/test/design/docs), defined for
+  both themes. Two sessions of the same role get the same hue at different lightness steps (up to 3) plus their
+  short name in the badge, so colour never has to carry identity alone.
+- `active` and `review` use the owning agent's colour; with no owner yet, `--ok` green. `done` uses `--ok` green,
+  `blocked` uses `--bad`, `pending` uses `--idle` grey. Status colours come from Dispatch's tokens, the same ones
+  the sessions board uses.
+- A **legend** sits in the block's top-right corner (collapsible): one row per agent (role colour swatch, short
+  name, role, model) and one row per state glyph. Only agents and states present in the run are listed.
+
+**Effects.**
+
+- Node: `active`/`review` get a 2px ring in the agent colour with a slow pulse (opacity 0.5 ↔ 1, 1.6 s);
+  `done` a solid thin ring and a ✓ corner badge; `blocked` a solid red ring and ⚠, no animation (a stopped thing
+  should look stopped); `pending` a dashed grey ring.
+- Edge: an edge whose target step is `active`/`review` and whose source is `done` gets a flowing dash along its
+  path in the target agent's colour; an edge between two `done` steps is solid green; others stay as drawn. This
+  needs connector paths with `from`/`to` in the render scene (today the scene has node boxes only, see "Active
+  edges" above); adding `SceneEdge { from, to, points }` to `shared/render/scene.ts` is part of the ticket.
+
+**How it is drawn.** One transparent SVG layer laid over the block picture, positioned with the scene → screen
+frame math (§5 "How badges find their node"), never baked into the block SVG. The same component draws in both
+places: `RunOverlay` on the canvas and inside the document's diagram embed (`web/src/doc/DiagramView.tsx`), which
+already draws the block picture from the same render result. Exports leave it out unless a later "실행 상태 포함"
+option asks for it (open question).
+
+**Progress.** Shown as a bar plus text at the top of the legend and in the run strip: `5단계 중 2 완료 · 48% ·
+남은 3 (막힘 1)`. Weighted per step: `pending` 0, `active` 0.5, `review` 0.8, `done` 1. `blocked` keeps the weight
+of the state it was in before blocking (so blocking never makes the bar go backwards) and is counted separately in
+the text. Steps closed as abandoned (그만둠) leave the denominator. Percent = sum of weights ÷ counted steps,
+rounded down so 100% means every counted step is `done`. Steps with `n > 1` sessions count once.
+
+**Accessibility.**
+
+- Never colour alone: every state has a glyph and a text label (badge text and `aria-label`, e.g.
+  "로그인 화면 · 진행 · Juno(구현자)"); the legend repeats glyph + label.
+- `prefers-reduced-motion: reduce`: no pulse and no flowing dash. `active`/`review` become a static thicker ring
+  (3px) and edges a static dashed line in the same colour.
+- Contrast: rings and glyphs keep 3:1 against both diagram backgrounds; checked in the headless screenshot pass in
+  light and dark.
+
+**Fit with "canvas looks like Eraser".** The board is a layer *over* the Eraser-look picture: it adds rings,
+badges and a legend but never changes node fills, shapes, connector style or fonts, so the diagram underneath
+still reads as the Eraser-style drawing the person wrote.
 
 ### Live update path
 

@@ -19,6 +19,9 @@ public look, not measured values.
    action (files, views, export, Dispatch sessions) is reachable without the mouse.
 6. **Reuse the WIP in parts, not as-is** (section 8): take `lib/utils.ts`, the `ui/*` sources and the dark-mode
    variant; replace the Zinc token block and fix the broken legacy variables before merging.
+7. **Two looks, one boundary (user decision, 2026-11-13).** The Linear-like look is for the app chrome only
+   (sidebar, top bar, menus, dialogs, Dispatch screens). The canvas and diagram blocks follow one rule: **look the
+   same as Eraser** (section 5). Eraser's name, logo, icon/illustration/font files and code are still never copied.
 
 ## 1. What exists today
 
@@ -187,25 +190,51 @@ Status in the top bar is a 6px dot + 12px text (the WIP already did this, `748f6
  role = 2px left bar in --role-*; status = dot in --ok/--warn/--bad/--idle; numbers .num
 ```
 
-## 5. Does it fit the Eraser-like canvas?
+## 5. The canvas follows Eraser, not the app chrome
 
-Yes, if the chrome stays neutral and the canvas keeps its own colour:
+**Rule (user decision, 2026-11-13): the canvas and diagram blocks look the same as Eraser.** The Linear-like
+tokens above are for app chrome only. Inside a diagram block, Eraser is the reference for node shapes, the colour
+palette and `colorMode` (`pastel` / `bold` / `outline`), `styleMode` (`shadow` / `plain` / `watercolor`),
+`typeface` (`rough` / `clean` / `mono`), connectors and `connectorStyle` (`elbow` default / `straight` / `arc`),
+labels, group boxes, icon placement, font sizes and spacing. Sources: `docs/research/eraser/04-visual-design.md`
+§7–§10 and `02-diagram-as-code-ai.md` (styling table, lines 39-47; `connectorStyle` rules, line 47). What stays
+forbidden is unchanged (CLAUDE.md "Internal use only"): no Eraser name, logo, icon or illustration files, font
+files or code (except the MIT `eraser-diagrams` code with its notice). Matching the look means re-drawing it with
+our own renderer, Lucide/Simple Icons and OFL fonts. The work to close the gaps is its own ticket
+(`dispatch-integration.md`, "Eraser 다이어그램 스타일 맞추기").
 
-- **Chrome vs content.** Linear-like chrome is grey and quiet; the canvas and diagrams carry colour (pastel/
-  bold fills per `docs/research/eraser/04-visual-design.md:58`). Not competing is the point.
-- **Canvas background = `--background`, grid = `--dot`** (low contrast, 20px, `04-visual-design.md:77`). The
-  canvas sits directly on the frame with no card around it, which matches both looks.
-- **Excalidraw UI.** Its toolbar and menus have their own CSS. Re-skin them through Excalidraw's CSS variables
-  (`--island-bg-color`, `--default-border-color`, `--color-primary` …) mapped to our tokens in one block, scoped
-  under `.excalidraw`, instead of overriding classes one by one. The `theme` prop stays as is
-  (`canvas/ExcalidrawCanvas.tsx:665`).
-- **Dark diagrams.** Excalidraw's dark mode inverts scene colours; our doc pictures and print already rely on the
-  same `invert(93%) hue-rotate(180deg)` trick (`web/src/index.css:214`). Keep it; don't invent a second dark
-  palette for diagrams.
-- **Hand-drawn font** stays on the canvas only (Excalidraw's bundled fonts, `web/vite.config.ts:10-12`); the UI
-  never uses it. Inter in the chrome + sketchy text on the canvas is the same contrast Eraser has.
-- **Risk:** at 13px chrome, Excalidraw's built-in 14px+ islands look larger. Accept it in v1; scale its
-  toolbar only if the screenshot pass shows a clash.
+So no chrome token (`--brand`, the grey ramp, 6px radius, Inter 13px) leaks into `shared/render/`. The renderer
+keeps its own theme table (`shared/render/theme.ts`), tuned against Eraser screenshots.
+
+### Where the two looks meet (recommendation)
+
+Three places touch both looks; the recommendation is **"the canvas owns everything inside its rectangle, the chrome
+only frames it"**:
+
+1. **Canvas background:** the canvas area uses the diagram theme's background (Eraser's near-white in light, its
+   dark surface in dark), not `--background`. The chrome around it (`--panel`, 1px `--border`) frames it, so a
+   small value difference between the two greys reads as a deliberate edge, not a mismatch. The dot grid stays
+   low-contrast and is drawn by the canvas (`04-visual-design.md` §8).
+2. **Selection colour:** selection inside the canvas (Excalidraw selection, layout-edit handles, the run overlay's
+   focus) uses one canvas selection colour defined next to the diagram theme. Its default is the same hue as
+   `--brand`, so a selected block and the focused sidebar row still look related, but it is owned by the canvas
+   theme and can be moved to an Eraser-like value without touching the chrome.
+3. **Dark/light switch:** one switch drives both (`data-theme`, OS by default, manual override kept). Diagrams do
+   not get a filter: the renderer draws each palette for the theme from colour *names* (`color: green`), as
+   Eraser does (dark mode is a viewer setting, not a file setting, `04-visual-design.md:59-60`). The current
+   `invert(93%) hue-rotate(180deg)` trick (`web/src/index.css:214`) stays only for exported doc pictures and print
+   until the renderer's dark palette covers every colour name; it is removed as part of the style ticket.
+
+Also kept from before:
+
+- **Excalidraw UI.** Re-skin its toolbar and menus through Excalidraw's CSS variables (`--island-bg-color`,
+  `--default-border-color`, `--color-primary` …) in one block scoped under `.excalidraw`, mapped to chrome tokens:
+  the toolbar is chrome, the scene is canvas. The `theme` prop stays (`canvas/ExcalidrawCanvas.tsx:665`).
+- **Hand-drawn font** stays on the canvas only (`typeface rough` = Shantell Sans, already bundled); the UI never uses it.
+- **Risk:** at 13px chrome, Excalidraw's built-in 14px+ islands look larger. Accept it in v1; scale its toolbar
+  only if the screenshot pass shows a clash.
+- **Run overlay** (pipeline progress on the diagram, part 2 §5.1) is drawn over the Eraser-look picture and uses
+  Dispatch's status and role tokens, which exist in both themes; it never repaints the diagram itself.
 
 ## 6. Implementation base: options compared
 
