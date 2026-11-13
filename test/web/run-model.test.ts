@@ -119,11 +119,11 @@ test('stripModel: the one-line summary and who needs a look', () => {
   const rows = stepRows(r, live, now);
   const sm = stripModel(r, rows, sessionRows(r, live, now), 0.68, now);
   assert.equal(sm.glyph, '●');
-  assert.deepEqual(sm.parts, ['실행 중', '4단계 중 0 완료 · 32% · 남은 4 (막힘 1)', '24분째', '$1.70', '5시간 68%']);
+  assert.deepEqual(sm.parts, ['실행 중', '4단계 중 0 완료 · 45% · 남은 4 (막힘 1)', '24분째', '$1.70', '5시간 68%']);
   assert.deepEqual(sm.attention, [{ sid: 's2', text: 'Juno(구현자)가 답을 기다려요', since: null }]);
   const ended = record({ state: 'done', endedAt: T0 + 67 * MIN });
   const em = stripModel(ended, stepRows(ended), sessionRows(ended), 0.68, now);
-  assert.deepEqual(em.parts, ['완료', '4단계 중 2 완료 · 50% · 남은 2 (막힘 1)', '1시간 7분', '$1.70']);
+  assert.deepEqual(em.parts, ['완료', '4단계 중 2 완료 · 62% · 남은 2 (막힘 1)', '1시간 7분', '$1.70']);
   assert.deepEqual(em.attention, []);
 });
 
@@ -164,6 +164,22 @@ test('beforeBlocked: a blocked step keeps the weight of its newest non-blocking 
   assert.equal(beforeBlocked(tl, 'impl'), 'review');
   assert.equal(beforeBlocked(tl, 'test'), 'active');
   assert.equal(beforeBlocked(tl, 'merge'), undefined);
+});
+
+test('stepRows: a blocked step whose history fell off the capped timeline still counts as started', () => {
+  const now = T0 + 24 * MIN;
+  const started = { state: 'blocked' as const, startedAt: T0 + 13 * MIN, endedAt: null, sessions: [{ sid: 's4', name: 'Pell', state: 'failed' as const }] };
+  const base = record({ steps: { ...record().steps, test: { state: 'working', startedAt: T0 + 13 * MIN, endedAt: null, sessions: [{ sid: 's4', name: 'Pell', state: 'working' }] } } });
+  const p0 = stripModel(base, stepRows(base, new Map(), now), [], null, now).progress;
+  // Only failed/blocked entries left for the step: no non-blocking state to carry.
+  const r = record({ steps: { ...record().steps, test: started }, timeline: [[T0 + 20 * MIN, 'test', 'failed'], [T0 + 21 * MIN, 'test', 'blocked']] });
+  const rows = stepRows(r, new Map(), now);
+  assert.equal(rows[3]!.view, 'blocked');
+  assert.equal(rows[3]!.before, 'active');
+  assert.equal(stripModel(r, rows, [], null, now).progress.percent, p0.percent);
+  // Never started: still nothing to carry.
+  const fresh = record({ steps: { ...record().steps, test: { state: 'blocked', startedAt: null, endedAt: null, sessions: [] } }, timeline: [] });
+  assert.equal(stepRows(fresh, new Map(), now)[3]!.before, undefined);
 });
 
 test('stripModel: blocking never makes the bar go backwards; skipped steps leave the count', () => {
