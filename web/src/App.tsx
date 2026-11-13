@@ -51,6 +51,7 @@ import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
 import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
 import { PlanStrip } from './run/PlanStrip';
+import { events } from './lib/events';
 
 const NARROW = '(max-width: 767px)';
 
@@ -405,15 +406,7 @@ export function App() {
 
   // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    const es = new EventSource('/api/events');
-    es.addEventListener('workspace', (m) => {
-      let e: WorkspaceEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
-      } catch {
-        return;
-      }
+    const offWorkspace = events.subscribeJson<WorkspaceEvent>('workspace', (e) => {
       // This tab's own move already renames the open file; the echo must not close it.
       if (e.kind === 'tree' && e.from !== undefined && ownMoves.current.delete(e.from)) {
         void refreshTree();
@@ -427,19 +420,19 @@ export function App() {
       void refreshTree();
     });
     // Runs of the open file; a run starting or ending also changes its tree badge.
-    es.addEventListener('run', (m) => {
-      let e: RunEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as RunEvent;
-      } catch {
-        return;
-      }
+    const offRun = events.subscribeJson<RunEvent>('run', (e) => {
       onRunEvent(e);
       if (e.run) void refreshTree();
     });
     // Events missed while the stream was down: read the run again.
-    es.onopen = () => void reloadRun();
-    return () => es.close();
+    const offOpen = events.onConnection((online) => {
+      if (online) void reloadRun();
+    });
+    return () => {
+      offWorkspace();
+      offRun();
+      offOpen();
+    };
   }, [session, load, refreshTree]);
 
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
