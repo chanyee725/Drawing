@@ -42,7 +42,7 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
   assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
   const call = (m, u, b) => fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
-  await call('POST', '/api/file', { path: 'plain', title: 'Plain' });
+  await call('POST', '/api/file', { path: 'ops/plain', title: 'Plain' });
 
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME });
   const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
@@ -52,13 +52,14 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
   await page.goto(BASE);
   const nav = page.getByRole('navigation', { name: '사이드바' });
   const row = (text) => nav.locator('[data-slot="sidebar-menu-button"]').filter({ hasText: text }).first();
+  await row('ops').click(); // unfold the project
   await row('Plain').waitFor();
+  await page.getByRole('button', { name: '모든 파일' }).first().click();
   assert.equal(await nav.getByRole('img', { name: '파이프라인: 계획' }).count(), 0, 'a plain file has no badge');
 
   await page.getByRole('button', { name: '새 파이프라인 계획' }).click();
 
   // The file opened with the template.
-  await row('release').waitFor();
   await page.waitForFunction(() => decodeURIComponent(location.hash).includes('release'));
   const res = await call('GET', '/api/file?path=release');
   assert.equal(res.status, 200);
@@ -72,9 +73,13 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
   assert.ok(f.document.content.some((n) => n.type === 'diagram' && n.attrs.blockId === f.blocks[0].id), 'document embeds the diagram');
   await page.getByRole('heading', { name: '목표' }).first().waitFor();
 
-  // Only the pipeline row carries the badge (hidden while the row is hovered, so move the pointer off the sidebar).
-  await page.mouse.move(900, 400);
-  const badge = row('release').getByRole('img', { name: '파이프라인: 계획' });
+  // A pipeline file inside a project carries the badge in the sidebar; the plain one does not.
+  const { document, blocks, plan } = f;
+  assert.equal((await call('POST', '/api/file', { path: 'ops/ship', title: 'Ship', document, blocks, plan })).status, 201);
+  await page.reload();
+  await row('ops').click();
+  await row('Ship').waitFor();
+  const badge = row('Ship').getByRole('img', { name: '파이프라인: 계획' });
   await badge.waitFor();
   assert.equal(await badge.textContent(), '◐계획');
   assert.equal(await nav.getByRole('img', { name: '파이프라인: 계획' }).count(), 1);
