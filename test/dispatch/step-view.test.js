@@ -97,4 +97,6 @@ test("progress: weighted, rounded down, blocked keeps its weight, abandoned leav
   assert.equal(progress([{ view: "blocked" }]).percent, 0);
   assert.equal(progress([]).percent, 0);
   assert.equal(progressLabel(progress([{ view: "done" }, { view: "active" }])), "2단계 중 1 완료 · 75% · 남은 1");
+  // Every step skipped: nothing to count, no "0단계 중 0 완료".
+  assert.equal(progressLabel(progress([{ view: "pending", abandoned: true }, { view: "done", abandoned: true }])), "건너뛴 단계뿐이에요");
 });

@@ -202,7 +202,8 @@ export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.n
     });
     const row: StepRow = { id: ps.id, n: i + 1, title: labels.get(node) ?? node, view, glyph: v.glyph, label: skipped ? '건너뜀' : v.label, time, agents, waiting, skipped, node };
     if (view === 'blocked') {
-      const before = beforeBlocked(record.timeline, ps.id);
+      // The timeline is capped, so a step blocked long ago can lose its history; one that started still carries 'active' weight.
+      const before = beforeBlocked(record.timeline, ps.id) ?? (step.startedAt !== null || step.sessions.length > 0 ? 'active' : undefined);
       if (before) row.before = before;
     }
     return row;
