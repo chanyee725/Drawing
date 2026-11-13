@@ -2,10 +2,11 @@
 // coordinates, so it scales with the picture. Draws rings, a glyph corner badge and a "state · agent" label per step
 // and traces active edges. Never touches the picture, the canvas elements or the file.
 // The same component draws on the canvas (RunOverlay) and in the document's diagram embed (DiagramView).
-import { useMemo } from 'react';
+import { useId, useMemo } from 'react';
+import { progressLabel } from '../../../shared/dispatch/step-view.ts';
 import type { Scene } from '../../../shared/render/index.ts';
 import { badgeRect } from '../../../shared/render/badge.ts';
-import { overlayModel, pathData, type OverlayNode, type RunStep } from './overlayModel';
+import { overlayModel, pathData, type OverlayModel, type OverlayNode, type RunStep } from './overlayModel';
 import { setStill, useStill } from './runStore';
 
 type Props = {
@@ -48,6 +49,7 @@ export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props
           <Step key={n.node} n={n} labels={labels} />
         ))}
       </svg>
+      <Legend model={model} />
       {moving && (
         <button type="button" className="run-motion" onClick={() => setStill(!still)}>
           {still ? '움직임 켜기' : '움직임 멈추기'}
@@ -83,5 +85,44 @@ function Step({ n, labels }: { n: OverlayNode; labels: boolean }) {
         </g>
       )}
     </g>
+  );
+}
+
+/** Top-right of the block (§5.1): the weighted progress bar and text, then a collapsible list of agents and states. */
+function Legend({ model }: { model: OverlayModel }) {
+  const id = useId();
+  const { progress: p, legend } = model;
+  return (
+    <div className="run-legend" data-run-legend="">
+      <p id={id} className="run-legend-progress">
+        {progressLabel(p)}
+      </p>
+      <progress className="run-progress" value={p.percent} max={100} aria-labelledby={id} />
+      <details open>
+        <summary>범례</summary>
+        <ul aria-label="에이전트">
+          {legend.agents.map((a) => (
+            <li key={a.name}>
+              <span className="run-swatch" aria-hidden="true" style={{ background: a.color }} />
+              <span>{a.name}</span>
+              <span className="run-legend-dim">
+                {a.roleName}
+                {a.model ? ` · ${a.model}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <ul aria-label="상태">
+          {legend.states.map((s) => (
+            <li key={s.view}>
+              <span className="run-legend-glyph" aria-hidden="true" style={{ color: s.color }}>
+                {s.glyph}
+              </span>
+              <span>{s.label}</span>
+            </li>
+          ))}
+        </ul>
+      </details>
+    </div>
   );
 }
