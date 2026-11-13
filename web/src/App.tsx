@@ -6,7 +6,8 @@ import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } fr
 import { Sidebar } from './Sidebar';
 import { ShellHome } from './ShellHome';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
-import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
+import { asTreeNode, docPlace, newFileDir, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
+import { SubDocs } from './SubDocs';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -64,6 +65,8 @@ function useNarrow() {
 }
 
 const NO_BLOCKS: Block[] = [];
+// Showing something on the canvas: next to the document, or instead of it on a narrow screen.
+const toCanvas = (v: View, narrow: boolean): View => (narrow ? 'canvas' : v === 'doc' ? 'both' : v);
 
 type TreeFile = Extract<TreeNode, { type: 'file' }>;
 /** Every file in the tree, depth first (folders in tree order). */
@@ -339,9 +342,10 @@ export function App() {
   }, [session]);
 
   // New files go in the project shown (or the open file's project); a typed `a/b` path still works.
-  const newFile = async () => {
-    const dir = newFileDir(section, projects, path);
-    const name = window.prompt(dir ? `새 파일 이름을 입력해 주세요 (${dir} 안에 만들어요)` : '새 파일 이름을 입력해 주세요');
+  // A sub-document goes in the folder named after the open document (design doc 6 §1).
+  const newFile = async (sub = false) => {
+    const dir = sub && path ? subFolderOf(path) : newFileDir(section, projects, path);
+    const name = window.prompt(sub ? '하위 문서 이름을 입력해 주세요' : dir ? `새 파일 이름을 입력해 주세요 (${dir} 안에 만들어요)` : '새 파일 이름을 입력해 주세요');
     const stem = name ? fileStem(name) : '';
     if (!stem) return;
     const p = dir ? `${dir}/${stem}` : stem;
@@ -493,14 +497,18 @@ export function App() {
     }
   };
 
-  const showDoc = view !== 'canvas';
-  const showCanvas = view !== 'doc';
+  // Narrow screens show one pane at a time (design doc 6 §6): 'both' shows the document there.
+  const shown: View = narrow && view === 'both' ? 'doc' : view;
+  const showDoc = shown !== 'canvas';
+  const showCanvas = shown !== 'doc';
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
   const showBlock = useCallback((blockId: string) => {
-    setView((v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
   }, []);
   const showFrame = useCallback((frameId: string) => {
-    setView((v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
   }, []);
   const report = useCallback(
@@ -654,8 +662,12 @@ export function App() {
   useCommandSource(registry, 'files', fileCommands);
 
   const dark = theme === 'dark';
+  const place = useMemo(() => docPlace(projects, path), [projects, path]);
   const doc = hasFile && path && (
-    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+    <>
+      <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+      <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(true)} />
+    </>
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
@@ -671,6 +683,7 @@ export function App() {
     },
     [narrow],
   );
+  const openCrumb = (c: Crumb) => (c.kind === 'project' ? showSection({ kind: 'project', path: c.path }) : void open(c.path));
 
   // Shell shortcuts (doc 6 §5): A 모든 파일, R 최근, B 보관함, N 새 파일, "," 설정. Never inside a text field,
   // an editor, the canvas (its own tool keys) or a dialog: see shellKey.
@@ -757,8 +770,12 @@ export function App() {
             hasFile={hasFile}
             status={status}
             statusAlert={statusAlert}
-            view={view}
+            view={shown}
             onView={setView}
+            narrow={narrow}
+            trail={place.trail}
+            onCrumb={openCrumb}
+            onSubDoc={() => void newFile(true)}
             onTitle={(title) => edit({ title })}
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
@@ -782,7 +799,7 @@ export function App() {
               />
             }
           />
-              {view === 'both' ? (
+              {shown === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
