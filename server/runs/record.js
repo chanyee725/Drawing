@@ -58,6 +58,15 @@ export function pickSession(s) {
   return out;
 }
 
+/** How a step closed (E28): { commit, base? } when merged, { abandoned: true } when dropped; null when neither. */
+export function pickResult(r) {
+  if (!r || typeof r !== 'object') return null;
+  if (r.abandoned === true) return { abandoned: true };
+  if (typeof r.commit !== 'string' || !/^[0-9a-f]{4,40}$/.test(r.commit)) return null;
+  const base = short(r.base);
+  return { commit: r.commit, ...(base && { base }) };
+}
+
 export function stepStateOf(step) {
   const states = step.sessions.map((s) => s.state).filter(Boolean);
   if (states.length === 0) return step.state;

@@ -12,6 +12,7 @@ import {
   RUN_STATES,
   STEP_STATES_WITHOUT_SESSIONS,
   TIMELINE_MAX,
+  pickResult,
   pickSession,
   serializeRecord,
   stepStateOf,
@@ -266,11 +267,26 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return run ? Object.keys(run.record.steps) : null;
   };
 
-  /** Finish a run (done / failed / stopped): written at once and dropped from memory. */
-  async function endRun(runId, state = 'done') {
+  /**
+   * Finish a run (done / failed / stopped): written at once and dropped from memory. `results` ({ [stepId]:
+   * { commit?, base?, abandoned? } }) says how the board closed each step (E28): merged at a commit, or abandoned
+   * (그만둠). An abandoned step without sessions becomes `skipped`.
+   */
+  async function endRun(runId, state = 'done', { results = null } = {}) {
     const run = get(runId);
     if (!RUN_STATES.includes(state) || state === 'running') throw new StoreError(400, 'invalid run state');
     flushEvents(runId);
+    for (const [id, r] of Object.entries(results ?? {})) {
+      const step = run.record.steps[id];
+      const result = pickResult(r);
+      if (!step || !result) continue;
+      step.result = result;
+      if (result.abandoned && step.sessions.length === 0 && step.state !== 'skipped') {
+        step.state = 'skipped';
+        step.endedAt = now();
+        run.record.timeline.push([step.endedAt, id, 'skipped']);
+      }
+    }
     run.record.state = state;
     run.record.endedAt = now();
     run.record.totals = totalsOf(run.record);
