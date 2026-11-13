@@ -161,6 +161,9 @@ function iconMarkup(ic: SceneIcon, theme: Theme): string {
   );
 }
 
+/** Corner radius of elbow connectors (spec §1.7). */
+export const BEND_RADIUS = 6;
+
 /** Polyline path with rounded corners. */
 function roundedPath(ps: Point[], radius: number): string {
   if (ps.length < 3) return `M${pts(ps).replace(' ', 'L')}`;
@@ -178,7 +181,11 @@ function roundedPath(ps: Point[], radius: number): string {
     }
     const p1 = { x: b.x - ((b.x - a.x) / l1) * r, y: b.y - ((b.y - a.y) / l1) * r };
     const p2 = { x: b.x + ((c.x - b.x) / l2) * r, y: b.y + ((c.y - b.y) / l2) * r };
-    d += `L${n(p1.x)} ${n(p1.y)}Q${n(b.x)} ${n(b.y)} ${n(p2.x)} ${n(p2.y)}`;
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y);
+    // A right-angle corner is a circular arc (spec §1.7: `A6 6`); any other angle a quadratic curve.
+    if (Math.abs(dot) < 1e-6 * l1 * l2) d += `L${n(p1.x)} ${n(p1.y)}A${n(r)} ${n(r)} 0 0 ${cross > 0 ? 1 : 0} ${n(p2.x)} ${n(p2.y)}`;
+    else d += `L${n(p1.x)} ${n(p1.y)}Q${n(b.x)} ${n(b.y)} ${n(p2.x)} ${n(p2.y)}`;
   }
   const last = ps[ps.length - 1]!;
   return `${d}L${n(last.x)} ${n(last.y)}`;
@@ -206,6 +213,9 @@ function markerMarkup(kind: SceneEdge['end'], from: Point, tip: Point, color: st
   }
 }
 
+/** Opacity of soft (straight-style) connectors: the same colour, lighter. */
+const SOFT_EDGE_OPACITY = 0.55;
+
 function edgeMarkup(e: SceneEdge, theme: Theme): string {
   if (e.points.length < 2) return '';
   const color = e.color ? strokeOf(e.color, theme) : THEMES[theme].edge;
@@ -231,11 +241,12 @@ function edgeMarkup(e: SceneEdge, theme: Theme): string {
   ps[ps.length - 1] = pull(last, endFrom, em.pull);
   let d: string;
   if (control) d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}Q${n(control.x)} ${n(control.y)} ${n(ps[1]!.x)} ${n(ps[1]!.y)}`;
-  else if (e.route === 'elbow') d = roundedPath(ps, 8);
+  else if (e.route === 'elbow') d = roundedPath(ps, BEND_RADIUS);
   else d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}L${n(ps[ps.length - 1]!.x)} ${n(ps[ps.length - 1]!.y)}`;
   ps = [];
   const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-  return `<g data-edge="${esc(e.id)}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
+  const soft = e.soft ? ` opacity="${SOFT_EDGE_OPACITY}"` : '';
+  return `<g data-edge="${esc(e.id)}"${soft}><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
 function lineMarkup(l: SceneLine, theme: Theme): string {
