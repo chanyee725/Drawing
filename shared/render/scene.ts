@@ -97,6 +97,8 @@ export interface SceneEdge {
   start: Marker;
   end: Marker;
   color?: string;
+  /** Drawn lighter (straight connectors in graph diagrams, spec §1.7). */
+  soft?: boolean;
 }
 
 export interface SceneLine {
