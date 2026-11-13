@@ -2,8 +2,8 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawnCli } from "./cli.js";
-import { redact } from "./redact.js";
+import { ownGitEnv, spawnCli } from "./cli.js";
+import { redact, redactDeep } from "./redact.js";
 import { dropWorktree, prepareWorkdir, verifyMerged } from "./git.js";
 import { enterStage } from "./tasks.js";
 import { CHILD_PROMPT, NAMES, PERMS, SPAWN_PROMPT } from "./roles.js";
@@ -44,7 +44,7 @@ const RESUME_TEXT = "[Dispatch] 서버가 재시작되어 직전 턴이 중간�
 // Browser tools in team sessions run headless, each in its own throwaway profile, so checks never pop
 // windows on the user's screen or steer another session's tab. A session can still opt out via its own env.
 const SESSION_ENV = { PLAYWRIGHT_MCP_HEADLESS: "true", PLAYWRIGHT_MCP_ISOLATED: "true" };
-const sessionEnv = () => ({ ...SESSION_ENV, ...process.env });
+const sessionEnv = () => ({ ...SESSION_ENV, ...ownGitEnv() });
 const isOpenStatus = st => !["done", "error"].includes(st);
 const clip = (s, n = 2000) => { s = String(s ?? ""); return s.length > n ? s.slice(0, n) + "…" : s; };
 
@@ -89,6 +89,11 @@ export function activityOf(name = "", text = "") {
   if (/^Web(Fetch|Search)$/.test(name)) return "웹 검색";
   if (/^(Monitor|TaskStop|TaskOutput|ToolSearch)$/.test(name)) return "기다리는 중";
   return name.replace(/^mcp__[^_]+__/, "");
+}
+
+/** A permission request as the UI may see it: tool input, description and suggestions masked. */
+function maskedPerm(req) {
+  return { ...req, input: redactDeep(req.input), description: redact(req.description), suggestions: redactDeep(req.suggestions) };
 }
 
 export class Hub extends EventEmitter {
@@ -139,7 +144,8 @@ export class Hub extends EventEmitter {
   publicSession(s) {
     const r = this.live.get(s.id);
     const busy = s.status === "running" || s.status === "starting";
-    const pending = r ? [...r.perms.values()] : [];
+    // The UI gets a masked copy; the raw input stays in r.perms for the allow answer.
+    const pending = r ? [...r.perms.values()].map(maskedPerm) : [];
     // stateSince moves only on a change of state, so "사람 기다림 · 8분째" counts from the real start.
     const state = sessionState(s, pending.length);
     if (state !== s.state) { s.state = state; s.stateSince = Date.now(); }
@@ -766,7 +772,7 @@ export class Hub extends EventEmitter {
           id, lead, leadName: ls?.name ?? null, status: "open", reason: hit.reason, resetAt: hit.resetAt,
           createdAt: now, updatedAt: now,
           items: items.map(t => ({ title: t.title, stage: t.stage, owner: t.owner, note: t.note })),
-          leadLast: clip(this.rt(lead).lastText || ls?.last || "", 1500),
+          leadLast: clip(redact(this.rt(lead).lastText || ls?.last || ""), 1500),
           team: this.sessions.filter(c => c.parent === lead && c.status !== "done")
             .map(c => ({ name: c.name, status: c.status, branch: c.branch, last: clip(c.last || "", 200) })),
         };
