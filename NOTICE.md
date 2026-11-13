@@ -94,11 +94,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-## UI fonts
+## UI font
 
-Bundled by Vite from their npm redistributions; no font is fetched at runtime.
+Bundled by Vite from its npm redistribution; no font is fetched at runtime.
 
-- Inter (`@fontsource-variable/inter`), Copyright 2016 The Inter Project Authors
-  (https://github.com/rsms/inter). SIL Open Font License, Version 1.1.
 - Pretendard (`pretendard`), Copyright (c) 2021, Kil Hyung-jin (https://github.com/orioncactus/pretendard),
   with Reserved Font Name 'Pretendard'. SIL Open Font License, Version 1.1.

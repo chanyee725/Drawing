@@ -12,7 +12,7 @@ import { dslCompletionSource } from './dsl/completion';
 type Props = { code: string; type: string; dark: boolean; onChange: (code: string) => void };
 
 const baseTheme = EditorView.theme({
-  '&': { fontSize: '12.5px', background: 'var(--muted)', color: 'var(--foreground)' },
+  '&': { fontSize: '13.5px', background: 'var(--muted)', color: 'var(--foreground)' },
   '.cm-content': { fontFamily: 'var(--font-mono)', caretColor: 'var(--brand)', padding: '6px 0' },
   '.cm-gutters': { background: 'transparent', color: 'var(--text-4)', border: 'none' },
   '.cm-activeLine, .cm-activeLineGutter': { background: 'var(--brand-soft)' },
