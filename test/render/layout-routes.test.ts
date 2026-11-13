@@ -70,3 +70,28 @@ test('routes: elbow, arc and sequence lines stay solid', async () => {
     assert.doesNotMatch(r.svg, /data-edge="[^"]+" opacity/);
   }
 });
+
+test('routes: a label that would cover another moves in 24 px steps along its line towards the end node', async () => {
+  const { renderDiagram } = await import('../../shared/render/index.ts');
+  // In a 2x2 straight mesh the two crossing lines share a midpoint, so beta and gamma would stack.
+  const code = ['direction down', 'connectorStyle straight', 'S1', 'S2', 'L1', 'L2', 'S1 > L1: alpha', 'S1 > L2: beta', 'S2 > L1: gamma', 'S2 > L2: delta'].join('\n');
+  const { scene } = await renderDiagram(code, { type: 'flowchart' });
+  type T = { kind: 'text'; plate?: boolean; lines: string[]; x: number; y: number };
+  type E = { kind: 'edge'; id: string; points: { x: number; y: number }[] };
+  const labels = scene.items.filter((i) => i.kind === 'text' && (i as T).plate) as T[];
+  const beta = labels.find((l) => l.lines[0] === 'beta')!;
+  const gamma = labels.find((l) => l.lines[0] === 'gamma')!;
+  assert.ok(Math.hypot(beta.x - gamma.x, beta.y - gamma.y) > 20, 'labels no longer stack');
+  // gamma sits on its line (S2 > L1), 24 px past the middle towards L1.
+  const es = scene.items.filter((i) => i.kind === 'edge') as E[];
+  const mid = (e: E) => ({ x: (e.points[0]!.x + e.points[1]!.x) / 2, y: (e.points[0]!.y + e.points[1]!.y) / 2 });
+  // Text y is the top of the label; beta stayed on its middle, which gives the offset to the centre.
+  const dy = mid(es[1]!).y - beta.y;
+  const g = { x: gamma.x, y: gamma.y + dy };
+  const m = mid(es[2]!);
+  const end = es[2]!.points[1]!;
+  // Steps of 24 px until the plate is clear (one step still touches beta here, so two).
+  const moved = Math.hypot(g.x - m.x, g.y - m.y);
+  assert.ok(moved >= 23 && Math.abs(moved / 24 - Math.round(moved / 24)) < 0.06, `moved ${moved} px`);
+  assert.ok(Math.hypot(g.x - end.x, g.y - end.y) < Math.hypot(m.x - end.x, m.y - end.y), 'towards the end node');
+});

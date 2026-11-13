@@ -515,6 +515,63 @@ function labelAnchor(points: Point[], route: string): Point {
   return at;
 }
 
+/** How far a label that would overlap moves along its line towards the end node (spec §1.7: 22-26 px). */
+export const LABEL_SHIFT = 24;
+
+/** Plate rect of a label centred on `c`, as drawn by sceneToSvg. */
+function labelRect(c: Point, label: Label): Rect {
+  const w = label.w + PLATE_PAD * 2;
+  return { x: c.x - w / 2, y: c.y - label.h / 2 - 2, w, h: label.h + 4 };
+}
+
+const overlaps = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/**
+ * Label centre for an edge: the middle of its longest segment, or, when that plate would overlap a label
+ * already placed or a node, moved along the line towards the end node in LABEL_SHIFT steps (first clear
+ * spot wins; none clear keeps the middle). Records the chosen plate in `placed`.
+ */
+function placeLabel(points: Point[], route: string, label: Label, placed: Rect[], nodeRects: Rect[]): Point {
+  const start = labelAnchor(points, route);
+  const clear = (c: Point): boolean => {
+    const r = labelRect(c, label);
+    return !placed.some((o) => overlaps(r, o)) && !nodeRects.some((o) => overlaps(r, o));
+  };
+  let best = start;
+  if (!clear(start)) {
+    // Path from the anchor to the end of the line.
+    const last = points[points.length - 1]!;
+    let path: Point[] = [start, last];
+    if (route !== 'arc') {
+      let k = 1;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1]!;
+        const b = points[i]!;
+        const t = Math.hypot(b.x - a.x, b.y - a.y);
+        if (t > 0 && Math.abs(Math.hypot(start.x - a.x, start.y - a.y) + Math.hypot(b.x - start.x, b.y - start.y) - t) < 0.01) { k = i; break; }
+      }
+      path = [start, ...points.slice(k)];
+    }
+    const total = path.reduce((s, p, i) => (i ? s + Math.hypot(p.x - path[i - 1]!.x, p.y - path[i - 1]!.y) : 0), 0);
+    const at = (d: number): Point => {
+      for (let i = 1; i < path.length; i++) {
+        const a = path[i - 1]!;
+        const b = path[i]!;
+        const t = Math.hypot(b.x - a.x, b.y - a.y);
+        if (d <= t) return t ? { x: a.x + ((b.x - a.x) * d) / t, y: a.y + ((b.y - a.y) * d) / t } : a;
+        d -= t;
+      }
+      return path[path.length - 1]!;
+    };
+    for (let d = LABEL_SHIFT; d <= total; d += LABEL_SHIFT) {
+      const c = at(d);
+      if (clear(c)) { best = { x: round(c.x), y: round(c.y) }; break; }
+    }
+  }
+  placed.push(labelRect(best, label));
+  return best;
+}
+
 /** A laid-out edge before overrides: its ELK route (layout coordinates) and what drawing it needs. */
 interface BaseEdge {
   edge: GraphEdge;
@@ -989,6 +1046,9 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
   const ports = straightPorts(rects, straight.map((be) => be.edge));
   const portOf = new Map(straight.map((be, i) => [be, ports[i]!]));
 
+  const nodeRects = [...nodes.keys()].map((id) => rects.get(id)!).filter(Boolean);
+  const placedLabels: Rect[] = [];
+
   for (const be of base.edges) {
     const { edge: e, style } = be;
     const route = be.forcedElbow ? 'elbow' : style.connectorStyle;
@@ -1036,7 +1096,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     edgeItems.push(edge);
     const label = be.label;
     if (label) {
-      const { x: cx, y: cy } = labelAnchor(points, route);
+      const { x: cx, y: cy } = placeLabel(points, route, label, placedLabels, nodeRects);
       labelItems.push(textItem(label.lines, cx, cy - label.h / 2, { size: label.size, font: style.typeface, plate: true, color: style.paint.color, tone: 'muted' }));
     }
   }
