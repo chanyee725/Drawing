@@ -1,37 +1,182 @@
+/* Fonts are bundled by Vite from their OFL npm packages; nothing is fetched from a CDN. Inter has no Hangul,
+   so Hangul falls through to Pretendard (dynamic subset: only the ranges a page uses are loaded). */
+@import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
+@import "@fontsource-variable/inter";
 @import "tailwindcss";
+@import "tw-animate-css";
 
-/* Theme tokens. data-theme on <html> is set by the theme switch (web/src/theme.ts). */
+/* The theme switch (web/src/theme.ts) sets data-theme on <html>; Tailwind's dark: follows it. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+ * App chrome tokens (docs/design/dispatch-integration/5-design-system-linear.md §3). Names follow shadcn/ui so
+ * web/src/components/ui/* works unchanged; --panel, --text-2, --text-4, --border-strong, --brand and the
+ * status/role colours are ours. Dark is designed first (Dispatch's old "monitor" theme folds into it); light is
+ * derived from it. The canvas and diagram renderer keep their own theme (shared/render/), not these tokens.
+ *
+ * Naming: --brand is the one violet accent. shadcn's "accent" is a neutral hover colour, so Tailwind's
+ * bg-accent reads --hover. The CSS variable --accent itself stays an alias of --brand (see "Legacy aliases").
+ */
 :root, :root[data-theme="light"] {
   color-scheme: light;
-  --surface: #ffffff;
-  --elevated: #f7f7f8;
-  --border: #e4e4e7;
-  --text: #18181b;
-  --text-muted: #71717a;
-  --danger: #b42318;
-  --accent: #6d4aff;
-  --accent-soft: #efeaff;
-  --dot: #d4d4d8;
+  --radius: 6px;
+  --background: oklch(0.99 0.002 280);
+  --panel: oklch(0.975 0.003 280);
+  --card: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --muted: oklch(0.955 0.004 280);
+  --secondary: var(--muted);
+  --hover: oklch(0 0 0 / 4%);
+  --border: oklch(0.91 0.004 280);
+  --border-strong: oklch(0.86 0.005 280);
+  --input: var(--border-strong);
+  --foreground: oklch(0.2 0.01 280);
+  --text-2: oklch(0.38 0.01 280);
+  --muted-foreground: oklch(0.5 0.012 280);
+  --text-4: oklch(0.68 0.01 280);
+  --brand: oklch(0.55 0.2 285);
+  --brand-soft: oklch(0.55 0.2 285 / 10%);
+  --brand-foreground: oklch(0.99 0 0);
+  --destructive: oklch(0.55 0.21 25);
+  --dot: oklch(0.86 0.004 280);
+  --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 10%);
+
+  /* Session status and agent role lanes (from Dispatch, light). */
+  --ok: oklch(0.62 0.15 155);
+  --warn: oklch(0.72 0.15 70);
+  --bad: oklch(0.6 0.2 25);
+  --idle: oklch(0.62 0.08 250);
+  --role-lead: oklch(0.56 0.2 290);
+  --role-impl: oklch(0.56 0.18 255);
+  --role-review: oklch(0.68 0.15 65);
+  --role-test: oklch(0.6 0.14 160);
+  --role-design: oklch(0.62 0.19 0);
+  --role-docs: oklch(0.55 0.04 250);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --surface: #18181b;
-  --elevated: #202024;
-  --border: #2e2e33;
-  --text: #f4f4f5;
-  --text-muted: #a1a1aa;
-  --danger: #f87171;
-  --accent: #9d86ff;
-  --accent-soft: #2a2447;
-  --dot: #3f3f46;
+  --background: oklch(0.16 0.006 280);
+  --panel: oklch(0.185 0.007 280);
+  --card: oklch(0.21 0.008 280);
+  --popover: oklch(0.21 0.008 280);
+  --muted: oklch(0.24 0.008 280);
+  --hover: oklch(1 0 0 / 5%);
+  --border: oklch(1 0 0 / 8%);
+  --border-strong: oklch(1 0 0 / 14%);
+  --foreground: oklch(0.94 0.004 280);
+  --text-2: oklch(0.78 0.008 280);
+  --muted-foreground: oklch(0.66 0.01 280);
+  --text-4: oklch(0.48 0.01 280);
+  --brand: oklch(0.68 0.16 285);
+  --brand-soft: oklch(0.68 0.16 285 / 16%);
+  --brand-foreground: oklch(0.16 0.006 280);
+  --destructive: oklch(0.68 0.19 25);
+  --dot: oklch(1 0 0 / 7%);
+  --shadow-pop: 0 0 0 1px var(--border), 0 8px 24px oklch(0 0 0 / 40%);
+
+  /* Status from Dispatch's monitor theme (tuned for dark panels), roles from Dispatch dark. */
+  --ok: oklch(0.76 0.17 150);
+  --warn: oklch(0.82 0.15 80);
+  --bad: oklch(0.7 0.2 25);
+  --idle: oklch(0.68 0.04 250);
+  --role-lead: oklch(0.7 0.16 290);
+  --role-impl: oklch(0.7 0.14 255);
+  --role-review: oklch(0.78 0.13 70);
+  --role-test: oklch(0.74 0.13 160);
+  --role-design: oklch(0.72 0.16 0);
+  --role-docs: oklch(0.7 0.03 250);
+}
+:root {
+  /* Derived tokens (same in both themes). */
+  --card-foreground: var(--foreground);
+  --popover-foreground: var(--foreground);
+  --secondary-foreground: var(--foreground);
+  --accent-foreground: var(--foreground);
+  --primary: var(--brand);
+  --primary-foreground: var(--brand-foreground);
+  --ring: var(--brand);
+
+  /* Sizes: 4px grid, 28px rows and controls, 220px sidebar. */
+  --h-row: 28px;
+  --h-compact: 24px;
+  --h-bar: 44px;
+  --w-sidebar: 220px;
+  --w-doc: 720px;
+
+  /* Legacy aliases, kept until every screen uses the names above (rollout step 5 removes them). */
+  --surface: var(--background);
+  --elevated: var(--panel);
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
+  --danger: var(--destructive);
+  --accent: var(--brand);
+  --accent-soft: var(--brand-soft);
+}
+
+@theme inline {
+  --font-sans: "Inter Variable", "Pretendard Variable", Pretendard, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  /* UI type scale: 13px is the UI default (text-sm), 12px for meta; the document body keeps 15px (.doc-editor). */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 20px;
+  --text-base: 14px;
+  --text-base--line-height: 20px;
+  --text-lg: 18px;
+  --text-lg--line-height: 24px;
+  --text-doc: 15px;
+  --text-doc--line-height: 1.65;
+  --radius-sm: calc(var(--radius) - 2px);
+  --radius-md: var(--radius);
+  --radius-lg: calc(var(--radius) + 2px);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-soft: var(--brand-soft);
+  --color-text-2: var(--text-2);
+  --color-text-4: var(--text-4);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-idle: var(--idle);
+  --shadow-pop: var(--shadow-pop);
 }
 
 html, body, #root { height: 100%; }
 body {
   margin: 0;
-  background: var(--surface);
-  color: var(--text);
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", "Noto Sans KR", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font: 13px/20px var(--font-sans);
+  font-feature-settings: "cv11";
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; }
+/* The canvas keeps its own type; the chrome tracking above must not leak into Excalidraw. */
+.excalidraw { letter-spacing: normal; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
 /* Excalidraw suggests double-click/Enter to crop an image; on diagram blocks those open the code instead. */
@@ -64,13 +209,13 @@ body {
 .doc-editor ul[data-type="taskList"] { list-style: none; padding-left: 0.2em; }
 .doc-editor ul[data-type="taskList"] li { display: flex; gap: 0.5em; align-items: flex-start; }
 .doc-editor ul[data-type="taskList"] li > label { margin-top: 0.3em; user-select: none; }
-.doc-editor ul[data-type="taskList"] li > label input { accent-color: var(--accent); width: 1em; height: 1em; }
+.doc-editor ul[data-type="taskList"] li > label input { accent-color: var(--brand); width: 1em; height: 1em; }
 .doc-editor ul[data-type="taskList"] li > div { flex: 1; min-width: 0; }
 .doc-editor ul[data-type="taskList"] li[data-checked="true"] > div { color: var(--text-muted); text-decoration: line-through; }
-.doc-editor a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.doc-editor a { color: var(--brand); text-decoration: underline; text-underline-offset: 2px; }
 .doc-editor blockquote { border-left: 3px solid var(--border); padding-left: 1em; color: var(--text-muted); }
 .doc-editor hr { border: none; border-top: 1px solid var(--border); margin: 1.2em 0; }
-.doc-editor hr.ProseMirror-selectednode { border-top-color: var(--accent); }
+.doc-editor hr.ProseMirror-selectednode { border-top-color: var(--brand); }
 .doc-editor code {
   font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
   font-size: 0.88em;
@@ -91,7 +236,7 @@ body {
 .doc-editor table { border-collapse: collapse; width: 100%; table-layout: fixed; overflow: hidden; }
 .doc-editor th, .doc-editor td { border: 1px solid var(--border); padding: 0.35em 0.6em; vertical-align: top; position: relative; }
 .doc-editor th { background: var(--elevated); font-weight: 600; text-align: left; }
-.doc-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--accent-soft); opacity: 0.6; pointer-events: none; }
+.doc-editor .selectedCell::after { content: ""; position: absolute; inset: 0; background: var(--brand-soft); opacity: 0.6; pointer-events: none; }
 .doc-editor .tableWrapper { overflow-x: auto; }
 .doc-editor p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
@@ -100,7 +245,7 @@ body {
   pointer-events: none;
   color: var(--text-muted);
 }
-.doc-editor .suggestion { color: var(--accent); }
+.doc-editor .suggestion { color: var(--brand); }
 
 .doc-diagram { margin: 1em 0; display: flex; flex-direction: column; gap: 0.35em; }
 .doc-diagram-pic {
@@ -113,14 +258,14 @@ body {
   background: var(--surface);
   cursor: pointer;
 }
-.doc-diagram-pic:hover, .doc-diagram.is-selected .doc-diagram-pic { border-color: var(--accent); }
-.doc-diagram-pic:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.doc-diagram-pic:hover, .doc-diagram.is-selected .doc-diagram-pic { border-color: var(--brand); }
+.doc-diagram-pic:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 .doc-diagram-pic img { max-width: 100%; height: auto; }
 .doc-diagram-wait, .doc-diagram-gone { color: var(--text-muted); font-size: 13px; padding: 1.5em; }
 .doc-diagram-gone { border: 1px dashed var(--border); border-radius: 10px; text-align: center; }
 .doc-diagram-actions { display: flex; justify-content: center; gap: 0.4em; }
 .doc-diagram-actions button { font-size: 12px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-muted); }
-.doc-diagram-actions button:hover, .doc-diagram-actions button:focus-visible { color: var(--accent); border-color: var(--accent); }
+.doc-diagram-actions button:hover, .doc-diagram-actions button:focus-visible { color: var(--brand); border-color: var(--brand); }
 .doc-diagram figcaption { font-size: 12px; color: var(--text-muted); text-align: center; }
 
 .doc-slash {
@@ -146,7 +291,7 @@ body {
   border-radius: 6px;
   text-align: left;
 }
-.doc-slash button[aria-selected="true"] { background: var(--accent-soft); }
+.doc-slash button[aria-selected="true"] { background: var(--brand-soft); }
 .doc-slash-hint { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .doc-slash-empty { padding: 0.4rem 0.6rem; color: var(--text-muted); }
 
@@ -165,25 +310,25 @@ body {
   font-size: 13px;
 }
 .doc-table-bar button { height: 1.75rem; padding: 0 0.6rem; border-radius: 6px; }
-.doc-table-bar button:hover { background: var(--accent-soft); }
+.doc-table-bar button:hover { background: var(--brand-soft); }
 
 /* Outline (목차) and heading links */
 .doc-outline-wrap { position: relative; align-self: flex-end; }
 .doc-outline-btn { font-size: 12px; padding: 2px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--elevated); color: var(--text-muted); }
-.doc-outline-btn:hover, .doc-outline-btn[aria-expanded="true"] { color: var(--text); border-color: var(--accent); }
+.doc-outline-btn:hover, .doc-outline-btn[aria-expanded="true"] { color: var(--text); border-color: var(--brand); }
 .doc-outline { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 260px; max-height: 50vh; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--elevated); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15); }
 .doc-outline ul { list-style: none; margin: 0; padding: 0; }
 .doc-outline li > button { display: block; width: 100%; text-align: left; font-size: 13px; padding: 3px 6px; border-radius: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.doc-outline li > button:hover { background: var(--accent-soft); }
+.doc-outline li > button:hover { background: var(--brand-soft); }
 .doc-outline-empty { font-size: 13px; color: var(--text-muted); padding: 4px 6px; }
 .doc-editor h1, .doc-editor h2, .doc-editor h3 { position: relative; }
 .doc-h-link { position: absolute; left: -1.3em; top: 0; width: 1.1em; font-size: 0.7em; line-height: 1.8; color: var(--text-muted); opacity: 0; user-select: none; }
 .doc-editor h1:hover .doc-h-link, .doc-editor h2:hover .doc-h-link, .doc-editor h3:hover .doc-h-link, .doc-h-link:focus-visible { opacity: 1; }
-.doc-h-link:hover { color: var(--accent); }
+.doc-h-link:hover { color: var(--brand); }
 .doc-h-flash { animation: doc-h-flash 1.5s ease-out; }
-@keyframes doc-h-flash { from { background: var(--accent-soft); } to { background: transparent; } }
-.doc-wikilink { color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 0 4px; cursor: pointer; text-decoration: none; }
-.doc-wikilink.ProseMirror-selectednode { outline: 2px solid var(--accent); }
+@keyframes doc-h-flash { from { background: var(--brand-soft); } to { background: transparent; } }
+.doc-wikilink { color: var(--brand); background: var(--brand-soft); border-radius: 4px; padding: 0 4px; cursor: pointer; text-decoration: none; }
+.doc-wikilink.ProseMirror-selectednode { outline: 2px solid var(--brand); }
 
 /* The canvas `/` insert menu: the document's slash list with a search field on top. */
 .canvas-insert input {
@@ -196,7 +341,7 @@ body {
   color: var(--text);
   outline: none;
 }
-.canvas-insert input:focus { border-color: var(--accent); }
+.canvas-insert input:focus { border-color: var(--brand); }
 .doc-frame .doc-diagram-pic img { background: #fff; }
 
 /* PDF export (print dialog): only the document column is printed while <html> has .print-doc. */
@@ -208,7 +353,7 @@ body {
   html.print-doc .doc-outline-wrap, html.print-doc .doc-table-bar, html.print-doc .doc-diagram-actions { display: none !important; }
   html.print-doc .doc-diagram, html.print-doc .doc-diagram-pic { break-inside: avoid; }
   /* Light tokens on paper; [data-theme] repeats so this outranks :root[data-theme='dark']. */
-  html.print-doc, html.print-doc[data-theme] { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; }
+  html.print-doc, html.print-doc[data-theme] { color-scheme: light; --text: #1b1b1f; --surface: #fff; --bg: #fff; --foreground: #1b1b1f; --background: #fff; }
   html.print-doc body { background: #fff !important; color: #1b1b1f !important; }
   /* Paper is light: dark-theme pictures are flipped back (the same filter the canvas uses), and the on-screen hint goes. */
   html.print-doc[data-theme='dark'] .doc-diagram-pic img { filter: invert(93%) hue-rotate(180deg); }
