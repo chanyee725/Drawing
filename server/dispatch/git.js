@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFile, mkdir, readFile } from "node:fs/promises";
+import { appendFile, copyFile, link, mkdir, readFile, readdir, readlink, symlink } from "node:fs/promises";
 import path from "node:path";
 import { existsSync } from "node:fs";
 
@@ -54,16 +54,25 @@ export async function prepareWorkdir(root, slug, useWorktree, { shareDeps: share
 /**
  * A fresh worktree has no node_modules, and sessions burned 10+ minutes on it: a symlink breaks
  * bundlers that refuse files outside the project root (Next/Turbopack font imports), so e2e servers
- * timed out. Hard links give real files inside the worktree at no disk cost (~0.4 s for 46k files);
- * macOS clones with APFS copy-on-write. Other platforms keep the old behaviour.
+ * timed out. Hard links give real files inside the worktree at no disk cost. Done in-process: child
+ * processes are limited to the agent CLIs, git and gh (CLAUDE.md), so no `cp -al`.
  */
 async function shareDeps(root, dir) {
   const src = path.join(root, "node_modules"), dst = path.join(dir, "node_modules");
   if (!existsSync(src) || existsSync(dst)) return null;
-  const args = process.platform === "linux" ? ["-al", src, dst] : process.platform === "darwin" ? ["-Rc", src, dst] : null;
-  if (!args) return null;
-  try { await run("cp", args); return null; }
-  catch (e) { return `node_modules를 작업 폴더에 연결하지 못했어요: ${String(e.stderr || e.message).trim().slice(0, 160)}`; }
+  try { await linkTree(src, dst); return null; }
+  catch (e) { return `node_modules를 작업 폴더에 연결하지 못했어요: ${String(e.code || e.message).trim().slice(0, 160)}`; }
+}
+
+/** Mirrors a tree with hard links (copies when linking fails, e.g. across devices); symlinks stay symlinks. */
+async function linkTree(src, dst) {
+  await mkdir(dst, { recursive: true });
+  for (const e of await readdir(src, { withFileTypes: true })) {
+    const from = path.join(src, e.name), to = path.join(dst, e.name);
+    if (e.isDirectory()) await linkTree(from, to);
+    else if (e.isSymbolicLink()) await symlink(await readlink(from), to);
+    else if (e.isFile()) await link(from, to).catch(() => copyFile(from, to));
+  }
 }
 
 /**

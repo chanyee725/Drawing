@@ -1085,7 +1085,9 @@ export class Hub extends EventEmitter {
 
   startGemini(s, prompt) {
     // agy has no approval channel in headless mode, so only plan and auto are allowed (checkPerm
-    // refuses the others, in create, setPerm and start). The skip flag goes with auto only.
+    // refuses the others, in create, setPerm and start). --dangerously-skip-permissions is never
+    // passed: it has no sandbox, so it is looser than Claude/Codex auto (CLAUDE.md: no bypass,
+    // refuse instead). If agy cannot run a tool headless in auto, the turn fails and says so.
     const first = !s.providerSessionId;
     const system = this.systemPrompt(s);
     const textPrompt = first && system ? `[역할]\n${system}\n\n[작업]\n${prompt}` : prompt;
@@ -1094,7 +1096,6 @@ export class Hub extends EventEmitter {
       "--output-format", "stream-json",
       "--model", s.model,
       "--mode", s.perm,
-      ...(s.perm === "auto" ? ["--dangerously-skip-permissions"] : []),
     ];
     if (s.effort) args.push("--effort", s.effort);
     if (s.providerSessionId) args.push("--conversation", s.providerSessionId);

@@ -92,11 +92,11 @@ function geminiSession(root, perm) {
   };
 }
 
-test("agy gets --mode <perm>, and the skip flag only in auto", async () => {
+test("agy gets --mode <perm> and never the skip flag", async () => {
   const { root, store, hub } = await makeHub();
   const oldPath = process.env.PATH;
   try {
-    for (const [perm, skip] of [["auto", true], ["plan", false]]) {
+    for (const perm of ["auto", "plan"]) {
       const { bin, log } = fakeBin();
       process.env.PATH = bin;
       const s = geminiSession(root, perm);
@@ -104,7 +104,7 @@ test("agy gets --mode <perm>, and the skip flag only in auto", async () => {
       hub.start(s, "hi");
       const args = await waitFor(log);
       assert.equal(args[args.indexOf("--mode") + 1], perm);
-      assert.equal(args.includes("--dangerously-skip-permissions"), skip, perm);
+      assert.equal(args.includes("--dangerously-skip-permissions"), false, perm);
     }
   } finally {
     process.env.PATH = oldPath;
