@@ -67,8 +67,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
-          <fieldset data-export-options className="m-0 flex min-w-0 flex-col gap-1 border-0 p-1 text-sm">
-            <legend className="sr-only">이미지 옵션</legend>
+          <div data-export-options className="flex min-w-0 flex-col gap-1 p-1 text-sm">
             <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
               const scale = SCALES.find((s) => String(s) === v);
               if (scale) onOptions({ ...options, scale });
@@ -91,7 +90,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-xs" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
               배경을 투명하게
             </DropdownMenuCheckboxItem>
-          </fieldset>
+          </div>
           <DropdownMenuSeparator />
           {items.map((it) => (
             <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start max-md:min-h-11">

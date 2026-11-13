@@ -639,7 +639,7 @@ export function App() {
       { id: 'new-pipeline', title: '새 파이프라인', icon: Workflow, keywords: ['new', 'pipeline', 'plan', 'create', '만들기', '파이프라인', '계획'], run: () => void newFile(undefined, 'plan') },
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
-      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
+      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', icon: FileText, disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'history', title: '버전 기록 열기', icon: Clock, disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
