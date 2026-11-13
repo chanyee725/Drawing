@@ -247,7 +247,9 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
             onClick={() => p.onCreate(kind, null)}
             className="shrink-0 border-dashed font-medium text-muted-foreground hover:border-solid hover:text-foreground"
           >
-            <Icon /> {label} <Kbd>{key}</Kbd>
+            {/* The row reads "새로 만들기", so the chip shows only the kind; the name keeps "새 …" (visible text stays inside it). */}
+            <Icon /> <span className="sr-only">새 </span>
+            {label} <Kbd>{key}</Kbd>
           </Button>
         ))}
       </div>
