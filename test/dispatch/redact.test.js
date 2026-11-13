@@ -126,8 +126,18 @@ test("a CLI that leaks a key and an email: masked in memory, absent from disk", 
   await store.flush();
   const files = [];
   const walk = d => { for (const e of readdirSync(d, { withFileTypes: true })) { const p = path.join(d, e.name); e.isDirectory() ? walk(p) : files.push(p); } };
-  walk(path.join(root, ".dispatch"));
+  walk(root); // the whole workspace, not only .dispatch
   assert.ok(files.length > 0);
-  for (const f of files) assert.doesNotMatch(readFileSync(f, "utf8"), /FAKE0000|example\.invalid/, f);
+  for (const f of files) assert.doesNotMatch(readFileSync(f, "utf8"), /FAKE0000|example\.invalid|found \S+ for|auth failed|echo /, f); // also the surrounding transcript text
   assert.equal(existsSync(path.join(root, ".dispatch", "transcripts")), false);
+});
+
+test("permission requests reach the UI masked, while the allow answer keeps the raw input", async () => {
+  const { hub, s } = await makeHub();
+  const raw = { command: `curl -H "Authorization: Bearer ${"a".repeat(24)}" ${MAIL}`, nested: [{ k: KEY }] };
+  hub.rt(s.id).perms.set("r1", { requestId: "r1", tool: "Bash", input: raw, description: `mail ${MAIL}`, suggestions: [{ rule: GH }] });
+  const shown = JSON.stringify(hub.publicSession(s).pending);
+  assert.doesNotMatch(shown, /example\.com|ghp_|sk-ant|aaaaaaaa/);
+  assert.match(shown, /\[가림\]/);
+  assert.equal(hub.rt(s.id).perms.get("r1").input, raw);
 });

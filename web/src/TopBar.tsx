@@ -36,7 +36,7 @@ type Props = {
 
 export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
   return (
-    <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-panel px-2 md:gap-3 md:px-3">
+    <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-sidebar px-2 md:gap-3 md:px-3">
       {onToggleNav && (
         <Button variant="ghost" size="icon-sm" onClick={onToggleNav} aria-label="파일 목록 열기" className={FOCUS_RING}>
           <Menu />
@@ -59,7 +59,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
         aria-live="polite"
         title={status}
       >
-        {status && <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', statusAlert ? 'bg-destructive' : 'bg-text-4')} />}
+        {status && <span aria-hidden className={cn('size-1.5 shrink-0 rounded-full', statusAlert ? 'bg-destructive' : 'bg-muted-foreground')} />}
         <span className="md:hidden">{statusAlert ? '저장 안 됨' : ''}</span>
         <span className="hidden truncate md:inline">{status}</span>
       </span>
