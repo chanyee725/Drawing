@@ -253,3 +253,20 @@ test('rename with subdocs: one request, no orphaned sub-documents, no unrelated 
     assert.ok((await st(join(ws, 'A', 'vacant'))).isDirectory());
   });
 });
+
+test('nestDocs: a group is dated by its newest grandchild and no node leaks `latest`', async () => {
+  const f = (path, mtime) => ({ type: 'file', name: path.split('/').pop() + '.dpx.json', path: path + '.dpx.json', title: '', revision: 1, mtime, created: mtime });
+  const nodes = [
+    {
+      type: 'folder',
+      name: 'G',
+      path: 'G',
+      children: [f('G/a', '2026-01-02T00:00:00.000Z'), { type: 'folder', name: 'a', path: 'G/a', children: [f('G/a/c', '2026-02-09T00:00:00.000Z')] }],
+    },
+    { type: 'folder', name: 'H', path: 'H', children: [{ type: 'folder', name: 'I', path: 'H/I', children: [f('H/I/x', '2026-03-01T00:00:00.000Z')] }] },
+  ];
+  const out = await nestDocs(nodes, async (x) => Date.parse(x.created));
+  assert.equal(out[0].modified, '2026-02-09T00:00:00.000Z');
+  assert.equal(out[1].modified, '2026-03-01T00:00:00.000Z');
+  assert.ok(!JSON.stringify(out).includes('latest'));
+});
