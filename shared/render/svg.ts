@@ -31,6 +31,8 @@ interface Ctx {
   c: (color: string) => string;
   /** Default connector colour for this diagram type (labels take it too). */
   edge: string;
+  /** Colour of a label that sits on a line: the line colour, except where the theme gives sequences their own. */
+  label: string;
 }
 
 const esc = (s: string): string =>
@@ -114,9 +116,16 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
 
 function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const soft = b.role === 'group' || b.role === 'frame' || b.role === 'legend';
-  const p = resolvePaint(b.paint, theme, soft, b.shadow);
+  // Sequence participant boxes are flat where the theme says so (dark, §2.4): no shadow, background fill.
+  const flat = b.role === 'column' ? t.sequence : undefined;
+  const shadow = b.shadow && !flat;
+  const p = resolvePaint(b.paint, theme, soft, shadow);
   let fill = p.fill;
   let stroke = p.stroke;
+  if (flat && !b.paint.color && b.paint.mode === 'pastel') {
+    fill = t.background;
+    stroke = flat.columnStroke;
+  }
   if (b.role === 'frame') fill = 'none';
   if (b.role === 'legend') {
     fill = t.fill;
@@ -127,7 +136,7 @@ function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const dash = b.dashed ? DASH : '';
   const out: string[] = [];
   // A solid copy of the shape moved (+4, +4), no blur; the opaque body on top hides all but the outside rim.
-  if (b.shadow) out.push(shapeMarkup({ ...b, x: b.x + 4, y: b.y + 4 }, ` fill="${c(t.shadow)}" stroke="none"`));
+  if (shadow) out.push(shapeMarkup({ ...b, x: b.x + 4, y: b.y + 4 }, ` fill="${c(t.shadow)}" stroke="none"`));
   const f = fill === 'none' ? 'none' : c(fill);
   out.push(shapeMarkup(b, ` fill="${f}" stroke="${c(stroke)}" stroke-width="${width}" stroke-linejoin="round"${dash}`));
   const id = b.id !== undefined ? ` data-id="${esc(b.id)}"` : '';
@@ -142,7 +151,7 @@ function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number 
   return { x: x0 - 1, y: tx.y - 3, w: w + 2, h: h + 2 };
 }
 
-function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
+function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
   if (tx.lines.length === 0) return '';
   let fill = tx.tone === 'muted' ? t.muted : t.text;
   if (tx.on) {
@@ -151,8 +160,9 @@ function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
     fill = tx.tone === 'muted' && tx.on.mode !== 'bold' ? readableMuted(t.muted, t.text, p.fill === 'none' ? t.background : p.fill) : p.text;
   }
   if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
-  // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
-  if (tx.plate) fill = edge;
+  // Edge labels take the line colour (sequence messages in dark: the text colour) and have no background: the
+  // line is cut under them instead (labelHole).
+  if (tx.plate) fill = label;
   if (tx.color) fill = strokeOf(tx.color, theme);
   const content = tx.font === 'mono' ? monoRuns : esc;
   const spans = tx.lines
@@ -381,7 +391,8 @@ const CLEAN_BOLD_TEXT = /<text\b(?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
-  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge: scene.type === 'flowchart' ? t.flowEdge : t.edge };
+  const edge = scene.type === 'flowchart' ? t.flowEdge : t.edge;
+  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge, label: (scene.type === 'sequence' ? t.sequence?.label : undefined) ?? edge };
   // Edge labels cut the lines under them (§2.1): one luminance mask, white everywhere, black under each label.
   const holes = scene.items.flatMap((it) => (it.kind === 'text' && it.plate && it.lines.length > 0 ? [labelHole(it)] : []));
   let defs = '';
