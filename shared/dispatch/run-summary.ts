@@ -30,16 +30,26 @@ export interface SummaryStep {
 export interface SummaryRecord {
   startedAt: number;
   endedAt: number | null;
-  plan: { snapshot: { steps: { id: string; role?: string; model?: string; task?: string }[]; defaults?: { role?: string; model?: string } } };
+  plan: { snapshot: { steps: { id: string; node?: string; role?: string; model?: string; task?: string }[]; defaults?: { role?: string; model?: string } } };
   steps: Record<string, SummaryStep>;
   totals: { cost: number; mtok: number };
 }
 
 export interface SummaryOptions {
-  /** Step title shown in the table (defaults to the first line of the step's task, else its id). */
-  title?: (id: string) => string;
+  /** Diagram node labels (`nodeLabels` of the plan block's code): the step title in the table. */
+  labels?: ReadonlyMap<string, string>;
   /** Role id → its name ("impl" → "구현자"). */
   roleName?: (role: string) => string;
+}
+
+/** Node labels from a diagram block's code: `impl [label: "Implement"]` → impl → Implement. */
+export function nodeLabels(code: string | undefined): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of (code ?? '').split('\n')) {
+    const m = /^\s*([^\s[>:-][^[>]*?)\s*\[[^\]]*\blabel:\s*"([^"]*)"/.exec(line);
+    if (m && !out.has(m[1]!)) out.set(m[1]!, m[2]!);
+  }
+  return out;
 }
 
 const two = (n: number) => String(n).padStart(2, '0');
@@ -93,7 +103,7 @@ export function summaryNodes(record: SummaryRecord, opts: SummaryOptions = {}): 
     sessions += step.sessions.length;
     for (const n of prsOf(step)) prs.add(n);
     if (step.result?.commit) merged++;
-    const title = opts.title?.(ps.id) || firstLine(ps.task) || ps.id;
+    const title = opts.labels?.get(ps.node ?? ps.id) || firstLine(ps.task) || ps.id;
     const abandoned = !!step.result?.abandoned || step.state === 'skipped';
     if (abandoned) diffs.push(`단계 ${i + 1} 그만둠${step.note ? ` ("${step.note}")` : ''}`);
     const models = [...new Set(step.sessions.map((s) => s.model).filter((m): m is string => !!m))];

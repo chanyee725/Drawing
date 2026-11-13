@@ -781,6 +781,31 @@ export function createStore(
     });
   }
 
+  /**
+   * The server's own document edit (E28: the 완료 summary block): `edit(document)` returns the new document, applied
+   * to what is on disk now under the save lock. Open tabs see a newer revision like any outside change.
+   */
+  async function editDocumentAt(rel, edit) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    return serial(async () => {
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
+      if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
+      let next;
+      try {
+        next = { ...normalizeContent({ ...current, document: edit(current.document) }), revision: current.revision + 1 };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      const text = serialize(next);
+      await snapshotQuietly(rel, before);
+      await atomicWrite(abs, text);
+      known.set(rel, { hash: sha(text), revision: next.revision });
+      return { path: rel, revision: next.revision };
+    });
+  }
+
   async function createFolder(rel) {
     parseOrThrow(rel);
     checkFolderNames(rel.split('/'));
@@ -1157,5 +1182,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, labelVersion, startWatching, close, runs: runsApi };
+  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, editDocument: editDocumentAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, labelVersion, startWatching, close, runs: runsApi };
 }

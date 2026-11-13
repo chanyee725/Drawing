@@ -130,15 +130,7 @@ export function fmtClock(t: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/** Node labels from a diagram block's code: `impl [label: "Implement"]` → impl → Implement. */
-export function nodeLabels(code: string | undefined): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const line of (code ?? '').split('\n')) {
-    const m = /^\s*([^\s[>:-][^[>]*?)\s*\[[^\]]*\blabel:\s*"([^"]*)"/.exec(line);
-    if (m && !out.has(m[1]!)) out.set(m[1]!, m[2]!);
-  }
-  return out;
-}
+export { nodeLabels } from '../../../shared/dispatch/run-summary.ts';
 
 // ---- steps ----
 
