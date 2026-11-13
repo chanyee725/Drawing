@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sceneToSvg } from '../../shared/render/index.ts';
 import type { Scene } from '../../shared/render/index.ts';
+import type { Rect } from '../../shared/render/layout-align.ts';
+import type { RouteEdge } from '../../shared/render/layout-routes.ts';
 
 test('routes: a right-angle bend is a radius 6 arc', () => {
   const scene: Scene = {
@@ -124,8 +126,6 @@ test('routes: an edge that keeps its old route is not overlapped by the bus of i
 });
 
 // #198: unit tests drive routeEdges with hand-made boxes and old routes.
-import type { Rect } from '../../shared/render/layout-align.ts';
-import type { RouteEdge } from '../../shared/render/layout-routes.ts';
 
 const box = (x: number, y: number, w = 100, h = 40): Rect => ({ x, y, w, h });
 const route = (from: string, to: string, ...pts: [number, number][]): RouteEdge => ({ from, to, points: pts.map(([x, y]) => ({ x, y })), keep: false });

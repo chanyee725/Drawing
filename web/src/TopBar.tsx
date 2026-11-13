@@ -2,11 +2,9 @@ import type { ReactNode } from 'react';
 import { Clock, FilePlus, Menu, MoreHorizontal, Search } from 'lucide-react';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './components/ui/dropdown-menu';
-import { Kbd } from './components/ui/kbd';
 import { ToggleGroup, ToggleGroupItem } from './components/ui/toggle-group';
 import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
-import { IS_MAC } from './platform';
 import { SAVED_STATUS, SAVING } from './fileSession';
 import type { Crumb } from './projectNav';
 
@@ -117,14 +115,9 @@ export function TopBar({ title, hasFile, status, statusAlert, view, canRun, onVi
           <span className="hidden truncate md:inline">{save === 'saved' || save === 'clean' ? SAVED : status}</span>
         </span>
       )}
-      {/* Layout A (design doc 6 §2.4): the view switch sits on the right, next to 내보내기 and ⋯. */}
+      {/* Layout A (design doc 6 §2.4): the view switch sits on the right, next to 내보내기 and ⋯. No search pill here:
+          the sidebar's 찾기 button and Ctrl/Cmd+K open the command menu (on narrow screens, ⋯ > 명령 메뉴). */}
       <div className="ml-auto flex shrink-0 items-center gap-2 md:gap-3">
-      {onCommands && (
-        <Button variant="ghost" size="sm" onClick={onCommands} aria-label="명령 메뉴 열기" aria-haspopup="dialog" className={cn('hidden text-muted-foreground md:inline-flex', FOCUS_RING)}>
-          <Search />
-          <Kbd>{IS_MAC ? '⌘K' : 'Ctrl K'}</Kbd>
-        </Button>
-      )}
       <ToggleGroup variant="segmented" size="sm" value={view} onValueChange={(v) => onView(v as View)} aria-label="보기 방식"
         // A toolbar: one Tab stop, arrow keys move between 문서 / 둘 다 / 캔버스 (Radix roving focus), and screen
         // readers announce that, which a plain group does not.

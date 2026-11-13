@@ -93,7 +93,15 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   const chips = dash.getByRole('group', { name: '새로 만들기' }).getByRole('button');
   // Chips show the kind only; a visually hidden "새 " keeps names like "새 파이프라인 계획" for assistive tech and e2e.
   const shown = await chips.evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !(n instanceof Element && n.classList.contains('sr-only'))).map((n) => n.textContent).join('').replace(/\s+/g, ' ').trim()));
-  assert.deepEqual(shown, ['문서 D', '캔버스 C', '파이프라인 계획 P', '템플릿 T']);
+  assert.deepEqual(shown, ['문서 D', '캔버스 C', '파이프라인 계획 P', '템플릿 준비 중']);
+  // The not-yet template chip stays focusable (aria-disabled, not disabled) and a click does nothing (#216 review).
+  const template = chips.filter({ hasText: '새 템플릿' });
+  assert.equal(await template.getAttribute('aria-disabled'), 'true');
+  assert.equal(await template.evaluate((el) => el.disabled), false);
+  await template.focus();
+  assert.equal(await template.evaluate((el) => el === document.activeElement), true);
+  await template.click({ force: true });
+  assert.equal(await page.locator('main[data-screen="dashboard"]').count(), 1);
   for (const name of ['새 문서', '새 캔버스', '새 파이프라인 계획', '새 템플릿']) assert.equal(await chips.filter({ hasText: name }).count(), 1, name);
   const heads = dash.locator('[data-slot="group-head"]');
   assert.deepEqual(
@@ -106,6 +114,12 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('type')), 'search');
   await page.keyboard.type('토큰');
   assert.deepEqual(await dash.locator('[data-doc-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-doc-row'))), ['결제 시스템/로그인 로직.dpx.json', '결제 시스템/로그인 로직/토큰 갱신.dpx.json']);
+  // The sub-document list sits inside its parent's <li>, so screen readers keep the level (#212 review).
+  assert.equal(
+    await dash.locator('[data-doc-row="결제 시스템/로그인 로직/토큰 갱신.dpx.json"]').evaluate((li) => li.parentElement?.closest('li')?.getAttribute('data-doc-row')),
+    '결제 시스템/로그인 로직.dpx.json',
+  );
+  assert.equal(await dash.getByRole('button', { name: '로그인 로직 하위 문서' }).getAttribute('aria-expanded'), 'true');
   await page.keyboard.press('Control+a');
   await page.keyboard.press('Backspace');
   await tabs.getByRole('tab', { name: '전체' }).click();
@@ -113,6 +127,20 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   assert.equal(await dash.locator('[data-doc-row]').count(), 5);
   await tabs.getByRole('tab', { name: '프로젝트별' }).click();
   await shot(page, 'light-dash-1440');
+  await page.evaluate(() => document.activeElement?.blur());
+
+  // G P opens the menu on projects only; the 프로젝트만 chip is a button that widens it again (#216 review).
+  await page.keyboard.press('g');
+  await page.keyboard.press('p');
+  const chip = page.getByRole('button', { name: '프로젝트만 찾기 풀기' });
+  await chip.waitFor();
+  await page.getByRole('combobox', { name: '명령 찾기' }).fill('없는이름');
+  await page.getByText('맞는 프로젝트가 없어요. 프로젝트만을 풀면 모든 명령에서 찾아요.').waitFor();
+  await chip.click();
+  await chip.waitFor({ state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'combobox');
+  await page.keyboard.press('Escape');
+  await page.getByRole('combobox', { name: '명령 찾기' }).waitFor({ state: 'detached' });
   await page.evaluate(() => document.activeElement?.blur());
 
   await page.keyboard.press('r');

@@ -1,7 +1,7 @@
 import { Download } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
-import { IS_MAC } from './platform';
+import { COPY_IMAGE_SHORTCUT, IS_MAC } from './platform';
 import { SCALES, describeExport, type ExportOptions } from './export/options';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
@@ -26,8 +26,14 @@ type Props = {
   narrow?: boolean;
 };
 
-/** An option pill; picking one keeps the menu open (onSelect preventDefault). */
-const pill = 'h-7 flex-none justify-center rounded-md border px-2 text-xs data-[state=checked]:border-primary data-[state=checked]:bg-muted data-[state=checked]:font-semibold data-[state=checked]:text-foreground';
+/**
+ * The option rows look like the header's segmented ToggleGroup (a muted track, the picked item raised) but keep
+ * menu radio semantics, so arrow keys reach them inside the menu. Picking one keeps the menu open.
+ */
+const track = 'flex h-7 items-center rounded-md bg-muted p-0.5';
+const segment =
+  'h-6 flex-none justify-center rounded-[5px] border border-transparent px-2 text-[13px] text-muted-foreground focus:bg-background/60 focus:text-foreground data-[state=checked]:border-border data-[state=checked]:bg-background data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-xs';
+const label = 'mr-auto px-1 text-[13px] text-muted-foreground';
 
 export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled, narrow }: Props) {
   const contentRef = useRef<HTMLDivElement>(null);
@@ -42,7 +48,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
   const items: { label: string; hint: string; kbd?: string; off: boolean; run: () => void; id: string }[] = [
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
     { id: 'png', label: 'PNG로 내보내기', hint: `${scope} · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('png') },
-    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', off: !canvasReady, run: () => onImage('copy') },
+    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: COPY_IMAGE_SHORTCUT, off: !canvasReady, run: () => onImage('copy') },
     {
       id: 'pdf',
       label: 'PDF로 저장(인쇄)',
@@ -67,27 +73,31 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
           )}
         </DropdownMenuTrigger>
         <DropdownMenuContent ref={contentRef} align="end" aria-label="내보내기" className="w-72">
-          <div data-export-options className="flex min-w-0 flex-col gap-1 p-1 text-sm">
-            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
+          <div data-export-options className="flex min-w-0 flex-col gap-1.5 p-1.5 text-sm">
+            <div className="flex items-center gap-2">
+              <span aria-hidden className={label}>PNG 크기</span>
+              <DropdownMenuRadioGroup className={track} aria-label="PNG 크기" value={String(options.scale)} onValueChange={(v) => {
               const scale = SCALES.find((s) => String(s) === v);
               if (scale) onOptions({ ...options, scale });
             }}>
-              <span className="mr-auto px-1 text-xs text-muted-foreground">PNG 크기</span>
               {SCALES.map((s) => (
-                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={pill} onSelect={(e) => e.preventDefault()}>
+                <DropdownMenuRadioItem key={s} value={String(s)} data-export-scale={s} className={segment} onSelect={(e) => e.preventDefault()}>
                   {s}배
                 </DropdownMenuRadioItem>
               ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuRadioGroup className="flex items-center gap-1" aria-label="색상" value={String(options.dark)} onValueChange={(v) => onOptions({ ...options, dark: v === 'true' })}>
-              <span className="mr-auto px-1 text-xs text-muted-foreground">색상</span>
+              </DropdownMenuRadioGroup>
+            </div>
+            <div className="flex items-center gap-2">
+              <span aria-hidden className={label}>색상</span>
+              <DropdownMenuRadioGroup className={track} aria-label="색상" value={String(options.dark)} onValueChange={(v) => onOptions({ ...options, dark: v === 'true' })}>
               {([false, true] as const).map((d) => (
-                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={pill} onSelect={(e) => e.preventDefault()}>
+                <DropdownMenuRadioItem key={String(d)} value={String(d)} data-export-dark={String(d)} className={segment} onSelect={(e) => e.preventDefault()}>
                   {d ? '다크' : '라이트'}
                 </DropdownMenuRadioItem>
               ))}
-            </DropdownMenuRadioGroup>
-            <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-xs" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
+              </DropdownMenuRadioGroup>
+            </div>
+            <DropdownMenuCheckboxItem data-export-transparent checked={options.transparent} className="h-7 text-[13px]" onCheckedChange={(c) => onOptions({ ...options, transparent: c === true })} onSelect={(e) => e.preventDefault()}>
               배경을 투명하게
             </DropdownMenuCheckboxItem>
           </div>
@@ -96,7 +106,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
             <DropdownMenuItem key={it.id} data-export={it.id} disabled={it.off} onSelect={() => it.run()} className="items-start max-md:min-h-11">
               <div className="flex min-w-0 flex-1 flex-col">
                 <span>{it.label}</span>
-                <span className="text-xs text-muted-foreground">{it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}</span>
+                <span className="text-[13px] leading-[18px] text-muted-foreground">{it.off ? '캔버스가 보이는 보기에서 쓸 수 있어요' : it.hint}</span>
               </div>
               {it.kbd && <Kbd className="mt-0.5 shrink-0">{it.kbd}</Kbd>}
             </DropdownMenuItem>

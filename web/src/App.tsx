@@ -51,8 +51,9 @@ import {
 import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type ImageKind } from './export/actions';
 import { blockExportTitle } from './export/markdown';
 import type { CanvasHandle } from './export/types';
-import { EXPORT_MENU_QUERY, IS_MAC } from './platform';
+import { COPY_IMAGE_SHORTCUT, EXPORT_MENU_QUERY, IS_MAC } from './platform';
 import { PlanStrip } from './run/PlanStrip';
+import { events } from './lib/events';
 
 const NARROW = '(max-width: 767px)';
 
@@ -407,15 +408,7 @@ export function App() {
 
   // Other tabs and outside edits: keep the file list current, reload the open file when it changed and holds no unsaved edits.
   useEffect(() => {
-    if (typeof EventSource === 'undefined') return;
-    const es = new EventSource('/api/events');
-    es.addEventListener('workspace', (m) => {
-      let e: WorkspaceEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as WorkspaceEvent;
-      } catch {
-        return;
-      }
+    const offWorkspace = events.subscribeJson<WorkspaceEvent>('workspace', (e) => {
       // This tab's own move already renames the open file; the echo must not close it.
       if (e.kind === 'tree' && e.from !== undefined && ownMoves.current.delete(e.from)) {
         void refreshTree();
@@ -429,32 +422,26 @@ export function App() {
       void refreshTree();
     });
     // Runs of the open file; a run starting or ending also changes its tree badge.
-    es.addEventListener('run', (m) => {
-      let e: RunEvent;
-      try {
-        e = JSON.parse((m as MessageEvent<string>).data) as RunEvent;
-      } catch {
-        return;
-      }
+    const offRun = events.subscribeJson<RunEvent>('run', (e) => {
       onRunEvent(e);
       if (e.run) void refreshTree();
       // A run that ended: no agent is editing its file any more.
       if (e.run?.endedAt) clearCursors(e.file);
     });
-    // Live agent cursors (E56): where an agent session is editing a diagram.
-    es.addEventListener('cursor', (m) => {
-      try {
-        applyCursorEvent(JSON.parse((m as MessageEvent<string>).data) as CursorEvent);
-      } catch {
-        /* a malformed event moves nothing */
-      }
-    });
+    // Live agent cursors (E56): where an agent session is editing a diagram. A malformed event moves nothing.
+    const offCursor = events.subscribeJson<CursorEvent>('cursor', applyCursorEvent);
     // Events missed while the stream was down: read the run again. Cursors from before the gap are stale.
-    es.onopen = () => {
+    const offOpen = events.onConnection((online) => {
+      if (!online) return;
       clearCursors();
       void reloadRun();
+    });
+    return () => {
+      offWorkspace();
+      offRun();
+      offCursor();
+      offOpen();
     };
-    return () => es.close();
   }, [session, load, refreshTree]);
 
   // Moves started here, by their `from` path: the server's SSE echo of them is not an outside move.
@@ -603,6 +590,8 @@ export function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return;
+      // A native modal <dialog> (settings) owns the keyboard: no palette, G P or export behind it.
+      if (document.querySelector('dialog:modal')) return;
       // Mac uses only Cmd, everything else only Ctrl, so Mac's Ctrl+E/K stay with text fields.
       const mod = IS_MAC ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       const k = e.code;
@@ -684,14 +673,15 @@ export function App() {
       { id: 'new-pipeline', title: '새 파이프라인', icon: Workflow, keywords: ['new', 'pipeline', 'plan', 'create', '만들기', '파이프라인', '계획'], run: () => void newFile(undefined, 'plan') },
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
-      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
+      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: COPY_IMAGE_SHORTCUT, disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', icon: FileText, disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'history', title: '버전 기록 열기', icon: Clock, disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
       { id: 'settings', title: '설정 열기', icon: Settings, keys: ',', keywords: ['settings', 'preferences', '설정', '환경설정'], run: () => openSettings('general') },
       { id: 'settings-models', title: '모델 연결 열기', icon: Plug, keywords: ['models', 'connect', 'login', 'claude', 'codex', 'gemini', '모델', '연결', '로그인'], run: () => openSettings('models') },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
       { id: 'view-doc', title: '보기: 문서', group: 'view', icon: PanelLeft, run: () => setView('doc'), keywords: ['view', '보기'] },
-      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, run: () => setView('both'), keywords: ['view', '보기'] },
+      // A narrow screen fits one pane (the header has no 둘 다 there either).
+      { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, disabled: narrow, hint: narrow ? '넓은 화면에서' : undefined, run: () => setView('both'), keywords: ['view', '보기'] },
       { id: 'view-canvas', title: '보기: 캔버스', group: 'view', icon: PanelRight, run: () => setView('canvas'), keywords: ['view', '보기'] },
       { id: 'theme', title: theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기', group: 'view', icon: theme === 'dark' ? Sun : Moon, run: toggleTheme, keywords: ['theme', 'dark', 'light', '테마', '다크'] },
       canvasCmd('tool-select', '도구: 선택', 'V', { key: 'v' }, ['tool', 'select', '도구'], MousePointer2),
@@ -871,7 +861,8 @@ export function App() {
               onProject={goProject}
               onOpen={openFile}
               onCreate={(k, project) => void newFile(project, k)}
-              onDelete={(p, t) => void remove({ type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
+              // The projects view has the document's sub-documents, so the confirm can say they go too.
+              onDelete={(p, t) => void remove(docPlace(projects, p).node ?? { type: 'doc', name: p.split('/').pop() ?? p, path: p, title: t, revision: null, created: null, modified: null, count: 0, children: [] })}
             />
           ) : (
             <>

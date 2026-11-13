@@ -4,7 +4,7 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList, CommandShortcut } from './components/ui/command';
 import { DialogContent } from './components/ui/dialog';
 import { Kbd } from './components/ui/kbd';
-import { FolderClosed } from 'lucide-react';
+import { FolderClosed, X } from 'lucide-react';
 import { cn } from './lib/utils';
 import { filterCommands, groupCommands, type Command as Cmd } from './commands';
 
@@ -108,9 +108,21 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
               className="h-11"
             />
             {group === 'project' && (
-              <span data-slot="group-chip" title="지우기를 누르면 모든 명령을 찾아요" className="mr-1.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground">
+              // A real button, so keyboard and screen reader users can widen the search too (#216 review).
+              <button
+                type="button"
+                data-slot="group-chip"
+                aria-label="프로젝트만 찾기 풀기"
+                title="눌러서 모든 명령을 찾아요"
+                onClick={() => {
+                  setGroup(undefined);
+                  input.current?.focus();
+                }}
+                className="mr-1.5 inline-flex shrink-0 items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground outline-none hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
                 프로젝트만
-              </span>
+                <X aria-hidden className="size-3" />
+              </button>
             )}
             {scope && (
               <span data-slot="scope-chip" title={`범위: ${scope.name} 프로젝트`} className="inline-flex max-w-40 shrink-0 items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
@@ -121,7 +133,7 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
             )}
           </div>
           <CommandList className="max-h-[min(400px,60vh)] max-sm:max-h-[min(480px,70dvh)]">
-            <CommandEmpty>맞는 명령이 없어요</CommandEmpty>
+            <CommandEmpty>{group === 'project' ? '맞는 프로젝트가 없어요. 프로젝트만을 풀면 모든 명령에서 찾아요.' : '맞는 명령이 없어요'}</CommandEmpty>
             {groups.map((g) => (
               <CommandPrimitive.Group
                 key={g.id}

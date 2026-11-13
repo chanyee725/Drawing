@@ -1,6 +1,7 @@
 // Dispatch screen state: one external store fed by the /api/events stream, read with useDispatch(selector).
 // Transcripts stay in this tab's memory; nothing here writes to storage.
 import { useSyncExternalStore } from 'react';
+import { events } from '../lib/events.ts';
 import type { DispatchState, BoardTask, Ticket } from './types';
 import type { Entry, Limits, Provider, ProviderStatus, Session, Settings, Snapshot } from '../../../shared/dispatch/types.ts';
 
@@ -93,14 +94,15 @@ export const EVENTS = ['snapshot', 'session', 'removed', 'message', 'tasks', 'ti
 
 /** Opens the event stream; returns a close function. A server without Dispatch marks the screen unavailable. */
 export function connect(): () => void {
-  const es = new EventSource('/api/events');
-  for (const ev of EVENTS) es.addEventListener(ev, e => apply(ev, JSON.parse((e as MessageEvent).data)));
-  es.onerror = () => setState({ online: false });
-  es.onopen = () => setState({ online: true });
-  // The snapshot comes over the stream; if Dispatch is off the state route 404s and nothing ever arrives.
+  // The shared stream may already be open (another listener holds it), and the server only sends a snapshot to a
+  // new connection, so every subscribe fetches /api/state and applies it unless a stream snapshot arrived meanwhile.
+  // If Dispatch is off the state route 404s and nothing ever arrives.
+  let streamed = false;
+  const offs = EVENTS.map(ev => events.subscribeJson<unknown>(ev, d => { if (ev === 'snapshot') streamed = true; apply(ev, d); }));
+  offs.push(events.onConnection(online => setState({ online })));
   api<Snapshot>('GET', '/api/state').then(
-    snap => { if (!state.ready) apply('snapshot', snap); },
+    snap => { if (!streamed) apply('snapshot', snap); },
     () => { if (!state.ready) setState({ unavailable: true }); },
   );
-  return () => es.close();
+  return () => offs.forEach(off => off());
 }

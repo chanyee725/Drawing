@@ -1,18 +1,67 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { INDENT, ROW_HEIGHT, filterDocs, flattenRows, relativeTime, runningIn } from '../../web/src/home/model.ts';
+import { INDENT, ROW_HEIGHT, filterDocs, pollWhileVisible, relativeTime, runningBelow, runningIn, subCount } from '../../web/src/home/model.ts';
 import type { ProjectDoc } from '../../web/src/api.ts';
 
 const d = (path: string, title: string, children: ProjectDoc[] = []): ProjectDoc => ({ path, name: path, title, bundle: false, createdAt: 1, modifiedAt: 2, children });
 const docs = [d('a', 'Login', [d('a/t', 'Token', [d('a/t/r', 'Refresh')])]), d('b', 'Collect')];
 
-test('flattenRows shows children only under an expanded parent, with depth and sub-doc counts', () => {
-  const rows = flattenRows(docs, new Set());
-  assert.deepEqual(rows.map((r) => [r.doc.title, r.depth]), [['Login', 0], ['Token', 1], ['Refresh', 2], ['Collect', 0]]);
-  assert.equal(rows[0].subs, 2);
-  const closed = flattenRows(docs, new Set(['a']));
-  assert.deepEqual(closed.map((r) => r.doc.title), ['Login', 'Collect']);
-  assert.equal(closed[0].expanded, false);
+test('subCount counts sub-docs at every level; runningBelow sees a run anywhere under a parent but not the parent itself', () => {
+  assert.equal(subCount(docs[0]), 2);
+  assert.equal(subCount(docs[1]), 0);
+  assert.equal(runningBelow(docs[0], new Set(['a/t/r'])), true);
+  assert.equal(runningBelow(docs[0], new Set(['a'])), false);
+  assert.equal(runningBelow(docs[1], new Set(['a/t'])), false);
+});
+
+function fakePage(state: 'visible' | 'hidden') {
+  const listeners = new Set<() => void>();
+  const timers = new Map<number, () => void>();
+  let id = 0;
+  return {
+    doc: {
+      visibilityState: state as string,
+      addEventListener: (_: 'visibilitychange', fn: () => void) => void listeners.add(fn),
+      removeEventListener: (_: 'visibilitychange', fn: () => void) => void listeners.delete(fn),
+    },
+    timers: { setInterval: (fn: () => void) => (timers.set(++id, fn), id), clearInterval: (t: unknown) => void timers.delete(t as number) },
+    tick: () => [...timers.values()].forEach((fn) => fn()),
+    show(next: 'visible' | 'hidden') {
+      this.doc.visibilityState = next;
+      listeners.forEach((fn) => fn());
+    },
+    get counts() {
+      return { timers: timers.size, listeners: listeners.size };
+    },
+  };
+}
+
+test('pollWhileVisible: polls while visible, stops while hidden, loads at once when shown again', () => {
+  const page = fakePage('visible');
+  let loads = 0;
+  const stop = pollWhileVisible(() => loads++, 10_000, page.doc, page.timers);
+  assert.equal(loads, 1, 'loads right away');
+  page.tick();
+  assert.equal(loads, 2);
+  page.show('hidden');
+  assert.equal(page.counts.timers, 0, 'no timer while hidden');
+  page.tick();
+  assert.equal(loads, 2);
+  page.show('visible');
+  assert.equal(loads, 3, 'catches up as soon as it shows');
+  assert.equal(page.counts.timers, 1);
+  stop();
+  assert.deepEqual(page.counts, { timers: 0, listeners: 0 });
+});
+
+test('pollWhileVisible: a page opened hidden waits until it shows', () => {
+  const page = fakePage('hidden');
+  let loads = 0;
+  pollWhileVisible(() => loads++, 10_000, page.doc, page.timers);
+  assert.equal(loads, 0);
+  assert.equal(page.counts.timers, 0);
+  page.show('visible');
+  assert.equal(loads, 1);
 });
 
 test('filterDocs keeps a matching sub-doc under its parents, and a matching parent with its subtree', () => {
