@@ -49,11 +49,23 @@ const num = (v) => {
   return n;
 };
 
+/**
+ * A path that opens with a relative `m` starts at that point only while it is its own element. Joined
+ * after another element it would start from where that one ended, outside the 24px box. Make the first
+ * move absolute; the pairs that follow it stay relative lines.
+ */
+export function absoluteStart(d) {
+  const m = /^\s*m\s*([+-]?(?:\d*\.\d+|\d+\.?))[\s,]*([+-]?(?:\d*\.\d+|\d+\.?))[\s,]*/.exec(d);
+  if (!m) return d;
+  const rest = d.slice(m[0].length);
+  return `M${m[1]} ${m[2]}${/^[+-.\d]/.test(rest) ? 'l' : ''}${rest}`;
+}
+
 /** Lucide element → path data. Only the element kinds Lucide uses. */
 function elementToPath([tag, a]) {
   switch (tag) {
     case 'path':
-      return a.d;
+      return absoluteStart(a.d);
     case 'line':
       return `M${num(a.x1)} ${num(a.y1)}L${num(a.x2)} ${num(a.y2)}`;
     case 'polyline':

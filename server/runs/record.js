@@ -11,7 +11,9 @@ export const SESSION_STATES = ['working', 'waiting', 'stuck', 'failed', 'resting
 // Worst first: a step shows the worst state among its sessions.
 const SEVERITY = ['failed', 'stuck', 'waiting', 'working', 'resting', 'done'];
 export const STEP_STATES_WITHOUT_SESSIONS = ['pending', 'skipped', 'blocked'];
-export const RUN_STATES = ['running', 'done', 'failed', 'stopped'];
+export const RUN_STATES = ['running', 'paused', 'done', 'failed', 'stopped'];
+/** Why a run is paused (E27): the usage-limit guard, or the person pressed 멈추기. */
+export const PAUSE_BY = ['limit', 'stop'];
 
 const SHORT = /^[A-Za-z0-9._:/@+-]{1,120}$/;
 const TOKEN_KEYS = ['input', 'output', 'cacheRead', 'cacheWrite'];
@@ -98,4 +100,4 @@ export function serializeRecord(record, max = RUN_FILE_MAX) {
   return text;
 }
 
-export const summaryOf = (r) => ({ id: r.id, startedAt: r.startedAt, endedAt: r.endedAt, state: r.state, totals: r.totals });
+export const summaryOf = (r) => ({ id: r.id, startedAt: r.startedAt, endedAt: r.endedAt, state: r.state, totals: r.totals, pause: r.pause ?? null });

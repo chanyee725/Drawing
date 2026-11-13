@@ -205,12 +205,13 @@ body {
 }
 
 /* The canvas draws clean lines only (E58): the style panel offers neither sloppiness nor the handwriting fonts
-   (the quick button, and Virgil 1 / Excalifont 5 in the font list, which opens in a portal outside .excalidraw).
+   (the quick button, and Virgil 1 / Excalifont 5 in the font list popover, which also opens inside .excalidraw).
+   These rely on Excalidraw's internal names; test/e2e/canvas-clean.test.mjs checks they still match.
    !important: Excalidraw's own rules load later and set display. */
 .excalidraw fieldset:has(input[name="sloppiness"]),
 .excalidraw label:has(> [data-testid="font-family-hand-drawn"]),
 .excalidraw [data-testid="font-family-hand-drawn"],
-.dropdown-menu.fonts .dropdown-menu-item:is([value="1"], [value="5"]) {
+.excalidraw .dropdown-menu.fonts .dropdown-menu-item:is([value="1"], [value="5"]) {
   display: none !important;
 }
 

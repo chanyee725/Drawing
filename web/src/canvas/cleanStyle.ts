@@ -40,31 +40,31 @@ export function cleanSkeleton(sk: Record<string, unknown>): Record<string, unkno
   }
 }
 
-type StyleEl = { type: string; roughness?: number; fontFamily?: number };
+type StyleEl = { id: string; type: string; roughness?: number; fontFamily?: number };
 type CleanPatch = { roughness?: 0; fontFamily?: number };
 
 /**
  * Hand-drawn shapes made clean: roughness above 0 becomes 0 and handwriting fonts become the clean font.
  * Images are left alone (diagram blocks are images). Returns the same array when nothing needed changing.
- * `apply` builds the changed element; `fonts` tells whether any text changed font (its size needs measuring again).
+ * `apply` builds the changed element; `refit` lists the texts that changed font (their size needs measuring again).
  */
 export function cleanElements<T extends StyleEl>(
   els: readonly T[],
   apply: (el: T, patch: CleanPatch) => T = (el, patch) => ({ ...el, ...patch }),
-): { elements: readonly T[]; changed: boolean; fonts: boolean } {
+): { elements: readonly T[]; changed: boolean; refit: string[] } {
   let changed = false;
-  let fonts = false;
+  const refit: string[] = [];
   const elements = els.map((e) => {
     if (e.type === 'image') return e;
     const patch: CleanPatch = {};
     if (typeof e.roughness === 'number' && e.roughness > 0) patch.roughness = 0;
     if (e.type === 'text' && HAND_FONTS.has(e.fontFamily)) {
       patch.fontFamily = CLEAN_FONT_FAMILY;
-      fonts = true;
+      refit.push(e.id);
     }
     if (patch.roughness === undefined && patch.fontFamily === undefined) return e;
     changed = true;
     return apply(e, patch);
   });
-  return changed ? { elements, changed, fonts } : { elements: els, changed, fonts };
+  return changed ? { elements, changed, refit } : { elements: els, changed, refit };
 }

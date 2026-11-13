@@ -26,6 +26,7 @@ import { AgentCursors } from './AgentCursors';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE, cleanElements } from './cleanStyle';
+import { refitTexts, type FitEl } from './refit';
 import './clean.css';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
@@ -77,6 +78,18 @@ const withLayout = (cd: Record<string, unknown> | undefined, layout: BlockLayout
 };
 const isGraphType = (type: string | undefined) => type === 'architecture' || type === 'flowchart';
 
+
+/** Texts measured by Excalidraw (it measures only with repairBindings set). */
+const measureTexts = (els: FitEl[]) => restoreElements(els as unknown as ExcalidrawElement[], null, { repairBindings: true, refreshDimensions: true }) as unknown as FitEl[];
+
+/** The texts in `ids` measured again; nothing else changes. */
+function refit(els: readonly ExcalidrawElement[], ids: Iterable<string>, apply?: (e: FitEl, patch: Partial<FitEl>) => FitEl) {
+  return refitTexts(els as unknown as readonly FitEl[], new Set(ids), measureTexts, apply) as unknown as { elements: readonly ExcalidrawElement[]; changed: boolean };
+}
+
+/** Whether Excalidraw's copy of the clean font has loaded; until then text is measured with a fallback font. */
+const cleanFontLoaded = () => Array.from(document.fonts).some((f) => f.family.replace(/["']/g, '') === 'Liberation Sans' && f.status === 'loaded');
+
 export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange, handle, path }: Props) {
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -121,6 +134,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const seenLayouts = useRef(new Map<string, string>());
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   apiRef.current = api;
+  // Texts that changed font before the clean font had loaded: measured again once it has.
+  const refitLater = useRef(new Set<string>());
   const focusRef = useRef(focus);
   focusRef.current = focus;
   const focusDone = useRef(0);
@@ -294,6 +309,22 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   }, []);
   useEffect(tryFocus, [api, focus, tryFocus]);
 
+  // Excalidraw loads the clean font after the scene is set: texts measured before that are measured again once it
+  // is in. Versions stay as they are, as when opening; the new size is saved with the next edit.
+  const refitPending = useCallback(() => {
+    const xapi = apiRef.current;
+    if (!xapi || !refitLater.current.size || !cleanFontLoaded()) return;
+    const ids = refitLater.current;
+    refitLater.current = new Set();
+    const out = refit(xapi.getSceneElementsIncludingDeleted(), ids);
+    if (out.changed) xapi.updateScene({ elements: out.elements, captureUpdate: CaptureUpdateAction.NEVER });
+  }, []);
+  useEffect(() => {
+    document.fonts.addEventListener('loadingdone', refitPending);
+    refitPending();
+    return () => document.fonts.removeEventListener('loadingdone', refitPending);
+  }, [api, refitPending]);
+
   // Built once per mount (CanvasPane remounts on file switch/reload).
   const initialData = useMemo(
     () => async () => {
@@ -303,7 +334,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       // Shapes saved hand-drawn (older builds, the insert menu before E58) open clean. Versions stay as saved, so
       // opening alone writes nothing: the clean style reaches the disk with the user's next edit.
       const tidy = cleanElements(canvas.elements as ExcalidrawElement[]);
-      const free = restoreElements(tidy.elements as ExcalidrawElement[], null, { refreshDimensions: tidy.fonts });
+      // Texts that changed font are measured in it; versions stay, so their new size is saved with that edit too.
+      const restored = restoreElements(tidy.elements as ExcalidrawElement[], null);
+      const free = refit(restored, tidy.refit).elements as typeof restored;
+      if (!cleanFontLoaded()) for (const id of tidy.refit) refitLater.current.add(id);
       sigRef.current = freeSignature(free);
       // A block goes back into the frame it was saved in, if that frame is still there (#83).
       const placed = placeBlocks(liveFrames(blocks, free as unknown as SceneEl[]), pics, liveRects(free));
@@ -472,7 +506,9 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     // Hand-drawn shapes that come in by paste, the library or copied styles are made clean on the spot.
     const tidy = cleanElements(elements, (e, patch) => newElementWith(e, patch as Partial<ExcalidrawElement>));
     if (tidy.changed && apiRef.current) {
-      elements = tidy.fonts ? restoreElements(tidy.elements, null, { refreshDimensions: true }) : tidy.elements;
+      // Only the texts that changed font are measured again (#270).
+      elements = refit(tidy.elements, tidy.refit, (e, patch) => newElementWith(e as unknown as ExcalidrawElement, patch as never) as unknown as FitEl).elements;
+      if (!cleanFontLoaded()) for (const id of tidy.refit) refitLater.current.add(id);
       apiRef.current.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
     }
     // A copied block image (duplicate, paste, alt-drag) becomes a new block with the same code.

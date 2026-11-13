@@ -9,6 +9,7 @@ import { planForRun } from './plan.js';
 import {
   RECORD_VERSION,
   RUN_ID,
+  PAUSE_BY,
   RUN_STATES,
   STEP_STATES_WITHOUT_SESSIONS,
   TIMELINE_MAX,
@@ -111,8 +112,12 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return id;
   }
 
-  /** Start recording a run of `plan` (the file's plan as started, read at `revision`). Returns the new record. */
-  async function startRun({ file, plan, revision }) {
+  /**
+   * Start recording a run of `plan` (the file's plan as started, read at `revision`). Returns the new record.
+   * `carry` ({ from: runId, steps: { [stepId]: step record } }) marks steps an earlier run of the file finished
+   * as done in this one (계획 다시 열기, E27); steps the new plan no longer has are dropped.
+   */
+  async function startRun({ file, plan, revision, carry = null }) {
     const rel = runs.fileRel(file);
     let planned;
     try {
@@ -132,7 +137,16 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
       steps: Object.fromEntries(planned.stepIds.map((id) => [id, { state: 'pending', startedAt: null, endedAt: null, sessions: [] }])),
       totals: { cost: 0, mtok: 0 },
       timeline: [],
+      pause: null,
     };
+    if (carry && typeof carry.from === 'string' && RUN_ID.test(carry.from)) {
+      for (const [id, old] of Object.entries(carry.steps ?? {})) {
+        if (!record.steps[id] || !old || typeof old !== 'object') continue;
+        const sessions = (Array.isArray(old.sessions) ? old.sessions : []).map(pickSession).filter((s) => s.sid);
+        record.steps[id] = { state: 'done', startedAt: old.startedAt ?? null, endedAt: old.endedAt ?? t, sessions, carried: carry.from };
+      }
+      record.totals = totalsOf(record);
+    }
     const run = { record, loc: { path: rel }, writeTimer: null, dirty: false };
     active.set(record.id, run);
     await writeNow(run);
@@ -268,13 +282,61 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
   };
 
   /**
+   * Pause a running run (E27): `by` is 'limit' (usage-limit guard, with the window's `resetAt`) or 'stop' (멈추기).
+   * The run stays in memory, so its sessions keep reporting; it is written at once so the tree shows it paused.
+   */
+  async function pauseRun(runId, { by, resetAt = null, file = null } = {}) {
+    const run = file && !active.has(runId) ? await load(file, runId) : get(runId);
+    if (!PAUSE_BY.includes(by)) throw new StoreError(400, 'invalid pause');
+    if (run.record.state !== 'running' && run.record.state !== 'paused') throw new StoreError(409, 'run is not running');
+    run.record.state = 'paused';
+    run.record.pause = { by, at: now(), ...(Number.isFinite(resetAt) && resetAt > 0 && { resetAt }) };
+    flushEvents(runId);
+    await writeNow(run);
+    hub?.broadcast('run', { file: run.record.file, runId, run: summaryOf(run.record) });
+    return structuredClone(run.record);
+  }
+
+  /** A paused run in memory, or read back from disk after a server restart. */
+  async function load(file, runId) {
+    const live = active.get(runId);
+    if (live) return live;
+    const rel = runs.fileRel(file);
+    if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new StoreError(400, 'invalid run id');
+    const record = await readRecord(join(await runs.dirOf(rel), `${runId}.json`));
+    if (!record) throw new StoreError(404, 'run not found');
+    if (record.state !== 'paused' && record.state !== 'running') throw new StoreError(409, 'run is not paused');
+    const run = { record, loc: { path: rel }, writeTimer: null, dirty: false };
+    record.file = rel;
+    active.set(runId, run);
+    return run;
+  }
+
+  /** Back to running after a pause (이어서 하기). */
+  async function resumeRun(file, runId) {
+    const run = await load(file, runId);
+    if (run.record.state !== 'paused' && run.record.state !== 'running') throw new StoreError(409, 'run is not paused');
+    run.record.state = 'running';
+    run.record.pause = null;
+    await writeNow(run);
+    hub?.broadcast('run', { file: run.record.file, runId, run: summaryOf(run.record) });
+    return structuredClone(run.record);
+  }
+
+  /** End a paused (or running) run even when a server restart dropped it from memory. */
+  async function endPaused(file, runId, state = 'stopped') {
+    await load(file, runId);
+    return endRun(runId, state);
+  }
+
+  /**
    * Finish a run (done / failed / stopped): written at once and dropped from memory. `results` ({ [stepId]:
    * { commit?, base?, abandoned? } }) says how the board closed each step (E28): merged at a commit, or abandoned
    * (그만둠). An abandoned step without sessions becomes `skipped`.
    */
   async function endRun(runId, state = 'done', { results = null } = {}) {
     const run = get(runId);
-    if (!RUN_STATES.includes(state) || state === 'running') throw new StoreError(400, 'invalid run state');
+    if (!RUN_STATES.includes(state) || state === 'running' || state === 'paused') throw new StoreError(400, 'invalid run state');
     flushEvents(runId);
     for (const [id, r] of Object.entries(results ?? {})) {
       const step = run.record.steps[id];
@@ -374,5 +436,5 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return [...out].sort();
   }
 
-  return { startRun, updateSession, setStepState, noteStep, stepsOf, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
+  return { startRun, pauseRun, resumeRun, endPaused, updateSession, setStepState, noteStep, stepsOf, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
 }
