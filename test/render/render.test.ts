@@ -296,6 +296,8 @@ test('the embedded clean font is the bundled OFL subset under its own name', asy
   // "Pretendard" is a reserved font name: the subset must not be offered under it.
   assert.match(license, /Reserved Font Name Pretendard/);
   assert.doesNotMatch(FONT_FAMILY.clean.split(',')[0], /Pretendard/);
+  // The page's Pretendard webfont must not reach an inline diagram SVG, or it differs from the canvas image.
+  for (const family of Object.values(FONT_FAMILY)) assert.doesNotMatch(family, /Pretendard/);
 });
 
 test('the embedded rough font is the bundled OFL file', async () => {

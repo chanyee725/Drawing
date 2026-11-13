@@ -8,8 +8,10 @@ import type { TextSize, Typeface } from './scene.ts';
 export const CLEAN_FONT_NAME = 'Drawing Sans';
 
 // The embedded face has Latin only. Hangul comes from the next installed family: named Korean fonts first, because
-// `system-ui` alone can pick another CJK locale's font.
-const HANGUL_FALLBACK = "'Pretendard Variable', Pretendard, 'Noto Sans KR', 'Noto Sans CJK KR', 'Apple SD Gothic Neo', 'Malgun Gothic'";
+// `system-ui` alone can pick another CJK locale's font. No Pretendard here: the page loads it as a webfont, so an
+// inline SVG (the layout edit overlay) would draw Hangul in it while the canvas image, which cannot see page fonts,
+// draws the system font.
+const HANGUL_FALLBACK = "'Noto Sans KR', 'Noto Sans CJK KR', 'Apple SD Gothic Neo', 'Malgun Gothic'";
 
 export const FONT_FAMILY: Record<Typeface, string> = {
   clean: `'${CLEAN_FONT_NAME}', ${HANGUL_FALLBACK}, system-ui, -apple-system, 'Segoe UI', sans-serif`,
