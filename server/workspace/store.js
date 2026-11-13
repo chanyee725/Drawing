@@ -632,10 +632,14 @@ export function createStore(
    * `type` is 'file' | 'folder'. Without it a file wins: `from` is tried as a file
    * (extension optional) first, then as a folder.
    */
-  async function move(from, to, type) {
+  async function move(from, to, type, { withSubdocs = false } = {}) {
     parseOrThrow(from);
     parseOrThrow(to);
     if (type !== undefined && type !== 'file' && type !== 'folder') throw new StoreError(400, 'type must be "file" or "folder"');
+    if (withSubdocs) {
+      if (type !== 'file') throw new StoreError(400, 'withSubdocs needs type "file"');
+      return serial(() => moveWithSubdocs(from, to));
+    }
     return serial(async () => {
       if (type !== 'folder') {
         const fileFrom = checkedFileRel(from);
@@ -649,6 +653,34 @@ export function createStore(
       if (!st?.isDirectory()) throw new StoreError(404, 'not found');
       return moved(from, await moveFolder(from, fromAbs, to));
     });
+  }
+
+  // A document and its sub-documents folder (`X/` next to `X.dpx.json`) move as one: both targets are checked
+  // before anything moves, and the file goes back if the folder move still fails.
+  async function moveWithSubdocs(from, to) {
+    const fileFrom = checkedFileRel(from);
+    const fileTo = checkedFileRel(to);
+    const fromAbs = await wrapPath(fileFrom);
+    if (!(await statOrNull(fromAbs))?.isFile()) throw new StoreError(404, 'not found');
+    const subFrom = fileFrom.slice(0, -FILE_EXT.length);
+    const subTo = fileTo.slice(0, -FILE_EXT.length);
+    const subAbs = await wrapPath(subFrom);
+    if (!(await statOrNull(subAbs))?.isDirectory()) return moved(from, await moveFile(fileFrom, fromAbs, fileTo));
+    if (subTo === subFrom || subTo.startsWith(subFrom + '/')) throw new StoreError(400, 'cannot move a folder into itself');
+    checkFolderNames(subTo.split('/'));
+    const subToAbs = await wrapPath(subTo).catch((err) => {
+      throw asParentClash(err);
+    });
+    if (await statOrNull(subToAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    const result = await moveFile(fileFrom, fromAbs, fileTo);
+    try {
+      await moveFolder(subFrom, subAbs, subTo);
+    } catch (err) {
+      await moveFile(fileTo, await wrapPath(fileTo), fileFrom).catch(() => {});
+      throw err;
+    }
+    moved(subFrom, { path: subTo });
+    return moved(from, result);
   }
 
   // A move or rename through the API tells other tabs where the thing went; `from` is the path as the caller wrote it.

@@ -146,3 +146,43 @@ test('projects: created follows the file through move, delete and restore', asyn
     assert.deepEqual((await call('GET', '/api/history?path=Q%2Fmoved')).body.versions, []);
   });
 });
+
+test('move with subdocs: a document and its sub-documents folder move together', async () => {
+  await withApp(async ({ ws, outside, call }) => {
+    for (const p of ['A/로그인', 'A/로그인/토큰', 'A/로그인/토큰/만료', 'A/solo', 'B/keep', 'B/clash', 'B/clash/x']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    const docsOf = async (name) => (await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === name)?.docs ?? [];
+
+    let r = await call('POST', '/api/move', { from: 'A/로그인.dpx.json', to: 'B/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.path, 'B/로그인.dpx.json');
+    assert.deepEqual(shape(await docsOf('B')).find((d) => d[1] === '로그인'), ['doc', '로그인', 2, [['doc', '토큰', 1, [['doc', '만료', 0, []]]]]]);
+    assert.deepEqual(shape(await docsOf('A')), [['doc', 'solo', 0, []]]);
+
+    // A document without sub-documents moves alone.
+    assert.equal((await call('POST', '/api/move', { from: 'A/solo.dpx.json', to: 'B/solo.dpx.json', type: 'file', withSubdocs: true })).status, 200);
+
+    // Into its own sub-documents: refused, nothing moves.
+    r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to: 'B/로그인/토큰/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 400);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === '로그인')[2], 2);
+
+    // The sub-documents folder name is taken at the target: refused before the file moves.
+    await mkdir(join(ws, 'A', 'clash'));
+    r = await call('POST', '/api/move', { from: 'B/clash.dpx.json', to: 'A/clash.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 409);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === 'clash')[2], 1);
+
+    // Outside the workspace: refused.
+    for (const to of ['../escape.dpx.json', `${outside}/x.dpx.json`]) {
+      r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to, type: 'file', withSubdocs: true });
+      assert.equal(r.status, 400, to);
+    }
+    await symlink(outside, join(ws, 'link'));
+    r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to: 'link/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.ok(r.status >= 400, `symlink target status ${r.status}`);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === '로그인')[2], 2);
+
+    // withSubdocs only goes with a file move.
+    assert.equal((await call('POST', '/api/move', { from: 'B', to: 'C', type: 'folder', withSubdocs: true })).status, 400);
+  });
+});

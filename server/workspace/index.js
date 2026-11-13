@@ -88,8 +88,9 @@ export async function setup(ctx) {
       route('GET', '/api/history/version', (p, _b, q) => store.historyVersion(need(p, 'path'), q.get('id'))),
       // Snapshot the file as it is on disk now (before a restore); ignores the 5-minute interval.
       route('POST', '/api/history', (p) => store.historySnapshotNow(need(p, 'path'))),
-      // body: {from, to, type?: 'file'|'folder'}; without type a file wins over a same-named folder
-      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type)),
+      // body: {from, to, type?: 'file'|'folder', withSubdocs?: true}; without type a file wins over a same-named folder.
+      // withSubdocs (type 'file' only): the document's sub-documents folder (`X/` next to `X.dpx.json`) moves along.
+      route('POST', '/api/move', (_p, b) => store.move(need(b?.from, 'from'), need(b?.to, 'to'), b?.type, { withSubdocs: b?.withSubdocs === true })),
     ],
   };
 }
