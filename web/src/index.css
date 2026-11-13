@@ -8,7 +8,7 @@
 /* The theme switch (web/src/theme.ts) sets data-theme on <html>; Tailwind's dark: follows it. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* Tailwind v4 borders default to currentColor; without this, \`border\` draws a white line in dark mode. */
+/* Tailwind v4 borders default to currentColor; without this, `border` draws a white line in dark mode. */
 @layer base {
   *, ::before, ::after { border-color: var(--border); }
 }
