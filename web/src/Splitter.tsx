@@ -31,7 +31,9 @@ export function Splitter({ ratio, onRatio, left, right }: Props) {
           if (e.key === 'ArrowLeft') onRatio(clamp(ratio - 0.02));
           if (e.key === 'ArrowRight') onRatio(clamp(ratio + 0.02));
         }}
-        className="w-1.5 shrink-0 cursor-col-resize touch-none bg-border hover:opacity-100"
+        // A deliberate 1px line at the doc/canvas seam (the dark canvas, ~#121212, can't match the page
+        // background, #0a0a0a, through Excalidraw's dark filter). The ::before strip keeps an 8px grab area.
+        className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none transition-colors before:absolute before:inset-y-0 before:-inset-x-1 before:content-[''] hover:bg-ring focus-visible:bg-ring focus-visible:shadow-[0_0_0_1px_var(--ring)]"
       />
       <div className="min-w-0 flex-1 overflow-auto">{right}</div>
     </div>
