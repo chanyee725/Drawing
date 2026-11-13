@@ -3,7 +3,8 @@
 // - files right in the workspace root are "loose" (미분류)
 // - a folder `X/` next to `X.dpx.json` holds X's sub-documents; a folder without such a file is a "group"
 // Built from the store's tree, so the same hidden-name and symlink rules apply. Nothing is written.
-import { lstat, readFile, stat } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { open, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FILE_EXT } from './model.js';
 
@@ -27,10 +28,14 @@ const maxOf = (xs) => {
 /** The optional meta file of a project folder: only known string fields, trimmed and capped; anything else is ignored. */
 export async function readProjectMeta(dir) {
   const abs = join(dir, PROJECT_META);
+  let fh;
   try {
-    const st = await lstat(abs);
+    // O_NOFOLLOW: a symlinked meta file is refused at open, with no gap between the check and the read.
+    // O_NONBLOCK: opening a FIFO must not wait for a writer; it is then rejected by the isFile check.
+    fh = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const st = await fh.stat();
     if (!st.isFile() || st.size > META_MAX_BYTES) return {};
-    const raw = JSON.parse(await readFile(abs, 'utf8'));
+    const raw = JSON.parse(await fh.readFile('utf8'));
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
     const out = {};
     for (const [k, max] of Object.entries(LIMITS)) {
@@ -40,6 +45,8 @@ export async function readProjectMeta(dir) {
     return out;
   } catch {
     return {};
+  } finally {
+    await fh?.close().catch(() => {});
   }
 }
 
@@ -50,13 +57,19 @@ export async function readProjectMeta(dir) {
  * `count` is the number of documents below (not counting the node itself).
  */
 export async function nestDocs(nodes, created) {
+  const strip = (list) => list.map(({ latest: _l, ...n }) => ({ ...n, children: strip(n.children) }));
+  return strip(await nest(nodes, created));
+}
+
+// Same as nestDocs, but each node keeps `latest` (newest change in its subtree) so a group above can use it.
+async function nest(nodes, created) {
   const docs = new Map();
   for (const n of nodes) if (n.type === 'file') docs.set(stem(n.name), n);
   const out = [];
   const used = new Set();
   for (const n of nodes) {
     if (n.type !== 'folder') continue;
-    const children = await nestDocs(n.children, created);
+    const children = await nest(n.children, created);
     const owner = docs.get(n.name);
     if (owner) {
       used.add(n.name);
@@ -67,7 +80,8 @@ export async function nestDocs(nodes, created) {
         path: n.path,
         name: n.name,
         created: iso(minOf(children.map((c) => ms(c.created)))),
-        modified: iso(maxOf(children.map((c) => ms(c.latest ?? c.modified)))),
+        modified: iso(maxOf(children.map((c) => (c.latest ?? ms(c.modified))))),
+        latest: maxOf(children.map((c) => (c.latest ?? ms(c.modified)))),
         count: countOf(children),
         children,
       });
@@ -75,7 +89,7 @@ export async function nestDocs(nodes, created) {
   }
   for (const [name, f] of docs) if (!used.has(name)) out.push(await docNode(f, [], created));
   out.sort((a, b) => a.name.localeCompare(b.name));
-  return out.map(({ latest: _l, ...n }) => n);
+  return out;
 }
 
 const countOf = (children) => children.reduce((s, c) => s + (c.type === 'doc' ? 1 : 0) + c.count, 0);
@@ -94,7 +108,7 @@ async function docNode(f, children, created) {
     count: countOf(children),
     children,
     // Newest change in this subtree; only used to date the enclosing group, then dropped.
-    latest: maxOf([modified, ...children.map((c) => ms(c.modified))]),
+    latest: maxOf([modified, ...children.map((c) => (c.latest ?? ms(c.modified)))]),
   };
 }
 
