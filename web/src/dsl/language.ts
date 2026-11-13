@@ -77,7 +77,7 @@ const light = HighlightStyle.define([
   { tag: t.number, color: '#b45309' },
   { tag: t.operator, color: '#e11d48', fontWeight: '600' },
   { tag: t.propertyName, color: '#0369a1' },
-  { tag: t.atom, color: '#0e7490' },
+  { tag: t.atom, color: '#6d28d9' },
   { tag: [t.bracket, t.brace, t.punctuation], color: '#71717a' },
 ]);
 const dark = HighlightStyle.define([
@@ -87,7 +87,7 @@ const dark = HighlightStyle.define([
   { tag: t.number, color: '#fbbf6a' },
   { tag: t.operator, color: '#fb7185', fontWeight: '600' },
   { tag: t.propertyName, color: '#7dd3fc' },
-  { tag: t.atom, color: '#67e8f9' },
+  { tag: t.atom, color: '#c4b5fd' },
   { tag: [t.bracket, t.brace, t.punctuation], color: '#a1a1aa' },
 ]);
 
