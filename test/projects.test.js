@@ -208,3 +208,21 @@ test('delete with subdocs: a document and its sub-documents folder go to the tra
     assert.equal((await call('GET', '/api/file?path=A%2Fplan%2Fstep.dpx.json')).status, 200);
   });
 });
+
+test('delete with subdocs: files other than documents under X/ are never lost', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/plan', 'A/plan/step', 'A/plan/sub/deep', 'A/plan/only/doc']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await writeFile(join(ws, 'A', 'plan', 'notes.md'), 'keep me\n');
+    await writeFile(join(ws, 'A', 'plan', 'sub', '.hidden'), 'keep me too\n');
+
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fplan.dpx.json&withSubdocs=1')).status, 200);
+    const trashed = (await call('GET', '/api/trash')).body.items.map((i) => i.path).sort();
+    assert.deepEqual(trashed, ['A/plan.dpx.json', 'A/plan/only/doc.dpx.json', 'A/plan/step.dpx.json', 'A/plan/sub/deep.dpx.json']);
+    // The documents are gone; the other files stay with the folders that hold them; emptied folders go.
+    const { readdir: ls, readFile: read } = await import('node:fs/promises');
+    assert.equal(await read(join(ws, 'A', 'plan', 'notes.md'), 'utf8'), 'keep me\n');
+    assert.equal(await read(join(ws, 'A', 'plan', 'sub', '.hidden'), 'utf8'), 'keep me too\n');
+    assert.deepEqual((await ls(join(ws, 'A', 'plan'))).sort(), ['notes.md', 'sub']);
+    assert.deepEqual(await ls(join(ws, 'A', 'plan', 'sub')), ['.hidden']);
+  });
+});

@@ -743,7 +743,24 @@ export function createStore(
     tombstones.delete(rel);
   }
 
-  // withSubdocs: the document's sub-documents folder (`X/` next to `X.dpx.json`) goes to the trash with it.
+  // Remove the empty folders under (and including) absDir, deepest first; anything still holding a file stays.
+  // Returns the rel paths of the folders it removed. Symlinks are never followed.
+  async function pruneEmptyDirs(absDir, relDir) {
+    let entries;
+    try {
+      entries = await readdir(absDir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const removed = [];
+    for (const e of entries) if (e.isDirectory()) removed.push(...(await pruneEmptyDirs(join(absDir, e.name), `${relDir}/${e.name}`)));
+    if (await rmdir(absDir).then(() => true, () => false)) removed.push(relDir); // fails (ENOTEMPTY) when something stays
+    return removed;
+  }
+
+  // withSubdocs: the document's sub-documents (`.dpx.json` files under `X/`, next to `X.dpx.json`) go to the trash
+  // with it. Only those files are removed: anything else under X/ (notes, images, hidden files) cannot be kept in
+  // the trash, so it stays where it is, with the folders that hold it. Folders left empty are removed.
   async function removeFile(rel, { withSubdocs = false } = {}) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
@@ -757,10 +774,13 @@ export function createStore(
       await unlink(abs);
       forget(rel, false);
       if (sub) {
-        await rm(subAbs, { recursive: true });
-        forget(subRel, true);
+        for (const f of sub) {
+          await unlink(join(subAbs, f.rel.slice(subRel.length + 1)));
+          forget(f.rel, false);
+        }
+        for (const d of await pruneEmptyDirs(subAbs, subRel)) knownDirs.delete(d);
         await trashMany([[rel, text], ...sub.map((f) => [f.rel, f.text])]);
-        await dropHistory(subRel);
+        for (const f of sub) await dropHistory(f.rel);
       } else await trashQuietly(rel, text);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
       if (sub) onExternalChange?.({ kind: 'tree', path: subRel, from: subRel });
