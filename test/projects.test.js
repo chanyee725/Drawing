@@ -226,3 +226,30 @@ test('delete with subdocs: files other than documents under X/ are never lost', 
     assert.deepEqual(await ls(join(ws, 'A', 'plan', 'sub')), ['.hidden']);
   });
 });
+
+test('rename with subdocs: one request, no orphaned sub-documents, no unrelated group taken over', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/login', 'A/login/token', 'A/solo', 'A/new/memo', 'A/other']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await mkdir(join(ws, 'A', 'empty'));
+    assert.equal((await call('POST', '/api/file', { path: 'A/empty' })).status, 201);
+    const docsOf = async () => shape((await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === 'A')?.docs ?? []);
+    const before = await docsOf();
+    const rename = (from, to) => call('POST', '/api/move', { from: `A/${from}.dpx.json`, to: `A/${to}.dpx.json`, type: 'file', withSubdocs: true });
+
+    // login (with sub-documents) onto the name of the unrelated group A/new: refused, nothing moves or is orphaned.
+    assert.equal((await rename('login', 'new')).status, 409);
+    // solo (no sub-documents) onto the same name: refused too, so it never takes the group over as its sub-documents.
+    assert.equal((await rename('solo', 'new')).status, 409);
+    assert.deepEqual(await docsOf(), before);
+
+    // A free name: the document and its sub-documents arrive together; an empty X/ is renamed along.
+    assert.equal((await rename('login', 'signin')).status, 200);
+    assert.equal((await rename('empty', 'vacant')).status, 200);
+    const after = await docsOf();
+    assert.deepEqual(after.find((d) => d[1] === 'signin'), ['doc', 'signin', 1, [['doc', 'token', 0, []]]]);
+    assert.ok(!after.some((d) => d[1] === 'login' || d[1] === 'empty'), 'nothing left under the old names');
+    assert.deepEqual(after.find((d) => d[1] === 'new'), ['group', 'new', 1, [['doc', 'memo', 0, []]]], 'the unrelated group is untouched');
+    const { stat: st } = await import('node:fs/promises');
+    assert.ok((await st(join(ws, 'A', 'vacant'))).isDirectory());
+  });
+});

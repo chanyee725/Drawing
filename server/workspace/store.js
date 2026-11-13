@@ -665,13 +665,16 @@ export function createStore(
     const subFrom = fileFrom.slice(0, -FILE_EXT.length);
     const subTo = fileTo.slice(0, -FILE_EXT.length);
     const subAbs = await wrapPath(subFrom);
-    if (!(await statOrNull(subAbs))?.isDirectory()) return moved(from, await moveFile(fileFrom, fromAbs, fileTo));
-    if (subTo === subFrom || subTo.startsWith(subFrom + '/')) throw new StoreError(400, 'cannot move a folder into itself');
-    checkFolderNames(subTo.split('/'));
+    const hasSub = (await statOrNull(subAbs))?.isDirectory();
+    if (hasSub && (subTo === subFrom || subTo.startsWith(subFrom + '/'))) throw new StoreError(400, 'cannot move a folder into itself');
+    // A folder already named like the new document would become its sub-documents (an unrelated group taken over),
+    // so the move is refused even when the document has no sub-documents of its own.
     const subToAbs = await wrapPath(subTo).catch((err) => {
       throw asParentClash(err);
     });
     if (await statOrNull(subToAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    if (!hasSub) return moved(from, await moveFile(fileFrom, fromAbs, fileTo));
+    checkFolderNames(subTo.split('/'));
     const result = await moveFile(fileFrom, fromAbs, fileTo);
     try {
       await moveFolder(subFrom, subAbs, subTo);

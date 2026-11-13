@@ -153,6 +153,9 @@ test('refused sidebar drops do not move to the root', { skip: !ON && 'set DRAW_E
   assert.ok(existsSync(join(ws, 'D', 'login', 'token.dpx.json')), 'its sub-documents stay with it');
   assert.ok(!existsSync(join(ws, 'D', 'new.dpx.json')), 'no half-renamed document');
   await page.getByRole('alert').filter({ hasText: /./ }).first().waitFor();
+  // A document without sub-documents never takes the unrelated group over as its own.
+  await menuAction('혼자', '이름 바꾸기', 'new');
+  assert.ok(existsSync(join(ws, 'D', 'solo.dpx.json')) && !existsSync(join(ws, 'D', 'new.dpx.json')), 'solo keeps its name');
   // An empty sub-documents folder takes the new name too.
   await menuAction('혼자', '이름 바꾸기', 'alone');
   assert.ok(existsSync(join(ws, 'D', 'alone.dpx.json')) && existsSync(join(ws, 'D', 'alone')), 'document and its empty folder renamed');
