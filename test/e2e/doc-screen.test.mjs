@@ -145,9 +145,8 @@ test('document screen: path, view switch, ⋯ menu, sub-documents, 390px', { ski
     assert.ok(sep === 'none' || sep === 'normal', `no separator before the title on a narrow screen: ${sep}`);
     for (const name of ['파일 목록 열기', '더 보기', '문서', '캔버스']) {
       const box = await page.getByRole('button', { name, exact: true }).boundingBox();
-      assert.ok(box.height >= 40 && box.width >= 40, `${name} is a touch target: ${JSON.stringify(box)}`);
+      assert.ok(box.height >= 44 && box.width >= 44, `${name} is a 44px touch target: ${JSON.stringify(box)}`);
     }
-    for (const name of ['파일 목록 열기', '더 보기']) assert.ok((await page.getByRole('button', { name, exact: true }).boundingBox()).height >= 44, name);
     await shot(page, `${theme}-doc-390`);
     await page.getByRole('button', { name: '캔버스', exact: true }).click();
     assert.equal(await page.locator("section[aria-label='문서']").count(), 0);
