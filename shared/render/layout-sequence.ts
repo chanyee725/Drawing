@@ -122,9 +122,9 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       y += 4;
       const pts: Point[] = [{ x: sx, y }, { x: x0 + SELF_W, y }, { x: x0 + SELF_W, y: y + SELF_H }, { x: sx, y: y + SELF_H }];
       mid.push({ ...common, points: pts, route: 'elbow' });
-      // A plate label too, so a long one cuts the next lifeline instead of running over it. 10px out: the cut reaches
-      // PLATE_PAD + 1 left of the text and must stay clear of the loop's own right side.
-      if (label.lines.length) front.push(textItem(label.lines, x0 + SELF_W + 10, y + SELF_H / 2 - label.h / 2, { size: MSG_SIZE, font: style.typeface, anchor: 'start', color: style.paint.color, plate: true }));
+      // No plate: the gap after a self message (SELF_W + 12 + label + 24, above) keeps the label clear of the next
+      // lifeline, so there is nothing to cut, and a hole would only nick the loop's own right side.
+      if (label.lines.length) front.push(textItem(label.lines, x0 + SELF_W + 8, y + SELF_H / 2 - label.h / 2, { size: MSG_SIZE, font: style.typeface, anchor: 'start', color: style.paint.color }));
       y += SELF_H + 20;
       return;
     }
