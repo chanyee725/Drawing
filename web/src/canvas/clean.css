@@ -5,6 +5,14 @@
   --sidebar-border-color: var(--border);
   --color-primary: var(--accent);
   --color-primary-light: var(--accent-soft);
+  /* Excalidraw's own violets (selected tool, hover/active, primary buttons) follow the neutral accent (#130). */
+  --color-primary-darker: var(--accent);
+  --color-primary-darkest: var(--accent);
+  --color-primary-hover: var(--accent);
+  --color-brand-hover: var(--accent);
+  --color-brand-active: var(--accent);
+  --color-surface-primary-container: var(--accent-soft);
+  --color-on-primary-container: var(--foreground);
   --color-surface-lowest: var(--surface);
   --border-radius-lg: 8px;
   --border-radius-md: 6px;
@@ -24,4 +32,10 @@
 .excalidraw.excalidraw .HintViewer {
   font-size: 0.6875rem;
   opacity: 0.8;
+}
+/* Excalidraw hard-codes white text on primary buttons; the dark accent is near-white, so use its foreground. */
+.excalidraw.excalidraw .Dialog__action-button--primary,
+.excalidraw.excalidraw .library-menu-browse-button,
+.excalidraw.excalidraw .ttd-dialog-panel-button {
+  color: var(--brand-foreground);
 }
