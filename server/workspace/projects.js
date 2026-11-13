@@ -31,7 +31,8 @@ export async function readProjectMeta(dir) {
   let fh;
   try {
     // O_NOFOLLOW: a symlinked meta file is refused at open, with no gap between the check and the read.
-    fh = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW);
+    // O_NONBLOCK: opening a FIFO must not wait for a writer; it is then rejected by the isFile check.
+    fh = await open(abs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const st = await fh.stat();
     if (!st.isFile() || st.size > META_MAX_BYTES) return {};
     const raw = JSON.parse(await fh.readFile('utf8'));
@@ -45,7 +46,7 @@ export async function readProjectMeta(dir) {
   } catch {
     return {};
   } finally {
-    await fh?.close();
+    await fh?.close().catch(() => {});
   }
 }
 

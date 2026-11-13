@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.js';
 import { modules } from '../server/modules.js';
 import { newFile } from '../server/workspace/model.js';
-import { nestDocs } from '../server/workspace/projects.js';
+import { nestDocs, readProjectMeta } from '../server/workspace/projects.js';
 
 // Scratch workspace only (never a real project); the dispatch module stays off outside a git repo.
 async function withApp(fn) {
@@ -269,4 +270,38 @@ test('nestDocs: a group is dated by its newest grandchild and no node leaks `lat
   assert.equal(out[0].modified, '2026-02-09T00:00:00.000Z');
   assert.equal(out[1].modified, '2026-03-01T00:00:00.000Z');
   assert.ok(!JSON.stringify(out).includes('latest'));
+});
+
+const mk = (path, mtime) => ({ type: 'file', name: path.split('/').pop() + '.dpx.json', path: path + '.dpx.json', title: '', revision: 1, mtime, created: mtime });
+const folder = (path, children) => ({ type: 'folder', name: path.split('/').pop(), path, children });
+const born = async (x) => Date.parse(x.created);
+
+test('nestDocs: doc -> doc -> doc, the group above is dated by the deepest document', async () => {
+  const nodes = [folder('G', [mk('G/a', '2026-01-01T00:00:00.000Z'), folder('G/a', [mk('G/a/b', '2026-01-02T00:00:00.000Z'), folder('G/a/b', [mk('G/a/b/c', '2026-05-05T00:00:00.000Z')])])])];
+  const out = await nestDocs(nodes, born);
+  assert.equal(out[0].modified, '2026-05-05T00:00:00.000Z');
+  assert.equal(out[0].children[0].modified, '2026-01-01T00:00:00.000Z');
+  assert.ok(!JSON.stringify(out).includes('latest'));
+});
+
+test('nestDocs: doc -> group -> doc, the outer group is dated by the document below the inner group', async () => {
+  const nodes = [folder('G', [mk('G/a', '2026-01-01T00:00:00.000Z'), folder('G/a', [folder('G/a/Z', [mk('G/a/Z/z', '2026-06-06T00:00:00.000Z')])])])];
+  const out = await nestDocs(nodes, born);
+  assert.equal(out[0].modified, '2026-06-06T00:00:00.000Z');
+  assert.ok(!JSON.stringify(out).includes('latest'));
+});
+
+test('readProjectMeta: a FIFO .project.json returns {} without waiting for a writer', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'draw-fifo-'));
+  try {
+    try {
+      execFileSync('mkfifo', [join(dir, '.project.json')]);
+    } catch {
+      return t.skip('mkfifo is not available');
+    }
+    const r = await Promise.race([readProjectMeta(dir), new Promise((res) => setTimeout(() => res('hung'), 2000))]);
+    assert.deepEqual(r, {});
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
