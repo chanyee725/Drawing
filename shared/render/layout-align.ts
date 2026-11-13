@@ -8,6 +8,8 @@ export type Rect = { x: number; y: number; w: number; h: number };
 
 /** Layer centres closer than this snap to their mean (spec §1.3: ELK differs by 2-10 px). */
 export const SNAP_TOLERANCE = 12;
+/** Groups grow to their row's or column's size only when already at least this share of it. */
+export const BAND_MIN_RATIO = 0.5;
 /** First and last edge segments keep at least this length when an end moves. */
 const MIN_STUB = 8;
 
@@ -287,6 +289,41 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
   };
 
   /**
+   * §1.3: stacked bands whose children each stand in one row share their columns: the k-th child of every
+   * band gets the same centre x, columns as wide as their widest child, centred in the band. Skipped when
+   * the columns do not fit the narrowest band.
+   */
+  const shareColumns = (set: readonly string[]): void => {
+    if (set.length < 2) return;
+    const rowsOf = set.map((g) => (tree.kids.get(g) ?? []).filter((k) => rects.has(k)).sort((a, b) => rects.get(a)!.x - rects.get(b)!.x));
+    if (rowsOf.some((ks) => ks.length === 0) || rowsOf.every((ks) => ks.length < 2)) return;
+    const cy = (k: string): number => rects.get(k)!.y + rects.get(k)!.h / 2;
+    if (rowsOf.some((ks) => ks.some((k) => Math.abs(cy(k) - cy(ks[0]!)) > 0.5))) return;
+    const cols = Math.max(...rowsOf.map((ks) => ks.length));
+    const colW = Array.from({ length: cols }, (_, i) => Math.max(0, ...rowsOf.map((ks) => (ks[i] ? rects.get(ks[i]!)!.w : 0))));
+    const gaps = rowsOf.flatMap((ks) => ks.slice(1).map((k, i) => rects.get(k)!.x - (rects.get(ks[i]!)!.x + rects.get(ks[i]!)!.w)));
+    const gap = gaps.length > 0 ? Math.min(...gaps) : 0;
+    const total = colW.reduce((a, b) => a + b, 0) + gap * (cols - 1);
+    const band = set.map((g) => rects.get(g)!);
+    if (band.some((r, i) => total > r.w - 2 * tree.pad(set[i]!).side)) return;
+    const mid = band[0]!.x + band[0]!.w / 2;
+    const centres: number[] = [];
+    let x = mid - total / 2;
+    for (const w of colW) {
+      centres.push(x + w / 2);
+      x += w + gap;
+    }
+    // Rows shorter than the column count sit in the leftmost columns.
+    for (const ks of rowsOf) {
+      ks.forEach((k, i) => {
+        const r = rects.get(k)!;
+        const d = Math.round(centres[i]! - (r.x + r.w / 2));
+        if (d !== 0) shift(k, d, 0);
+      });
+    }
+  };
+
+  /**
    * §1.2: sibling groups in one row take the row's top and bottom; sibling groups stacked in one column
    * take the column's left and right.
    */
@@ -316,9 +353,16 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
         const hi = Math.max(...rs.map((r) => (rows ? r.y + r.h : r.x + r.w)));
         for (const g of set) {
           const r = rects.get(g)!;
+          // A band less than half the target size would be mostly empty: it keeps its own size.
+          if ((rows ? r.h : r.w) < BAND_MIN_RATIO * (hi - lo)) continue;
           const next = rows ? { ...r, y: lo, h: hi - lo } : { ...r, x: lo, w: hi - lo };
-          if (canResize(g, ids, next)) Object.assign(r, next);
+          if (!canResize(g, ids, next)) continue;
+          // A widened band keeps its content centred (a taller row keeps it at the top).
+          const dx = rows ? 0 : next.x + next.w / 2 - (r.x + r.w / 2);
+          Object.assign(r, next);
+          if (Math.abs(dx) >= 0.5) for (const k of tree.kids.get(g) ?? []) shift(k, Math.round(dx), 0);
         }
+        if (!rows) shareColumns(set.filter((g) => Math.abs(rects.get(g)!.x - lo) < 0.5 && Math.abs(rects.get(g)!.w - (hi - lo)) < 0.5));
       }
     }
   };
