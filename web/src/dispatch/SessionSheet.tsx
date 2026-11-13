@@ -349,7 +349,7 @@ export function SessionSheet({ id, onClose }: { id: string | null; onClose: () =
   const sid = s ? encodeURIComponent(s.id) : '';
   return (
     <Sheet open={!!id && !!s} onOpenChange={o => { if (!o) onClose(); }}>
-      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-2xl">
+      <SheetContent side="right" showCloseButton className="w-full gap-0 bg-background p-0 sm:max-w-2xl">
         {s && (
           <>
             <SheetHeader className="gap-2 border-b px-6 pt-5 pb-4">

@@ -1,18 +1,32 @@
 // Paint a Scene as a standalone SVG string. Deterministic: same scene + options → same bytes.
-// No ids, no external references, no scripts: safe to inline several on one page.
+// No external references, no scripts. The one id (the edge-label mask) is derived from the content, so two
+// pictures inlined on one page only share it when they are the same picture.
+// Style tokens: docs/research/eraser/09-examples-style.md §2 (light measured, dark our proposal).
 
 import { round } from './common.ts';
 import { iconFor } from './icons.ts';
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
 import { FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
-import { THEMES, resolvePaint, strokeOf } from './theme.ts';
-import type { Theme } from './theme.ts';
+import { THEMES, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
+import type { Theme, ThemeColors } from './theme.ts';
 
 export interface SvgOptions {
   theme?: Theme;
   /** Fill the background with the theme colour (for export). Default: transparent. */
   background?: boolean;
+  /**
+   * Rewrite every paint colour (`#rrggbb` or `rgba(...)`) before it is written, e.g. to cancel a filter the
+   * host puts over the picture. Not applied to the label mask, which is luminance, not colour.
+   */
+  mapColor?: (color: string) => string;
+}
+
+/** What every painter below needs: the theme, its colours and the colour rewrite. */
+interface Ctx {
+  theme: Theme;
+  t: ThemeColors;
+  c: (color: string) => string;
 }
 
 const esc = (s: string): string =>
@@ -20,16 +34,25 @@ const esc = (s: string): string =>
 const n = (v: number): string => String(round(v));
 const pts = (ps: Point[]): string => ps.map((p) => `${n(p.x)},${n(p.y)}`).join(' ');
 
-const RADIUS: Record<SceneBox['role'], number> = {
-  node: 8,
-  group: 12,
+/** Corner radius per role; `null` = the node rule `min(12, 0.15 × the shorter side)` (§2.1). */
+const RADIUS: Record<SceneBox['role'], number | null> = {
+  node: null,
+  group: 6,
   entity: 8,
   'entity-header': 8,
-  column: 8,
+  column: null,
   activation: 2,
   frame: 6,
-  legend: 8,
+  legend: 6,
 };
+export const radiusOf = (b: Pick<SceneBox, 'role' | 'w' | 'h'>): number => RADIUS[b.role] ?? Math.min(12, 0.15 * Math.min(b.w, b.h));
+
+/** Dash pattern shared by nodes, connectors and groups (§2.1). */
+const DASH = ' stroke-dasharray="8 8.75"';
+/** Line widths (§2.1): connectors 1.3, node borders 1.2, group borders 1. */
+const EDGE_W = 1.3;
+const BOX_W = 1.2;
+const SOFT_W = 1;
 
 function shapeMarkup(b: SceneBox, attrs: string): string {
   const { x, y, w, h } = b;
@@ -66,7 +89,7 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
       return poly(ps);
     }
     case 'cylinder': {
-      const ry = Math.min(9, h / 6);
+      const ry = 0.11 * h;
       const d = `M${n(x)} ${n(y + ry)}A${n(w / 2)} ${n(ry)} 0 0 1 ${n(x + w)} ${n(y + ry)}V${n(y + h - ry)}A${n(w / 2)} ${n(ry)} 0 0 1 ${n(x)} ${n(y + h - ry)}Z`;
       const lid = `M${n(x)} ${n(y + ry)}A${n(w / 2)} ${n(ry)} 0 0 0 ${n(x + w)} ${n(y + ry)}`;
       return `<path d="${d}"${attrs}/><path d="${lid}" fill="none"${attrs.replace(/ fill="[^"]*"/, '')}/>`;
@@ -78,17 +101,16 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
     }
     default:
       if (b.role === 'entity-header') {
-        const r = RADIUS['entity-header'];
+        const r = radiusOf(b);
         return `<path d="M${n(x)} ${n(y + h)}V${n(y + r)}Q${n(x)} ${n(y)} ${n(x + r)} ${n(y)}H${n(x + w - r)}Q${n(x + w)} ${n(y)} ${n(x + w)} ${n(y + r)}V${n(y + h)}Z"${attrs}/>`;
       }
-      return `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="${RADIUS[b.role]}"${attrs}/>`;
+      return `<rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}" rx="${n(radiusOf(b))}"${attrs}/>`;
   }
 }
 
-function boxMarkup(b: SceneBox, theme: Theme): string {
-  const t = THEMES[theme];
+function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const soft = b.role === 'group' || b.role === 'frame' || b.role === 'legend';
-  const p = resolvePaint(b.paint, theme, soft);
+  const p = resolvePaint(b.paint, theme, soft, b.shadow);
   let fill = p.fill;
   let stroke = p.stroke;
   if (b.role === 'frame') fill = 'none';
@@ -96,38 +118,40 @@ function boxMarkup(b: SceneBox, theme: Theme): string {
     fill = t.fill;
     stroke = t.stroke;
   }
-  if (b.role === 'activation') fill = b.paint.color ? p.fill : t.groupFill;
-  const width = b.role === 'group' || b.role === 'frame' ? 1.25 : 1.5;
-  const dash = b.dashed ? ' stroke-dasharray="6 4"' : '';
+  if (b.role === 'activation') fill = b.paint.color ? p.fill : t.fill;
+  const width = soft ? SOFT_W : BOX_W;
+  const dash = b.dashed ? DASH : '';
   const out: string[] = [];
-  if (b.shadow) out.push(shapeMarkup({ ...b, x: b.x + 2, y: b.y + 3 }, ` fill="${t.shadow}" stroke="none"`));
-  out.push(shapeMarkup(b, ` fill="${fill}" stroke="${stroke}" stroke-width="${width}"${dash}`));
+  // A solid copy of the shape moved (+4, +4), no blur; the opaque body on top hides all but the outside rim.
+  if (b.shadow) out.push(shapeMarkup({ ...b, x: b.x + 4, y: b.y + 4 }, ` fill="${c(t.shadow)}" stroke="none"`));
+  const f = fill === 'none' ? 'none' : c(fill);
+  out.push(shapeMarkup(b, ` fill="${f}" stroke="${c(stroke)}" stroke-width="${width}" stroke-linejoin="round"${dash}`));
   const id = b.id !== undefined ? ` data-id="${esc(b.id)}"` : '';
   return `<g data-role="${b.role}"${id}>${out.join('')}</g>`;
 }
 
-function textMarkup(tx: SceneText, theme: Theme): string {
+/** The box an edge label cuts out of the lines under it: the label's own box, 1px larger on every side. */
+function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number } {
+  const w = linesWidth(tx.lines, tx.size, tx.font, tx.weight === 600) + PLATE_PAD * 2;
+  const h = tx.lines.length * tx.lineHeight + 4;
+  const x0 = tx.anchor === 'start' ? tx.x - PLATE_PAD : tx.anchor === 'end' ? tx.x - w + PLATE_PAD : tx.x - w / 2;
+  return { x: x0 - 1, y: tx.y - 3, w: w + 2, h: h + 2 };
+}
+
+function textMarkup(tx: SceneText, { theme, t, c }: Ctx): string {
   if (tx.lines.length === 0) return '';
-  const t = THEMES[theme];
   let fill = tx.tone === 'muted' ? t.muted : t.text;
   if (tx.on) fill = resolvePaint(tx.on, theme).text;
+  if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
+  // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
+  if (tx.plate) fill = t.edge;
   if (tx.color) fill = strokeOf(tx.color, theme);
-  const out: string[] = [];
-  if (tx.plate) {
-    // A small pill behind the label, like a chip on the line: room on both ends, round ends, a hairline edge.
-    const w = linesWidth(tx.lines, tx.size, tx.font, tx.weight === 600) + PLATE_PAD * 2;
-    const h = tx.lines.length * tx.lineHeight + 4;
-    const x0 = tx.anchor === 'start' ? tx.x - PLATE_PAD : tx.anchor === 'end' ? tx.x - w + PLATE_PAD : tx.x - w / 2;
-    const rx = tx.lines.length > 1 ? Math.min(8, h / 2) : h / 2;
-    out.push(`<rect x="${n(x0)}" y="${n(tx.y - 2)}" width="${n(w)}" height="${n(h)}" rx="${n(rx)}" fill="${t.plate}" stroke="${t.plateStroke}" stroke-width="1"/>`);
-  }
   const spans = tx.lines
     .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
     .join('');
   const weight = tx.weight === 600 ? ' font-weight="600"' : '';
   const family = tx.font === 'clean' ? '' : ` font-family="${esc(FONT_FAMILY[tx.font])}"`;
-  out.push(`<text font-size="${tx.size}"${weight}${family} fill="${fill}" text-anchor="${tx.anchor}" xml:space="preserve">${spans}</text>`);
-  return out.join('');
+  return `<text font-size="${tx.size}"${weight}${family} fill="${c(fill)}" text-anchor="${tx.anchor}" xml:space="preserve">${spans}</text>`;
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */
@@ -143,9 +167,8 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
 }
 
-function iconMarkup(ic: SceneIcon, theme: Theme): string {
+function iconMarkup(ic: SceneIcon, { theme, t, c }: Ctx): string {
   const icon = iconFor(ic.name);
-  const t = THEMES[theme];
   let color = ic.paint.color ? strokeOf(ic.paint.color, theme) : t.text;
   if (ic.inside && ic.paint.mode === 'bold') color = resolvePaint(ic.paint, theme).text;
   // Logos keep their brand colour unless a colour was asked for, they sit on a bold fill, or the
@@ -153,6 +176,7 @@ function iconMarkup(ic: SceneIcon, theme: Theme): string {
   else if (icon.hex && !ic.paint.color && contrast(icon.hex, t.background) >= 3) color = icon.hex;
   const s = ic.size / 24;
   const open = `<g data-icon="${esc(ic.name)}" data-icon-set="${icon.set}" transform="translate(${n(ic.x)} ${n(ic.y)}) scale(${n(s)})">`;
+  color = c(color);
   if (icon.fill) return `${open}<path d="${icon.d}" fill="${color}"/></g>`;
   const dash = icon.set === 'own' && icon.key === 'placeholder' ? ' stroke-dasharray="3 2.5"' : '';
   return (
@@ -160,6 +184,9 @@ function iconMarkup(ic: SceneIcon, theme: Theme): string {
     `<path d="${icon.d}" fill="none" stroke="${color}" stroke-width="${n(1.6 / Math.max(s, 0.5))}" stroke-linecap="round" stroke-linejoin="round"${dash}/></g>`
   );
 }
+
+/** Corner radius of elbow connectors (spec §1.7). */
+export const BEND_RADIUS = 6;
 
 /** Polyline path with rounded corners. */
 function roundedPath(ps: Point[], radius: number): string {
@@ -178,7 +205,11 @@ function roundedPath(ps: Point[], radius: number): string {
     }
     const p1 = { x: b.x - ((b.x - a.x) / l1) * r, y: b.y - ((b.y - a.y) / l1) * r };
     const p2 = { x: b.x + ((c.x - b.x) / l2) * r, y: b.y + ((c.y - b.y) / l2) * r };
-    d += `L${n(p1.x)} ${n(p1.y)}Q${n(b.x)} ${n(b.y)} ${n(p2.x)} ${n(p2.y)}`;
+    const cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+    const dot = (b.x - a.x) * (c.x - b.x) + (b.y - a.y) * (c.y - b.y);
+    // A right-angle corner is a circular arc (spec §1.7: `A6 6`); any other angle a quadratic curve.
+    if (Math.abs(dot) < 1e-6 * l1 * l2) d += `L${n(p1.x)} ${n(p1.y)}A${n(r)} ${n(r)} 0 0 ${cross > 0 ? 1 : 0} ${n(p2.x)} ${n(p2.y)}`;
+    else d += `L${n(p1.x)} ${n(p1.y)}Q${n(b.x)} ${n(b.y)} ${n(p2.x)} ${n(p2.y)}`;
   }
   const last = ps[ps.length - 1]!;
   return `${d}L${n(last.x)} ${n(last.y)}`;
@@ -190,12 +221,19 @@ function markerMarkup(kind: SceneEdge['end'], from: Point, tip: Point, color: st
   const ux = (tip.x - from.x) / len;
   const uy = (tip.y - from.y) / len;
   const at = (back: number, side: number): Point => ({ x: tip.x - ux * back - uy * side, y: tip.y - uy * back + ux * side });
-  const line = (a: Point, b: Point): string => `<path d="M${n(a.x)} ${n(a.y)}L${n(b.x)} ${n(b.y)}" stroke="${color}" stroke-width="1.5" fill="none"/>`;
+  const line = (a: Point, b: Point): string => `<path d="M${n(a.x)} ${n(a.y)}L${n(b.x)} ${n(b.y)}" stroke="${color}" stroke-width="${EDGE_W}" fill="none"/>`;
   switch (kind) {
     case 'arrow': {
-      const a = at(10, -4.5);
-      const b = at(10, 4.5);
-      return { markup: `<path d="M${n(tip.x)} ${n(tip.y)}L${n(a.x)} ${n(a.y)}L${n(b.x)} ${n(b.y)}Z" fill="${color}" stroke="${color}" stroke-width="1" stroke-linejoin="round"/>`, pull: 8 };
+      // Open V, 12 long and 11 wide, in the line's colour and width (§2.1). Its mitred point is pulled 1px back so
+      // it ends on the target's border, and the line stops there too.
+      const back = 1;
+      const a = at(12 + back, -5.5);
+      const p = at(back, 0);
+      const b = at(12 + back, 5.5);
+      return {
+        markup: `<path d="M${n(a.x)} ${n(a.y)}L${n(p.x)} ${n(p.y)}L${n(b.x)} ${n(b.y)}" fill="none" stroke="${color}" stroke-width="${EDGE_W}" stroke-linejoin="miter"/>`,
+        pull: back + 0.5,
+      };
     }
     case 'one':
       return { markup: line(at(9, -6), at(9, 6)) + line(at(14, -6), at(14, 6)), pull: 0 };
@@ -206,9 +244,12 @@ function markerMarkup(kind: SceneEdge['end'], from: Point, tip: Point, color: st
   }
 }
 
-function edgeMarkup(e: SceneEdge, theme: Theme): string {
+/** Opacity of soft (straight-style) connectors: the same colour, lighter. */
+const SOFT_EDGE_OPACITY = 0.55;
+
+function edgeMarkup(e: SceneEdge, { theme, t, c }: Ctx, mask: string): string {
   if (e.points.length < 2) return '';
-  const color = e.color ? strokeOf(e.color, theme) : THEMES[theme].edge;
+  const color = c(e.color ? strokeOf(e.color, theme) : t.edge);
   let ps = e.points.map((p) => ({ ...p }));
   const first = ps[0]!;
   const last = ps[ps.length - 1]!;
@@ -231,32 +272,42 @@ function edgeMarkup(e: SceneEdge, theme: Theme): string {
   ps[ps.length - 1] = pull(last, endFrom, em.pull);
   let d: string;
   if (control) d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}Q${n(control.x)} ${n(control.y)} ${n(ps[1]!.x)} ${n(ps[1]!.y)}`;
-  else if (e.route === 'elbow') d = roundedPath(ps, 8);
+  else if (e.route === 'elbow') d = roundedPath(ps, BEND_RADIUS);
   else d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}L${n(ps[ps.length - 1]!.x)} ${n(ps[ps.length - 1]!.y)}`;
   ps = [];
-  const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-  return `<g data-edge="${esc(e.id)}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
+  const dash = e.dashed ? DASH : '';
+  const soft = e.soft ? ` opacity="${SOFT_EDGE_OPACITY}"` : '';
+  return `<g data-edge="${esc(e.id)}"${mask}${soft}><path d="${d}" fill="none" stroke="${color}" stroke-width="${EDGE_W}" stroke-linecap="butt" stroke-linejoin="miter"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
-function lineMarkup(l: SceneLine, theme: Theme): string {
-  const t = THEMES[theme];
-  const dash = l.dashed ? ' stroke-dasharray="5 5"' : '';
-  return `<polyline points="${pts(l.points)}" fill="none" stroke="${l.tone === 'muted' ? t.stroke : t.text}" stroke-width="1.25"${dash}/>`;
+function lineMarkup(l: SceneLine, { t, c }: Ctx): string {
+  const dash = l.dashed ? DASH : '';
+  return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${SOFT_W}"${dash}/>`;
 }
 
-function itemMarkup(it: SceneItem, theme: Theme): string {
+function itemMarkup(it: SceneItem, ctx: Ctx, mask: string): string {
   switch (it.kind) {
     case 'box':
-      return boxMarkup(it, theme);
+      return boxMarkup(it, ctx);
     case 'text':
-      return textMarkup(it, theme);
+      return textMarkup(it, ctx);
     case 'icon':
-      return iconMarkup(it, theme);
+      return iconMarkup(it, ctx);
     case 'edge':
-      return edgeMarkup(it, theme);
+      return edgeMarkup(it, ctx, mask);
     case 'line':
-      return lineMarkup(it, theme);
+      return lineMarkup(it, ctx);
   }
+}
+
+/** FNV-1a, for an id that only another copy of the same picture shares. */
+function hashOf(s: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return (h >>> 0).toString(36);
 }
 
 const ROUGH_FONT_STYLE =
@@ -265,13 +316,25 @@ const ROUGH_FONT_STYLE =
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
-  const bg = options.background ? `<rect width="${scene.width}" height="${scene.height}" fill="${t.background}"/>` : '';
-  const body = scene.items.map((it) => itemMarkup(it, theme)).join('');
+  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x) };
+  // Edge labels cut the lines under them (§2.1): one luminance mask, white everywhere, black under each label.
+  const holes = scene.items.flatMap((it) => (it.kind === 'text' && it.plate && it.lines.length > 0 ? [labelHole(it)] : []));
+  let defs = '';
+  let mask = '';
+  if (holes.length) {
+    const cut = holes.map((r) => `<rect x="${n(r.x)}" y="${n(r.y)}" width="${n(r.w)}" height="${n(r.h)}" fill="#000"/>`).join('');
+    const body = `<rect width="${scene.width}" height="${scene.height}" fill="#fff"/>${cut}`;
+    const id = `label-cut-${hashOf(`${scene.width}x${scene.height}${body}${scene.items.length}`)}`;
+    defs = `<defs><mask id="${id}" maskUnits="userSpaceOnUse" x="0" y="0" width="${scene.width}" height="${scene.height}">${body}</mask></defs>`;
+    mask = ` mask="url(#${id})"`;
+  }
+  const bg = options.background ? `<rect width="${scene.width}" height="${scene.height}" fill="${ctx.c(t.background)}"/>` : '';
+  const body = scene.items.map((it) => itemMarkup(it, ctx, mask)).join('');
   // An SVG shown as an <img> or exported cannot see page fonts, so the hand-drawn face travels inside it.
   const usesRough = scene.items.some((it) => it.kind === 'text' && it.font === 'rough' && it.lines.length > 0);
   const style = usesRough ? ROUGH_FONT_STYLE : '';
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.width}" height="${scene.height}" viewBox="0 0 ${scene.width} ${scene.height}" ` +
-    `font-family="${esc(FONT_FAMILY.clean)}" data-diagram="${scene.type}" data-theme="${theme}">${style}${bg}${body}</svg>`
+    `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`
   );
 }

@@ -11,6 +11,14 @@ import './index.css';
 const DispatchApp = lazy(() => import('./dispatch/index'));
 const isDispatch = /^\/dispatch(\/|$)/.test(window.location.pathname);
 
+// Dev-only check hook (stripped from builds): `?runFixture=<blockId>` shows the fixture run over that block,
+// `&runBlocked` with the test step blocked. The block's code should be FIXTURE_CODE.
+if (import.meta.env.DEV) {
+  const q = new URLSearchParams(location.search);
+  const id = q.get('runFixture');
+  if (id) void import('./run/fixture').then(async (f) => (await import('./run/runStore')).setRunSteps(id, q.has('runBlocked') ? f.FIXTURE_BLOCKED : f.FIXTURE_STEPS));
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {isDispatch ? (

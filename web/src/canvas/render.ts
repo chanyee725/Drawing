@@ -3,8 +3,19 @@
 import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOutcome } from '../dsl/adapter.ts';
 import type { ReconcileReason } from '../../../shared/render/overrides.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
+import type { Scene } from '../../../shared/render/scene.ts';
 import { drawSig, fileIdFor, hash, type BlockLike, type OriginAnchor } from './sync.ts';
 import { svgDataURL } from './resolution.ts';
+import { sceneToSvg } from '../../../shared/render/index.ts';
+import { preDarkFilterColor } from './darkFilter.ts';
+
+/**
+ * How a picture is painted: `light`, `dark`, or `dark-canvas` = the dark palette pre-corrected for Excalidraw's dark
+ * filter (darkFilter.ts), for pictures that sit under that filter (the dark canvas and dark canvas exports).
+ */
+export type PicTheme = 'light' | 'dark' | 'dark-canvas';
+/** The palette a picture theme draws with. */
+const paletteOf = (theme: PicTheme): 'light' | 'dark' => (theme === 'light' ? 'light' : 'dark');
 
 export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number;
   /** Number of errors in the code that is drawn now; when above 0 the picture is the last good one (or a placeholder). */ errors: number;
@@ -12,16 +23,18 @@ export type BlockPicture = { fileId: string; dataURL: string; /** The picture as
   /** The renderer itself failed (threw) on the current code. */ failed: boolean;
   /** Layout origin of a real drawing with the layout applied. Lets the canvas keep a moved layout still on screen (design §5.6). */
   anchor?: OriginAnchor;
-  /** The code changed so much that the saved layout was left out of this picture (design §4.2). */ layoutReset?: ReconcileReason };
+  /** The code changed so much that the saved layout was left out of this picture (design §4.2). */ layoutReset?: ReconcileReason;
+  /** The laid-out scene drawn in this picture (scene units = picture px), for the run overlay; absent for placeholders. */ scene?: Scene };
 
-type Drawn = { svg: string; width: number; height: number; errors?: number; lastGood?: boolean; failed?: boolean; anchor?: OriginAnchor; layoutReset?: ReconcileReason };
+type Drawn = { svg: string; width: number; height: number; scene?: Scene; errors?: number; lastGood?: boolean; failed?: boolean; anchor?: OriginAnchor; layoutReset?: ReconcileReason };
 
 const MIN = 40;
 const MAX_PICTURES = 200;
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
-function placeholder(message: string, theme: 'light' | 'dark') {
+function placeholder(message: string, theme: PicTheme) {
+  // Under the dark filter the light placeholder comes out dark.
   const fg = theme === 'dark' ? '#a1a1aa' : '#71717a';
   const border = theme === 'dark' ? '#3f3f46' : '#d4d4d8';
   const w = 320;
@@ -60,7 +73,7 @@ function picture(blockId: string, r: Drawn): BlockPicture {
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: svgDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false };
+    p = { fileId, dataURL: svgDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false, ...(r.scene ? { scene: r.scene } : {}) };
     pictures.set(fileId, p);
     if (pictures.size > MAX_PICTURES) pictures.delete(pictures.keys().next().value!);
   }
@@ -78,7 +91,7 @@ function picture(blockId: string, r: Drawn): BlockPicture {
  * The picture for a block's current code. Code with errors keeps the block's last good picture
  * (`nextPreview`); with none yet it shows a placeholder. Never rejects.
  */
-export function renderBlock(b: BlockLike, theme: 'light' | 'dark'): Promise<BlockPicture> {
+export function renderBlock(b: BlockLike, theme: PicTheme): Promise<BlockPicture> {
   const key = `${b.id}\n${theme}`;
   const sig = drawSig(b);
   // Same drawing as the latest call (a drag or resize calls again with only the position changed): reuse it.
@@ -101,13 +114,14 @@ const latestCall = new Map<string, { sig: string; result: Promise<BlockPicture> 
 
 const sameAnchor = (a: OriginAnchor | undefined, b: OriginAnchor | undefined) => a === b || (!!a && !!b && a.key === b.key && a.x === b.x && a.y === b.y);
 
-async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
+async function draw(b: BlockLike, theme: PicTheme, key: string) {
   if (!analyzeDiagram(b.type, '').parsed) {
     shown.delete(key);
     return placeholder('이 종류는 아직 그릴 수 없어요', theme);
   }
-  const outcome = await outcomeFor(b, theme);
-  const state = nextPreview(shown.get(key) ?? null, outcome, b.type, theme);
+  const palette = paletteOf(theme);
+  const outcome = await outcomeFor(b, palette);
+  const state = nextPreview(shown.get(key) ?? null, outcome, b.type, palette);
   shown.set(key, state);
   if (!state) return { ...placeholder('그리지 못했어요. 코드를 확인해 주세요', theme), errors: outcome ? outcome.diagnostics.filter((d) => d.severity === 'error').length : 0, failed: !outcome };
   if (!state.scene.items.length) return placeholder(b.code.trim() ? '그릴 내용이 없어요. 코드를 확인해 주세요' : '코드를 입력하면 여기에 그려져요', theme);
@@ -117,5 +131,6 @@ async function draw(b: BlockLike, theme: 'light' | 'dark', key: string) {
   const applied = !state.stale && !state.failed && !reset && (!b.layout || b.layout.v === BLOCK_LAYOUT_VERSION);
   const o = state.scene.origin;
   const anchor = applied && o ? { key: hash(`${theme}\n${b.type}\n${b.code}`), x: o.x, y: o.y } : undefined;
-  return { svg: state.svg, width: state.scene.width, height: state.scene.height, errors: state.errors.length, lastGood: state.stale, failed: state.failed, anchor, layoutReset: reset };
+  const svg = theme === 'dark-canvas' ? sceneToSvg(state.scene, { theme: 'dark', mapColor: preDarkFilterColor }) : state.svg;
+  return { svg, width: state.scene.width, height: state.scene.height, scene: state.scene, errors: state.errors.length, lastGood: state.stale, failed: state.failed, anchor, layoutReset: reset };
 }

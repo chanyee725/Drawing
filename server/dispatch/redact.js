@@ -32,3 +32,11 @@ export function redact(text) {
   }
   return out;
 }
+
+/** A copy of `value` with every string value inside it (objects, arrays) masked. Object keys are kept as they are: permission inputs carry secrets in values, not in key names. */
+export function redactDeep(value) {
+  if (typeof value === "string") return redact(value);
+  if (Array.isArray(value)) return value.map(redactDeep);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v)]));
+  return value;
+}
