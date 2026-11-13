@@ -4,6 +4,7 @@ import { watch } from 'node:fs';
 import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, lstat, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { basename, dirname, join, sep } from 'node:path';
+import { ensureDirInside, LockPathError } from '../lock.js';
 import { createResolver, parseRelPath, PathError } from './paths.js';
 import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
 import { applyPlanOps } from './plan-ops.js';
@@ -26,11 +27,14 @@ export const HISTORY_DIR = ['.drawing', 'history'];
 export const HISTORY_INTERVAL_MS = 5 * 60 * 1000;
 export const HISTORY_MAX = 50;
 const SNAPSHOT_ID = /^\d{13}$/;
+const BORN_FILE = 'born';
 // Deleted files keep their version history (and last content) in `.drawing/trash/<id>/` for 30 days.
 export const TRASH_DIR = ['.drawing', 'trash'];
 export const TRASH_DAYS = 30;
 export const TRASH_MAX = 200;
 const TRASH_ID = /^\d{13}-[0-9a-f]{8}$/;
+// Pipeline run records (server/runs/) live beside history and follow the file the same way on move, delete and restore.
+export const RUNS_DIR = ['.drawing', 'runs'];
 
 export function createStore(
   workspaceDir,
@@ -45,6 +49,16 @@ export function createStore(
   let queue = Promise.resolve();
   let watcher = null;
   const timers = new Map();
+  // Listeners told when a file's sidecars (history, runs) move: {kind:'move', from, to} | {kind:'trash', path, trashId}
+  // | {kind:'restore', path, trashId}. Called inside the serial queue, so they see a settled tree.
+  const sidecarListeners = new Set();
+  const sidecarEvent = (e) => {
+    for (const fn of sidecarListeners) {
+      try {
+        fn(e);
+      } catch {}
+    }
+  };
 
   // Serialize every mutation so revision check + rename is one step.
   const serial = (fn) => {
@@ -142,14 +156,16 @@ export function createStore(
   // `.drawing/history/<file path>/<ms timestamp>.json` holds the file as it was on disk just before a save
   // overwrote it (the timestamp is that save's time), so the end of each edit session is kept.
   // History is a convenience: a failure here never fails the save, delete or move it belongs to.
-  const historyDirOf = async (rel) => {
+  const sidecarDirOf = async (root, rel) => {
     try {
-      return await fsr.resolveInternal(...HISTORY_DIR, ...rel.split('/'));
+      return await fsr.resolveInternal(...root, ...rel.split('/'));
     } catch (err) {
       if (err instanceof PathError) throw new StoreError(400, err.message);
       throw err;
     }
   };
+  const historyDirOf = (rel) => sidecarDirOf(HISTORY_DIR, rel);
+  const runsDirOf = (rel) => sidecarDirOf(RUNS_DIR, rel);
 
   async function snapshotIds(dir) {
     try {
@@ -190,6 +206,25 @@ export function createStore(
   }
 
   const snapshotQuietly = (rel, text) => snapshot(rel, text).catch(() => null);
+
+  // When a file was made: saves replace the file, so its own birth time is lost. A `born` file (ms as text) in its
+  // history dir keeps it; it moves with the history (move), and goes through the trash in meta.json (delete, restore).
+  async function markBorn(rel, t) {
+    try {
+      const dir = await historyDirOf(rel);
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, BORN_FILE), `${t}\n`, { mode: 0o644 });
+    } catch {}
+  }
+  async function readBorn(dir) {
+    try {
+      if (!(await plainFile(join(dir, BORN_FILE)))) return null;
+      const t = Number((await readFile(join(dir, BORN_FILE), 'utf8')).trim());
+      return Number.isSafeInteger(t) && t > 0 ? t : null;
+    } catch {
+      return null;
+    }
+  }
 
   async function history(rel) {
     rel = checkedFileRel(rel);
@@ -238,32 +273,72 @@ export function createStore(
     });
   }
 
-  // A file or folder moved: its history moves with it (best effort); one deleted: its history goes too.
-  async function moveHistory(from, to) {
+  // A file or folder moved: its history and runs move with it (best effort); one deleted: its history goes too.
+  async function moveSidecar(root, from, to) {
     try {
-      const fromDir = await historyDirOf(from);
+      const fromDir = await sidecarDirOf(root, from);
       if (!(await statOrNull(fromDir))) return;
-      const toDir = await historyDirOf(to);
+      const toDir = await sidecarDirOf(root, to);
       await rm(toDir, { recursive: true, force: true });
       await mkdir(dirname(toDir), { recursive: true });
       await rename(fromDir, toDir);
-      await pruneEmptyHistoryParents(fromDir);
+      await pruneEmptyParents(root, fromDir);
     } catch {}
   }
-  // Remove now-empty parent folders of a history dir that moved or went away, up to (not including) `.drawing/history`.
-  async function pruneEmptyHistoryParents(dir) {
+  async function moveHistory(from, to) {
+    await moveSidecar(HISTORY_DIR, from, to);
+    await moveSidecar(RUNS_DIR, from, to);
+    sidecarEvent({ kind: 'move', from, to });
+  }
+  // Remove now-empty parent folders of a sidecar dir that moved or went away, up to (not including) `.drawing/<kind>`.
+  async function pruneEmptyParents(rootSegs, dir) {
     try {
-      const root = await fsr.resolveInternal(...HISTORY_DIR);
+      const root = await fsr.resolveInternal(...rootSegs);
       for (let d = dirname(dir); d.startsWith(root + sep) && d !== root; d = dirname(d)) await rmdir(d); // throws (ENOTEMPTY) at the first non-empty one
     } catch {}
   }
-  const dropHistory = (rel) =>
-    historyDirOf(rel)
+  const pruneEmptyHistoryParents = (dir) => pruneEmptyParents(HISTORY_DIR, dir);
+  const dropSidecar = (root, rel) =>
+    sidecarDirOf(root, rel)
       .then(async (d) => {
         await rm(d, { recursive: true, force: true });
-        await pruneEmptyHistoryParents(d);
+        await pruneEmptyParents(root, d);
       })
       .catch(() => {});
+  const dropHistory = async (rel) => {
+    await dropSidecar(HISTORY_DIR, rel);
+    await dropSidecar(RUNS_DIR, rel);
+  };
+  const nonEmptyDir = async (dir) => {
+    try {
+      return (await readdir(dir)).length > 0;
+    } catch {
+      return false;
+    }
+  };
+
+  // ---- run record sidecars: server/runs/ owns their content; the store owns where they live ----
+  const runsApi = {
+    // Run `fn` in the store's mutation queue, so a run write never interleaves with a move, delete or restore.
+    serial,
+    fileRel: checkedFileRel,
+    dirOf: runsDirOf,
+    // The `runs` folder inside a trash entry must be a real folder inside the workspace (not a link out of it).
+    trashDirOf: async (trashId) => {
+      const dir = join(await entryDir(trashId), 'runs');
+      try {
+        await ensureDirInside(fsr.root, dir);
+      } catch (err) {
+        if (err instanceof LockPathError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      return dir;
+    },
+    onChange(fn) {
+      sidecarListeners.add(fn);
+      return () => sidecarListeners.delete(fn);
+    },
+  };
 
   // ---- trash: deleted files stay restorable for TRASH_DAYS ----
   // `.drawing/trash/<ms>-<hex>/` holds `meta.json` {path, deletedAt}, `file.json` (the content when we saw it go)
@@ -282,16 +357,24 @@ export function createStore(
     try {
       const histDir = await historyDirOf(rel);
       const hasHistory = (await snapshotIds(histDir)).length > 0;
-      if (text == null && !hasHistory) return null;
+      const runsDir = await runsDirOf(rel);
+      const hasRuns = await nonEmptyDir(runsDir);
+      if (text == null && !hasHistory && !hasRuns) return null;
+      const born = await readBorn(histDir);
       const t = now();
       const id = `${String(t).padStart(13, '0')}-${randomBytes(4).toString('hex')}`;
       const dir = join(await trashRoot(), id);
       await mkdir(dir, { recursive: true });
-      await writeFile(join(dir, 'meta.json'), JSON.stringify({ path: rel, deletedAt: t }) + '\n', { mode: 0o644 });
+      await writeFile(join(dir, 'meta.json'), JSON.stringify({ path: rel, deletedAt: t, ...(born ? { created: born } : {}) }) + '\n', { mode: 0o644 });
       if (text != null) await writeFile(join(dir, 'file.json'), text, { mode: 0o644 });
       if (hasHistory) await rename(histDir, join(dir, 'history'));
       await rm(histDir, { recursive: true, force: true });
       await pruneEmptyHistoryParents(histDir);
+      if (hasRuns) {
+        await rename(runsDir, join(dir, 'runs'));
+        await pruneEmptyParents(RUNS_DIR, runsDir);
+        sidecarEvent({ kind: 'trash', path: rel, trashId: id });
+      }
       if (purge) await purgeTrash([id]);
       return id;
     } catch {
@@ -313,7 +396,7 @@ export function createStore(
       const meta = JSON.parse(await readFile(join(dir, 'meta.json'), 'utf8'));
       if (typeof meta?.path !== 'string' || !Number.isFinite(meta.deletedAt)) return null;
       parseRelPath(meta.path);
-      return { id, dir, path: meta.path, deletedAt: meta.deletedAt };
+      return { id, dir, path: meta.path, deletedAt: meta.deletedAt, created: Number.isSafeInteger(meta.created) && meta.created > 0 ? meta.created : null };
     } catch {
       return null;
     }
@@ -409,7 +492,11 @@ export function createStore(
       await atomicWrite(abs, text, { exclusive: true });
       await adopt(rel, abs);
       if (hasHist) await mergeHistory(histDir, await historyDirOf(rel));
+      const hasRuns = (await statOrNull(join(dir, 'runs')))?.isDirectory() === true;
+      if (hasRuns) await mergeRuns(join(dir, 'runs'), await runsDirOf(rel));
+      if (entry.created) await markBorn(rel, entry.created);
       await rm(dir, { recursive: true, force: true });
+      if (hasRuns) sidecarEvent({ kind: 'restore', path: rel, trashId: id });
       for (let d = dirname(rel); d !== '.'; d = dirname(d)) knownDirs.add(d);
       onExternalChange?.({ kind: 'tree', path: rel });
       return { path: rel };
@@ -426,6 +513,16 @@ export function createStore(
       while (taken.has(next)) next = String(Number(next) + 1).padStart(13, '0');
       taken.add(next);
       await rename(join(fromDir, `${id}.json`), join(toDir, `${next}.json`)).catch(() => {});
+    }
+  }
+
+  // Put trashed run records back; a record whose name is taken at the path keeps the one already there.
+  async function mergeRuns(fromDir, toDir) {
+    await mkdir(toDir, { recursive: true });
+    const taken = new Set(await readdir(toDir).catch(() => []));
+    for (const name of await readdir(fromDir).catch(() => [])) {
+      if (name.startsWith('.') || taken.has(name) || !(await plainFile(join(fromDir, name)))) continue;
+      await rename(join(fromDir, name), join(toDir, name)).catch(() => {});
     }
   }
 
@@ -481,7 +578,10 @@ export function createStore(
         } catch {
           continue; // removed or unreadable between readdir and stat
         }
-        const row = { type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString() };
+        // Saves replace the file (atomic rename), so its birth time is the last save on most systems; projects.js
+        // takes the earlier of this and the oldest history snapshot. Without a birth time (0) the mtime stands in.
+        const born = st.birthtimeMs > 0 && st.birthtimeMs < st.mtimeMs ? st.birthtime : st.mtime;
+        const row = { type: 'file', name: e.name, path: rel, title, revision, mtime: st.mtime.toISOString(), created: born.toISOString() };
         if (pipeline) row.pipeline = pipeline;
         out.push(row);
       }
@@ -491,6 +591,23 @@ export function createStore(
   }
 
   const tree = () => walk(fsr.root, '');
+
+  /**
+   * When the file at `rel` (a tree path) was made, in ms: the `born` mark of a file made through the API; for one
+   * made outside the app, the earliest of its oldest kept history snapshot and `fallback` (its own times). Null when unknown.
+   */
+  async function createdAt(rel, fallback = null) {
+    try {
+      const dir = await historyDirOf(rel);
+      const born = await readBorn(dir);
+      if (born) return born;
+      const first = (await snapshotIds(dir))[0];
+      const known = [first === undefined ? null : Number(first), fallback].filter((t) => t != null);
+      return known.length ? Math.min(...known) : null;
+    } catch {
+      return fallback;
+    }
+  }
 
   // ---- file operations ----
   // `body` may carry starting content (document, canvas, blocks, plan), e.g. a pipeline template; it is checked like a save.
@@ -518,6 +635,8 @@ export function createStore(
       await atomicWrite(abs, text, { exclusive: true });
       known.set(rel, { hash: sha(text), revision: file.revision });
       tombstones.delete(rel);
+      // The file's own write time, so `created` never comes after its first `mtime`.
+      await markBorn(rel, Math.floor((await statOrNull(abs).catch(() => null))?.mtimeMs ?? now()));
       return { path: rel, ...file };
     });
   }
@@ -920,5 +1039,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close };
+  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close, runs: runsApi };
 }

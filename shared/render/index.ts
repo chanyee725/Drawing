@@ -18,6 +18,8 @@ export { glyphFor, iconFor } from './icons.ts';
 export type { IconSet, ResolvedIcon } from './icons.ts';
 export { composeGraph, graphBase } from './layout-graph.ts';
 export type { GraphBase } from './layout-graph.ts';
+export { edgeKey, edgePaths, nodeRects } from './overlay.ts';
+export type { EdgePath, Rect } from './overlay.ts';
 export { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 export type { BlockLayout, LayoutBasis, LayoutItem } from './block-layout.ts';
 

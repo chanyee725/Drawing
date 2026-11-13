@@ -8,7 +8,7 @@
   --color-primary: var(--primary);
   --color-primary-hover: color-mix(in oklab, var(--primary) 90%, var(--background));
   --color-primary-darker: color-mix(in oklab, var(--primary) 80%, var(--background));
-  --color-primary-darkest: color-mix(in oklab, var(--primary) 80%, var(--background));
+  --color-primary-darkest: color-mix(in oklab, var(--primary) 70%, var(--background));
   --color-brand-hover: color-mix(in oklab, var(--primary) 90%, var(--background));
   --color-brand-active: color-mix(in oklab, var(--primary) 80%, var(--background));
   --color-primary-light: color-mix(in oklab, var(--primary) 12%, var(--background));
@@ -17,6 +17,8 @@
   --color-on-primary-container: var(--foreground);
   /* Selection box and handles: grey, not violet (doc 6 §4.1 keeps hue for status only). */
   --color-selection: var(--ring);
+  /* Opacity slider track: Excalidraw ships a lavender one (hsl 240/244), so use a neutral mix. */
+  --color-slider-track: color-mix(in oklab, var(--muted-foreground) 35%, var(--background));
   /* Surfaces, three steps: buttons rest on --sidebar (the old --panel), hover on --muted, selected is the mix above. */
   --color-surface-low: var(--sidebar);
   --color-surface-mid: var(--muted);
@@ -50,4 +52,26 @@
 .excalidraw.excalidraw .library-menu-browse-button,
 .excalidraw.excalidraw .ttd-dialog-panel-button {
   color: var(--primary-foreground);
+}
+
+/* Library unit glyphs: the check and the "+" sit on a --primary box, so draw them in --primary-foreground
+   (the tinted --color-primary-light blends into --primary in dark). */
+.excalidraw.excalidraw .library-unit__checkbox.is-checked .Checkbox-box svg,
+.excalidraw.excalidraw .library-unit__adder svg {
+  color: var(--primary-foreground);
+}
+/* Hover and press on --primary fills (text-to-diagram button, toggled Switch). Without these the 80% mix
+   of --primary-darker and the old press colour looked identical to rest on near-white dark primary. */
+.excalidraw.excalidraw .ttd-dialog-panel-button.excalidraw-button:hover:not(:disabled),
+.excalidraw.excalidraw .Switch.toggled:hover {
+  background-color: color-mix(in oklab, var(--primary) 90%, var(--background));
+  border-color: color-mix(in oklab, var(--primary) 90%, var(--background));
+}
+.excalidraw.excalidraw .ttd-dialog-panel-button.excalidraw-button:active:not(:disabled),
+.excalidraw.excalidraw .Switch.toggled:active {
+  background-color: color-mix(in oklab, var(--primary) 78%, var(--background));
+  border-color: color-mix(in oklab, var(--primary) 78%, var(--background));
+}
+.excalidraw.excalidraw .Switch.toggled:active::before {
+  filter: brightness(0.92);
 }

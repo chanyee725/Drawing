@@ -576,6 +576,22 @@ test('block layout: valid layouts round-trip, unknown fields are dropped, bad on
   });
 });
 
+test('block frameId: a block keeps the frame it sits in; bad values get 400, or are dropped on read (#83)', async () => {
+  await withApp(async ({ call }) => {
+    await call('POST', '/api/file', { path: 'a' });
+    const blk = { id: 'b1', type: 'flowchart', code: 'A > B', x: 0, y: 0, w: 10, h: 10 };
+    const put = (b, revision) => call('PUT', `/api/file?path=${q('a')}`, { revision, blocks: [b] });
+    assert.equal((await put({ ...blk, frameId: 'frame_1' }, 1)).status, 200);
+    assert.equal((await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0].frameId, 'frame_1');
+    assert.equal((await put({ ...blk, frameId: null }, 2)).status, 200, 'null means no frame');
+    assert.equal('frameId' in (await call('GET', `/api/file?path=${q('a')}`)).body.blocks[0], false);
+    for (const bad of ['', 3, {}, 'x'.repeat(201)]) assert.equal((await put({ ...blk, frameId: bad }, 3)).status, 400, JSON.stringify(bad));
+  });
+  const { normalizeContent } = await import('../server/workspace/model.js');
+  const read = normalizeContent({ blocks: [{ id: 'b', type: 't', code: '', x: 0, y: 0, w: 1, h: 1, frameId: 7 }] }, { lenient: true });
+  assert.equal('frameId' in read.blocks[0], false, 'a hand-edited bad frame only loses the frame');
+});
+
 test('block layout: 200-character names are the limit and a "__proto__" key is refused by name', async () => {
   await withApp(async ({ call }) => {
     await call('POST', '/api/file', { path: 'a' });

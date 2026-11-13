@@ -57,6 +57,11 @@ function normalizeBlock(b, i, lenient) {
       if (!lenient || !(e instanceof ValidationError)) throw e;
     }
   }
+  // The frame the block's image sits in (Excalidraw frame element id). Absent or null: in no frame.
+  if (b.frameId !== undefined && b.frameId !== null) {
+    if (typeof b.frameId === 'string' && b.frameId && b.frameId.length <= 200) out.frameId = b.frameId;
+    else if (!lenient) throw new ValidationError(`blocks[${i}].frameId must be a non-empty string of at most 200 characters or null`);
+  }
   return out;
 }
 

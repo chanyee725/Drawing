@@ -5,12 +5,22 @@ Paths are relative to the workspace, `/`-separated. No `..`, absolute paths, hid
 | Route | Notes |
 |---|---|
 | `GET /api/tree` | folders first; unreadable files are listed with `title:''`, `revision:null`; files with a `plan` carry `pipeline: {state:'plan'}` |
+| `GET /api/workspace/projects` | projects view, see below (`/api/projects` belongs to Dispatch) |
 | `GET /api/file?path=` / `POST /api/file {path,title?,document?,canvas?,blocks?,plan?}` | create is exclusive (409 if it exists); optional content (a template) is checked like a save (400) |
 | `PUT /api/file?path=` `{revision,title,document,canvas,blocks,plan?}` | whole-file save; 409 `{revision}` when `revision` is not the current one |
 | `PATCH /api/file/plan?path=` `{revision?,ops}` | step-level plan edit, see below; returns `{path,revision,plan}` |
 | `DELETE /api/file?path=` | files only. `?path=sub` never touches a folder `sub/` |
 | `POST /api/folder {path}` / `DELETE /api/folder?path=` | folders only; delete is recursive |
 | `POST /api/move {from,to,type?}` | rename = move |
+
+## Projects view
+
+`GET /api/workspace/projects` → `{ projects: Project[], loose: DocNode[] }` (design: `docs/design/dispatch-integration/6-app-shell-projects.md` §1). Read only; built from the same walk as `/api/tree`.
+
+- **Project** = a top-level folder: `{ path, name, icon, description, created, modified, count, docs }`. An optional `<folder>/.project.json` gives `name` (max 100 characters), `icon` (max 16) and `description` (max 500); other fields, non-strings, broken JSON, files over 16 KB and symlinks are ignored. Without it `name` is the folder name, `icon` null, `description` ''. Sorted by `name`.
+- **DocNode** = `{ type: 'doc'|'group', path, name, title?, revision?, created, modified, count, children }`. A folder `X/` next to `X.dpx.json` holds X's sub-documents (`children`); a folder with no such file is a `group` (its `path` is the folder). `count` is the number of documents below. Sorted by `name`.
+- `loose` = files right in the workspace root (미분류). They are not nested: a top-level folder is always a project.
+- Times are ISO strings. `modified` is the file's mtime (a group's or project's newest below). `created`: saves replace the file, so its birth time is lost; a file made through the API gets a `born` mark (ms) in its history folder, which moves with it and goes through the trash. For files made outside the app it is the earliest of the oldest kept snapshot and the file's own times.
 
 ## Delete and move rules
 

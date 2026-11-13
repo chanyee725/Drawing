@@ -7,7 +7,7 @@ export const FILE_FORMAT_VERSION = 4;
 // Pipeline steps (format v4). The web only carries it through saves for now; docs/workspace-api.md "Pipeline `plan`".
 export type { Plan, PlanStep } from '../../shared/dispatch/plan.ts';
 import type { Plan } from '../../shared/dispatch/plan.ts';
-export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout };
+export type Block = { id: string; type: string; code: string; x: number; y: number; w: number; h: number; layout?: BlockLayout; frameId?: string };
 export type DpxFile = {
   version: number;
   title: string;
@@ -20,9 +20,37 @@ export type DpxFile = {
 };
 export type TreeNode =
   | { type: 'folder'; name: string; path: string; children: TreeNode[] }
-  | { type: 'file'; name: string; path: string; title: string; revision: number | null; pipeline?: PipelineMark };
+  | { type: 'file'; name: string; path: string; title: string; revision: number | null; mtime?: string; created?: string; pipeline?: PipelineMark };
 /** Tree mark of a pipeline file. Only `plan` (draft) exists until runs are recorded (E21). */
 export type PipelineMark = { state: 'plan' };
+
+/** Projects view (GET /api/workspace/projects, docs/workspace-api.md). Times are ISO strings. */
+export type DocNode = {
+  type: 'doc' | 'group';
+  path: string;
+  name: string;
+  title?: string;
+  revision?: number | null;
+  /** Set on a pipeline file (E18). */
+  pipeline?: PipelineMark;
+  created: string | null;
+  modified: string | null;
+  /** Documents below this one. */
+  count: number;
+  children: DocNode[];
+};
+export type Project = { path: string; name: string; icon: string | null; description: string; created: string | null; modified: string | null; count: number; docs: DocNode[] };
+export type ProjectsView = { projects: Project[]; loose: DocNode[] };
+
+/** Model connection summary for the sidebar (Dispatch routes; GET only, nothing here starts a CLI). */
+export type DispatchStatus = { enabled: boolean; reason?: string; message?: string };
+export type ProviderState = { installed: boolean | null; connected: boolean };
+export type LimitWindow = { label: string; used: number | null; reset: number | null };
+export type ProviderLimits = {
+  claude?: { windows: LimitWindow[] } | null;
+  openai?: { windows: LimitWindow[] } | null;
+  gemini?: { reached: boolean; reset: number | null } | null;
+};
 
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
 export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
@@ -59,6 +87,10 @@ const q = (p: string) => `?path=${encodeURIComponent(p)}`;
 export const api = {
   info: () => call<{ workspace: string }>('GET', '/api/info'),
   tree: () => call<{ tree: TreeNode[] }>('GET', '/api/tree').then((r) => r.tree),
+  projects: () => call<ProjectsView>('GET', '/api/workspace/projects'),
+  dispatch: () => call<DispatchStatus>('GET', '/api/dispatch'),
+  providers: () => call<{ providers: Record<string, ProviderState> }>('GET', '/api/state').then((r) => r.providers ?? {}),
+  limits: () => call<ProviderLimits>('GET', '/api/limits'),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
   /** `content`: starting document, canvas, blocks and plan (a template); defaults to an empty file. */
   createFile: (path: string, title: string, content?: Partial<Pick<DpxFile, 'document' | 'canvas' | 'blocks' | 'plan'>>) =>
@@ -75,4 +107,62 @@ export const api = {
   trash: () => call<{ items: TrashItem[] }>('GET', '/api/trash').then((r) => r.items),
   restoreTrash: (id: string) => call<{ path: string }>('POST', '/api/trash/restore', { id }),
   move: (from: string, to: string, type: 'file' | 'folder') => call<unknown>('POST', '/api/move', { from, to, type }),
+};
+
+// Project view: GET /api/workspace/projects (docs/workspace-api.md "Projects view"), mapped to the shapes the screens use.
+type DocNodeDto = { type: 'doc' | 'group'; path: string; name: string; title?: string; created: string | null; modified: string | null; children: DocNodeDto[] };
+type ProjectDto = { path: string; name: string; icon: string | null; description: string; created: string | null; modified: string | null; count: number; docs: DocNodeDto[] };
+export type ProjectDoc = {
+  path: string;
+  name: string;
+  title: string;
+  /** A folder without a same-named file: a parent without a document of its own. */
+  bundle: boolean;
+  /** ms since epoch (0 = unknown) */
+  createdAt: number;
+  modifiedAt: number;
+  children: ProjectDoc[];
+};
+export type ProjectInfo = {
+  /** The project folder's path (its unique id). */
+  id: string;
+  path: string;
+  name: string;
+  icon: string;
+  description: string;
+  docCount: number;
+  createdAt: number;
+  modifiedAt: number;
+  docs: ProjectDoc[];
+};
+export type ProjectsResponse = { projects: ProjectInfo[]; unfiled: ProjectDoc[] };
+export type RecentFile = { path: string; title: string; project: string | null; parent: string | null; createdAt: number; modifiedAt: number };
+const time = (s: string | null) => (s ? Date.parse(s) || 0 : 0);
+const toDoc = (n: DocNodeDto): ProjectDoc => ({
+  path: n.path,
+  name: n.name,
+  title: n.title || n.name,
+  bundle: n.type === 'group',
+  createdAt: time(n.created),
+  modifiedAt: time(n.modified),
+  children: n.children.map(toDoc),
+});
+export const projectsApi = {
+  projects: () =>
+    call<{ projects: ProjectDto[]; loose: DocNodeDto[] }>('GET', '/api/workspace/projects').then(
+      (r): ProjectsResponse => ({
+        projects: r.projects.map((p) => ({
+          id: p.path,
+          path: p.path,
+          name: p.name,
+          icon: p.icon ?? [...p.name][0] ?? '',
+          description: p.description,
+          docCount: p.count,
+          createdAt: time(p.created),
+          modifiedAt: time(p.modified),
+          docs: p.docs.map(toDoc),
+        })),
+        unfiled: r.loose.map(toDoc),
+      }),
+    ),
 };

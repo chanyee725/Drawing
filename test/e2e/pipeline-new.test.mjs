@@ -1,5 +1,5 @@
-// Headless browser check (E18): the sidebar "+" menu makes a pipeline from the template under pipelines/,
-// and a file with a plan shows the 계획 badge in the tree.
+// Headless browser check (E18): the home's "새 파이프라인 계획" button makes a pipeline from the template,
+// and a file with a plan shows the 계획 badge in the sidebar.
 // Run on request: DRAW_E2E=1 CHROME=/path/to/chrome-headless-shell PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core npm test
 // It starts its own server on a free port against a scratch workspace in a temp dir, and refuses to go on
 // unless the server's own log names that port and folder.
@@ -50,20 +50,17 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
   page.on('dialog', (d) => void d.accept('release'));
   await page.goto(BASE);
-  const nav = page.getByRole('navigation', { name: '파일 목록' });
-  const row = (text) => nav.getByRole('button').filter({ hasText: text }).first();
+  const nav = page.getByRole('navigation', { name: '사이드바' });
+  const row = (text) => nav.locator('[data-slot="sidebar-menu-button"]').filter({ hasText: text }).first();
   await row('Plain').waitFor();
   assert.equal(await nav.getByRole('img', { name: '파이프라인: 계획' }).count(), 0, 'a plain file has no badge');
 
-  await page.getByRole('button', { name: '새로 만들기' }).click();
-  const items = page.getByRole('menuitem');
-  assert.deepEqual(await items.allTextContents(), ['새 파일', '새 파이프라인']);
-  await page.getByRole('menuitem', { name: '새 파이프라인' }).click();
+  await page.getByRole('button', { name: '새 파이프라인 계획' }).click();
 
-  // The bare name went under pipelines/ and the file opened with the template.
+  // The file opened with the template.
   await row('release').waitFor();
-  await page.waitForFunction(() => decodeURIComponent(location.hash).includes('pipelines/release'));
-  const res = await call('GET', '/api/file?path=pipelines/release');
+  await page.waitForFunction(() => decodeURIComponent(location.hash).includes('release'));
+  const res = await call('GET', '/api/file?path=release');
   assert.equal(res.status, 200);
   const f = await res.json();
   assert.equal(f.blocks.length, 1);

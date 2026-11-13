@@ -19,8 +19,9 @@ import { renderBlock, type BlockPicture } from './render';
 import { baseFileId, exportVariants, pictureScale, scaleSvg, svgDataURL, variantId } from './resolution';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, liveFrames, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
+import { RunOverlay } from './RunOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE } from './cleanStyle';
@@ -86,6 +87,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   // The picture each block shows, so a block whose code did not change is not rendered again.
   const picCache = useRef<PictureCache<BlockPicture>>(new Map());
   const draw = useCallback((list: readonly Block[]) => picturesFor(list, picCache.current, (b) => renderBlock(b, PIC_THEME)), []);
+  // The run overlay reads pictures by the image's file id (a sharpened variant maps back to its base picture).
+  const pictureOf = useCallback((fileId: string) => sizes.current.get(baseFileId(fileId)), []);
   const wrap = useRef<HTMLDivElement>(null);
   const blocksRef = useRef(blocks);
   const canvasRef = useRef(canvas);
@@ -283,7 +286,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       for (const b of blocks) seenLayouts.current.set(b.id, layoutSig(b.layout));
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
-      const placed = placeBlocks(blocks, pics, liveRects(free));
+      // A block goes back into the frame it was saved in, if that frame is still there (#83).
+      const placed = placeBlocks(liveFrames(blocks, free as unknown as SceneEl[]), pics, liveRects(free));
       const images = restoreElements(
         placed.map((b, i) => blockImageSkeleton(b, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
@@ -349,7 +353,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       if (missing.length) {
         changed = true;
         const mpics = missing.map((b) => pics[index.get(b.id)!]!);
-        const skeletons = placeBlocks(missing, mpics, liveRects(next)).map(
+        const skeletons = placeBlocks(liveFrames(missing, next as unknown as SceneEl[]), mpics, liveRects(next)).map(
           (b, i) => blockImageSkeleton(b, mpics[i]!.fileId, newElId(b.id)) as unknown as ExcalidrawElement,
         );
         next.push(...restoreElements(skeletons, null));
@@ -481,7 +485,9 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           const g = split.geometry.get(id)!;
           const old = graveyard.current.get(id)!;
           graveyard.current.delete(id);
-          return { ...old, x: g.x, y: g.y, w: g.w, h: g.h };
+          const { frameId: _old, ...rest } = old;
+          const f = split.frames.get(id);
+          return { ...rest, x: g.x, y: g.y, w: g.w, h: g.h, ...(f ? { frameId: f } : {}) };
         }),
       ];
     }
@@ -743,6 +749,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
           setEditing(b.id);
         }}
       />
+      {api && wrap.current && <RunOverlay api={api} wrap={wrap.current} pictureOf={pictureOf} hide={edit?.blockId ?? null} />}
       {edit && editBlock && overlaySess && overlayFrame && wrap.current && (
         <LayoutEditOverlay
           layout={editBlock.layout}

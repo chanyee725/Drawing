@@ -1,5 +1,6 @@
 // Workspace module: HTTP API over the file store + SSE "workspace" events for outside changes.
 import { createStore, StoreError } from './store.js';
+import { listProjects } from './projects.js';
 
 const MAX_BODY = 20 * 1024 * 1024;
 
@@ -72,6 +73,8 @@ export async function setup(ctx) {
     close: () => store.close(),
     routes: [
       route('GET', '/api/tree', async () => ({ tree: await store.tree() })),
+      // Projects view (top-level folders, nested sub-documents). Not /api/projects: Dispatch owns that path.
+      route('GET', '/api/workspace/projects', () => listProjects(store)),
       route('GET', '/api/file', (p) => store.readFile(need(p, 'path'))),
       route('PUT', '/api/file', (p, b) => store.writeFile(need(p, 'path'), b)),
       route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
