@@ -83,8 +83,10 @@ function useCreateKeys(on: boolean, run: (k: CreateKind) => void, focusSearch: (
     if (!on) return;
     const h = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return;
+      // A native modal <dialog> (settings) has no role attribute but owns the keyboard: nothing is created behind it.
+      if (document.querySelector('dialog:modal')) return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.closest('input, textarea, select, [contenteditable], [role=dialog], [role=menu]') || t.isContentEditable)) return;
+      if (t && (t.closest('input, textarea, select, [contenteditable], dialog, [role=dialog], [role=menu]') || t.isContentEditable)) return;
       const key = e.key.toLowerCase();
       if (key === 'p' && Date.now() - chord.g < CHORD_MS) return; // G P belongs to the project menu
       if (key === '/') {

@@ -369,7 +369,7 @@ export function Sidebar(p: Props) {
         <SidebarModels />
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton className="group/row" aria-haspopup="dialog" aria-keyshortcuts="," onClick={p.onSettings}>
+            <SidebarMenuButton data-settings-trigger className="group/row" aria-haspopup="dialog" aria-keyshortcuts="," onClick={p.onSettings}>
               <Settings aria-hidden />
               <span className="truncate">설정</span>
               {/* The key is announced through aria-keyshortcuts, so the button's name stays 설정. */}
