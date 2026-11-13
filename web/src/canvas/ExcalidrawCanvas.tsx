@@ -14,12 +14,15 @@ import { DIAGRAM_TYPES, TEMPLATES, isDiagramType, type DiagramType } from '../ds
 import { analyzeDiagram, prunedLayout } from '../dsl/adapter';
 import { blockLabel, brokenNotice, type BrokenBlock } from './notice';
 import { renderBlock, type BlockPicture } from './render';
+import { baseFileId, exportVariants, pictureScale, scaleSvg, svgDataURL, variantId } from './resolution';
 import type { CanvasHandle } from '../export/types';
 import { DEFAULT_EXPORT, type ExportOptions } from '../export/options';
-import { applyScene, blockIdOf, blockImageSkeleton, findCopies, findFreeSpot, fitHeight, freeSignature, hash, isUnplaced, layoutSig, layoutsFromImages, newBlockId, picturesFor, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
+import { applyScene, blockIdOf, blockImageSkeleton, findCopies, freeSignature, hash, layoutSig, layoutsFromImages, newBlockId, picturesFor, placeBlocks, rectOf, sameDrawing, shiftForOrigin, splitScene, type PictureCache, type Rect, type SceneEl } from './sync';
 import { LayoutEditOverlay, focusCanvas, type EditStart } from './LayoutEditOverlay';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
+import { CLEAN_APP_STATE } from './cleanStyle';
+import './clean.css';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
 export type CanvasData = { elements: unknown[]; appState: Record<string, unknown> };
@@ -42,19 +45,12 @@ const PIC_THEME = 'light';
 const newElId = (blockId: string) => `blk_${blockId}_${Math.random().toString(36).slice(2, 8)}`;
 const liveRects = (els: readonly ExcalidrawElement[]): Rect[] => els.filter((e) => !e.isDeleted).map((e) => rectOf(e));
 
-/**
- * Where a block's image goes. A placed block keeps its spot and width (height follows the picture);
- * a block never placed gets the picture's own size and a spot clear of everything in `taken`.
- */
-function placeBlock(b: Block, p: BlockPicture, taken: Rect[]): Block {
-  if (!isUnplaced(b)) return { ...b, h: fitHeight(b.w, p.width, p.height) };
-  const spot = findFreeSpot(p.width, p.height, taken);
-  const out = { ...b, ...spot, w: p.width, h: p.height };
-  taken.push(out);
-  return out;
-}
-
-const fileData = (p: BlockPicture): BinaryFileData => ({ id: p.fileId as FileId, mimeType: 'image/svg+xml', dataURL: p.dataURL as BinaryFileData['dataURL'], created: Date.now() });
+const fileData = (p: BlockPicture, k = 1): BinaryFileData => ({
+  id: variantId(p.fileId, k) as FileId,
+  mimeType: 'image/svg+xml',
+  dataURL: (k === 1 ? p.dataURL : svgDataURL(scaleSvg(p.svg, k))) as BinaryFileData['dataURL'],
+  created: Date.now(),
+});
 
 const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: false },
@@ -130,7 +126,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
 
   /** Where the block's layout lands in the wrapper, from its image and the view; null while its picture is not current. */
   const frameOf = useCallback((img: ExcalidrawImageElement, st: AppState, b: Block): LayoutFrame | null => {
-    const pic = sizes.current.get(img.fileId ?? '');
+    const pic = sizes.current.get(baseFileId(img.fileId ?? ''));
     const el = wrap.current;
     if (!pic || !el) return null;
     let origin = pic.anchor && pic.anchor.key === hash(`${PIC_THEME}\n${b.type}\n${b.code}`) ? pic.anchor : null;
@@ -286,13 +282,12 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       for (const b of blocks) seenLayouts.current.set(b.id, layoutSig(b.layout));
       const free = restoreElements(canvas.elements as ExcalidrawElement[], null);
       sigRef.current = freeSignature(free);
-      // Placed blocks first, so blocks still to place keep clear of them.
-      const taken = [...liveRects(free), ...blocks.filter((b) => !isUnplaced(b)).map((b) => ({ x: b.x, y: b.y, w: b.w, h: b.h }))];
+      const placed = placeBlocks(blocks, pics, liveRects(free));
       const images = restoreElements(
-        blocks.map((b, i) => blockImageSkeleton(placeBlock(b, pics[i], taken), pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
+        placed.map((b, i) => blockImageSkeleton(b, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
       );
-      return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), scrollToContent: true };
+      return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), appState: CLEAN_APP_STATE, scrollToContent: true };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -315,7 +310,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       setResets(new Set(pics.flatMap((p, i) => (p.layoutReset ? [blocks[i]!.id] : []))));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
-      const add = pics.filter((p) => !files[p.fileId]).map(fileData);
+      const add = pics.filter((p) => !files[p.fileId]).map((p) => fileData(p));
       if (add.length) api.addFiles(add);
       const els = api.getSceneElementsIncludingDeleted();
       const index = new Map(blocks.map((b, i) => [b.id, i]));
@@ -335,14 +330,14 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         // The image carries the block's layout, so undo of a layout edit comes back through it (design §5.6).
         const want = blocks[i]!.layout;
         const layoutStale = layoutSig(img.customData?.layout as never) !== layoutSig(want);
-        if (img.fileId === p.fileId && !layoutStale) return el;
+        if (baseFileId(img.fileId ?? '') === p.fileId && !layoutStale) return el;
         changed = true;
         const { layout: _old, ...rest } = img.customData ?? {};
         const customData = want ? { ...rest, layout: want } : rest;
         seenLayouts.current.set(bid, layoutSig(want));
-        if (img.fileId === p.fileId) return newElementWith(img, { customData });
+        if (baseFileId(img.fileId ?? '') === p.fileId) return newElementWith(img, { customData });
         // Keep the zoom the block was shown at, so a bigger diagram takes more room instead of shrinking.
-        const old = sizes.current.get(img.fileId ?? '');
+        const old = sizes.current.get(baseFileId(img.fileId ?? ''));
         const scale = old && old.width > 0 ? img.width / old.width : 1;
         // When only the layout changed, its origin stays where it was on screen, so moving a node left does not push
         // the whole block right. Code edits, resets and error pictures leave the block where it is.
@@ -352,11 +347,10 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       const missing = blocks.filter((b) => !shown.has(b.id));
       if (missing.length) {
         changed = true;
-        const taken = liveRects(next);
-        const skeletons = missing.map((b) => {
-          const p = pics[index.get(b.id)!];
-          return blockImageSkeleton(placeBlock(b, p, taken), p.fileId, newElId(b.id)) as unknown as ExcalidrawElement;
-        });
+        const mpics = missing.map((b) => pics[index.get(b.id)!]!);
+        const skeletons = placeBlocks(missing, mpics, liveRects(next)).map(
+          (b, i) => blockImageSkeleton(b, mpics[i]!.fileId, newElId(b.id)) as unknown as ExcalidrawElement,
+        );
         next.push(...restoreElements(skeletons, null));
       }
       if (changed) api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
@@ -370,8 +364,72 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, drawn, draw, tryFocus, refreshFrame]);
 
+  // Block pictures follow the zoom and screen scale: each image shows the variant of its picture that is
+  // sharp at the size it covers on screen (resolution.ts). Checked shortly after the view or the images change.
+  const sharpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sharpenView = useRef('');
+  const sharpen = useCallback(() => {
+    sharpenTimer.current = null;
+    const xapi = apiRef.current;
+    if (!xapi) return;
+    const zoom = xapi.getAppState().zoom.value;
+    const dpr = window.devicePixelRatio || 1;
+    const files = xapi.getFiles();
+    const add = new Map<string, BinaryFileData>();
+    const swaps = new Map<string, string>();
+    for (const el of xapi.getSceneElements()) {
+      if (el.type !== 'image' || blockIdOf(el as unknown as SceneEl) === null) continue;
+      const img = el as ExcalidrawImageElement;
+      const p = sizes.current.get(baseFileId(img.fileId ?? ''));
+      if (!p) continue;
+      const k = pictureScale(Math.max(Math.abs(img.width) / p.width, Math.abs(img.height) / p.height) * zoom * dpr, p.width, p.height);
+      const id = variantId(p.fileId, k);
+      if (id === img.fileId) continue;
+      if (!files[id] && !add.has(id)) add.set(id, fileData(p, k));
+      swaps.set(img.id, id);
+    }
+    if (!swaps.size) return;
+    // Decode the new variants before showing them, so a block does not flash its loading placeholder.
+    void Promise.all(
+      [...add.values()].map((f) => {
+        const im = new Image();
+        im.src = f.dataURL;
+        return im.decode().catch(() => undefined);
+      }),
+    ).then(() => {
+      if (apiRef.current !== xapi) return;
+      if (add.size) xapi.addFiles([...add.values()]);
+      let changed = false;
+      const els = xapi.getSceneElementsIncludingDeleted().map((el) => {
+        const id = swaps.get(el.id);
+        // Skip an image whose picture changed meanwhile (a code edit); the next check handles it.
+        const img = el as ExcalidrawImageElement;
+        if (!id || el.isDeleted || baseFileId(img.fileId ?? '') !== baseFileId(id)) return el;
+        changed = true;
+        return newElementWith(img, { fileId: id as FileId });
+      });
+      if (changed) xapi.updateScene({ elements: els, captureUpdate: CaptureUpdateAction.NEVER });
+    });
+  }, []);
+  const scheduleSharpen = useCallback(() => {
+    if (sharpenTimer.current) clearTimeout(sharpenTimer.current);
+    sharpenTimer.current = setTimeout(sharpen, 120);
+  }, [sharpen]);
+  useEffect(() => {
+    window.addEventListener('resize', scheduleSharpen);
+    return () => {
+      window.removeEventListener('resize', scheduleSharpen);
+      if (sharpenTimer.current) clearTimeout(sharpenTimer.current);
+    };
+  }, [scheduleSharpen]);
+
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
+    const view = `${appState.zoom.value}|${sceneEls.map((e) => (e.type === 'image' && !e.isDeleted && blockIdOf(e as unknown as SceneEl) !== null ? `${e.id}:${(e as ExcalidrawImageElement).fileId}:${Math.round(e.width)}` : '')).join('')}`;
+    if (view !== sharpenView.current) {
+      sharpenView.current = view;
+      scheduleSharpen();
+    }
     setBlockSelected(sel.length > 0 && sel.every((e) => blockIdOf(e as unknown as SceneEl) !== null));
     setSelBlock(sel.length === 1 ? blockIdOf(sel[0] as unknown as SceneEl) : null);
     const ed = editRef.current;
@@ -613,7 +671,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       png: async (o = DEFAULT_EXPORT) => {
         const { elements } = scope();
         if (!elements.length) return null;
-        return await exportToBlob({ elements, appState: opts(o), files: api.getFiles(), mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
+        // Block images carry the variant picked for the view; the export uses the one sharp at its own scale.
+        const ex = exportVariants(elements, o.scale, (id) => sizes.current.get(id));
+        const files = { ...api.getFiles() };
+        for (const { picture, k } of ex.need) {
+          const p = sizes.current.get(picture.fileId);
+          const id = variantId(picture.fileId, k);
+          if (p && !files[id]) files[id] = fileData(p, k);
+        }
+        return await exportToBlob({ elements: ex.elements, appState: opts(o), files, mimeType: 'image/png', exportPadding: 16, getDimensions: (w: number, h: number) => ({ width: w * o.scale, height: h * o.scale, scale: o.scale }) });
       },
       key: ({ key, code, ctrl, meta, shift, alt }) => {
         const target = wrap.current?.querySelector<HTMLElement>('.excalidraw');

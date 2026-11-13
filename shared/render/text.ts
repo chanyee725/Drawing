@@ -88,3 +88,6 @@ export function linesWidth(lines: string[], size: number, font: Typeface, bold =
 }
 
 export const lineHeightOf = (size: number): number => Math.round(size * 1.35);
+
+/** Room on each side of an edge label inside its pill. */
+export const PLATE_PAD = 7;
