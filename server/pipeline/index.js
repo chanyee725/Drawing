@@ -15,6 +15,7 @@
 import { StoreError } from '../workspace/store.js';
 import { FILE_EXT } from '../workspace/model.js';
 import { redact } from '../dispatch/redact.js';
+import { mergeResult, pickResult } from '../runs/record.js';
 import { effectiveRoles } from '../dispatch/settings.js';
 import { buildPlanFile, planChanges, writePlanProblem, PLAN_BLOCK_ID } from '../../shared/dispatch/plan-write.ts';
 import { resolvedStep } from '../../shared/dispatch/plan.ts';
@@ -471,10 +472,22 @@ export async function setup(ctx) {
     const file = await readOrNull(path);
     if (!file) throw new StoreError(404, 'not found');
     const d = dispatch();
-    const done = (e.steps ?? []).filter((id) => !openSteps(e).includes(id));
-    // How the board closed them, kept now: the next run only counts tasks closed after its own 시작하기.
-    const results = resultsOf(e);
     const runId = e.runId;
+    // Steps this run carried over from an earlier stopped run stay done, with how they closed then.
+    const record = runId ? await recorder.read(path, runId).catch(() => null) : null;
+    const carried = Object.keys(record?.steps ?? {}).filter((id) => record.steps[id].carried);
+    const open = openSteps(e);
+    const done = (e.steps ?? []).filter((id) => !open.includes(id) || carried.includes(id));
+    // How the board closed them, kept now: the next run only counts tasks closed after its own 시작하기.
+    const results = {};
+    for (const id of carried) {
+      const r = pickResult(record.steps[id].result);
+      if (r) results[id] = r;
+    }
+    for (const [id, r] of Object.entries(resultsOf(e))) {
+      const next = mergeResult(results[id], pickResult(r));
+      if (next) results[id] = next;
+    }
     if (runId) await quietly(recorder.endPaused(path, runId, 'stopped'));
     Object.assign(e, { state: 'plan', draftRevision: file.revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} });
     delete e.pause;

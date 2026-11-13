@@ -14,6 +14,7 @@ import {
   STEP_STATES_WITHOUT_SESSIONS,
   TIMELINE_MAX,
   pickResult,
+  mergeResult,
   pickSession,
   serializeRecord,
   stepStateOf,
@@ -341,10 +342,11 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     flushEvents(runId);
     for (const [id, r] of Object.entries(results ?? {})) {
       const step = run.record.steps[id];
-      const result = pickResult(r);
+      const result = mergeResult(step?.result, pickResult(r));
       if (!step || !result) continue;
       step.result = result;
-      if (result.abandoned && step.sessions.length === 0 && step.state !== 'skipped') {
+      // A step carried over from an earlier run stays done: it finished there.
+      if (result.abandoned && !step.carried && step.sessions.length === 0 && step.state !== 'skipped') {
         step.state = 'skipped';
         step.endedAt = now();
         run.record.timeline.push([step.endedAt, id, 'skipped']);

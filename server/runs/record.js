@@ -69,6 +69,13 @@ export function pickResult(r) {
   return { commit: r.commit, ...(base && { base }) };
 }
 
+/** A later close of the same step: a merged commit stays when the step is closed again without one (그만둠). */
+export function mergeResult(prev, next) {
+  if (!next) return prev ?? null;
+  if (next.abandoned && prev?.commit) return prev;
+  return next;
+}
+
 export function stepStateOf(step) {
   const states = step.sessions.map((s) => s.state).filter(Boolean);
   if (states.length === 0) return step.state;

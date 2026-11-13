@@ -381,6 +381,56 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
   }
 });
 
+test('계획 다시 열기 twice keeps what the first run finished and how it merged (E28)', { timeout: 90_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead, root } = t;
+    const { path, runId: a } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const merged = (step) => until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === step && x.commit)?.mergeCheck?.ok === true, 10_000);
+    const runOf = async (id) => (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${id}`)).body;
+    const reopenAndStart = async () => {
+      assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+      const re = await call('POST', '/api/pipeline/reopen', { path });
+      assert.equal(re.status, 200, JSON.stringify(re.body));
+      const go = await call('POST', '/api/pipeline/start', { path, revision: re.body.draftRevision ?? re.body.revision });
+      assert.equal(go.status, 200, JSON.stringify(go.body));
+      return go.body.runId;
+    };
+
+    // Run A merges api.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', commit: head, stage: 'done' });
+    await merged('api');
+    const b = await reopenAndStart();
+    assert.equal((await runOf(b)).steps.api.carried, a);
+
+    // Run B merges ui and closes api again without a commit: the earlier merge stays.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', commit: head, stage: 'done' });
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API 다시', step: 'api', stage: 'done' });
+    await merged('ui');
+    const c = await reopenAndStart();
+    assert.match(told(d, lead.id), /이미 끝난 단계: api, ui/);
+    assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api, ui/);
+    const runC = await runOf(c);
+    for (const id of ['api', 'ui']) {
+      assert.equal(runC.steps[id].state, 'done', id);
+      assert.equal(runC.steps[id].carried, b, id);
+      assert.deepEqual(runC.steps[id].result, { commit: head, base: 'develop' }, id);
+    }
+    assert.equal(runC.steps.review.state, 'pending');
+
+    // Run C closes review: both carried steps count as merged in the record.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '리뷰', step: 'review', commit: head, stage: 'done' });
+    await until(async () => (await statusOf(call, path)).state === 'done', 10_000);
+    const fin = await runOf(c);
+    assert.equal(fin.steps.api.result.commit, head);
+    assert.equal(fin.steps.ui.result.commit, head);
+    assert.equal(fin.steps.api.state, 'done');
+  } finally {
+    await t.stop();
+  }
+});
+
 test('완료: closing every step ends the run done, writes the summary block once and labels the versions (E28)', { timeout: 60_000 }, async () => {
   const t = await start();
   try {
