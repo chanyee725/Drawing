@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, rectOf, splitScene, type Rect, type SceneEl } from '../../web/src/canvas/sync.ts';
+import { applyScene, blockIdOf, blockImageSkeleton, fileIdFor, findCopies, findFreeSpot, fitHeight, freeSignature, isUnplaced, liveFrames, rectOf, splitScene, type Rect, type SceneEl } from '../../web/src/canvas/sync.ts';
 
 const block = (id: string, x = 0) => ({ id, type: 'flowchart', code: 'A > B', x, y: 0, w: 200, h: 100 });
 const img = (id: string, x: number, extra: Partial<SceneEl> = {}): SceneEl => ({ id: `blk_${id}`, type: 'image', x, y: 0, width: 200, height: 100, customData: { blockId: id }, ...extra });
@@ -203,4 +203,28 @@ test('layoutSig does not depend on key order', async () => {
   assert.notEqual(layoutSig(a), layoutSig({ ...b, v: 2 }));
   assert.equal(fileIdFor({ ...block('x'), layout: a }, 'light'), fileIdFor({ ...block('x'), layout: b }, 'light'));
   assert.equal(sameDrawing([{ ...block('x'), layout: a }], [{ ...block('x'), layout: b }]), true);
+});
+
+test('a block keeps its frame across a reload (#83)', () => {
+  // Excalidraw marks the image as in a frame; the block stores it, and the image rebuilt on load carries it again.
+  const blocks = [block('a')];
+  const inFrame = applyScene(blocks, splitScene([img('a', 0, { frameId: 'f1' })]));
+  assert.notEqual(inFrame, blocks);
+  assert.equal(inFrame[0]!.frameId, 'f1');
+  assert.equal(blockImageSkeleton(inFrame[0]!, 'f', 'e').frameId, 'f1');
+  assert.equal(applyScene(inFrame, splitScene([img('a', 0, { frameId: 'f1' })])), inFrame, 'no change, no save');
+  // Taken out of the frame: the block forgets it.
+  const out = applyScene(inFrame, splitScene([img('a', 0, { frameId: null })]));
+  assert.equal('frameId' in out[0]!, false);
+  assert.equal(blockImageSkeleton(out[0]!, 'f', 'e').frameId, null);
+});
+
+test('liveFrames drops a stored frame that is gone or deleted', () => {
+  const frame = (id: string, more: Partial<SceneEl> = {}) => rect(id, { type: 'frame', ...more });
+  const list = [{ ...block('a'), frameId: 'f1' }, { ...block('b'), frameId: 'gone' }, { ...block('c'), frameId: 'dead' }, block('d')];
+  const out = liveFrames(list, [frame('f1'), frame('dead', { isDeleted: true }), rect('r')]);
+  assert.deepEqual(out.map((b) => b.frameId ?? null), ['f1', null, null, null]);
+  assert.equal(out[0], list[0], 'kept blocks are the same objects');
+  const ok = [{ ...block('a'), frameId: 'f1' }];
+  assert.equal(liveFrames(ok, [frame('f1')]), ok, 'same array when nothing changed');
 });
