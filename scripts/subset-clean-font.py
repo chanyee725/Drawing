@@ -1,4 +1,5 @@
-# usage: python subset.py <pretendard static woff2 dir> <out dir>
+# usage: python scripts/subset-clean-font.py <pretendard static woff2 dir> <out dir>
+# needs fonttools==4.68.0 and brotli (pip install fonttools==4.68.0 brotli); other versions write different bytes.
 import sys
 from fontTools import subset
 from fontTools.ttLib import TTFont
@@ -8,7 +9,8 @@ for name, weight in (("Regular", 400), ("SemiBold", 600)):
     opts = subset.Options()
     opts.flavor = "woff2"
     opts.layout_features = ["kern"]
-    opts.name_IDs = [1, 2, 3, 4, 6]
+    # Keep the copyright (0) and license (13, 14) records so the notice travels inside every exported SVG.
+    opts.name_IDs = [0, 1, 2, 3, 4, 6, 13, 14]
     opts.notdef_outline = True
     opts.hinting = False
     opts.desubroutinize = True
