@@ -70,8 +70,8 @@ export function SidebarModels() {
           return (
             <SidebarMenuItem key={m.id}>
               <SidebarMenuButton aria-label={`${m.name} ${s.long}, 연결 설정 열기`} title={`${m.name}: ${s.long}`} onClick={() => setOpenId(m.id)}>
-                {/* Same 16px slot as the nav icons, so names line up with 모든 파일, 최근, 보관함. */}
-                <span aria-hidden className="grid size-4 shrink-0 place-items-center">
+                {/* Same 17px slot as the nav icons, so names line up with 모든 파일, 최근, 보관함. */}
+                <span aria-hidden className="grid size-[17px] shrink-0 place-items-center">
                   <i className={cn('size-2 rounded-full', DOT[s.tone])} />
                 </span>
                 <span className="truncate">{m.name}</span>
@@ -177,20 +177,20 @@ function ConnectDialog({ line, enabled, reason, state, reload, onClose }: Dialog
           )}
         </div>
         <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={onClose}>
+          <Button variant="ghost" size="sm" className="max-md:h-11" onClick={onClose}>
             닫기
           </Button>
           {enabled && line && !missing && (
             line.connected ? (
-              <Button variant="outline" size="sm" onClick={disconnect}>
+              <Button variant="outline" size="sm" className="max-md:h-11" onClick={disconnect}>
                 연결 끊기
               </Button>
             ) : waiting ? (
-              <Button variant="outline" size="sm" onClick={cancel}>
+              <Button variant="outline" size="sm" className="max-md:h-11" onClick={cancel}>
                 로그인 취소
               </Button>
             ) : (
-              <Button size="sm" autoFocus onClick={connect}>
+              <Button size="sm" className="max-md:h-11" autoFocus onClick={connect}>
                 연결하기
               </Button>
             )
