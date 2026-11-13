@@ -43,7 +43,7 @@ export function RunStrip({ code, inRunView, onRunView }: Props) {
         <span aria-hidden className={cn(s.state === 'running' ? 'text-ok' : 'text-muted-foreground')}>
           {s.glyph}
         </span>
-        <progress className="run-progress w-16 shrink-0" value={s.progress.percent} max={100} aria-label={`진행률 ${s.progress.percent}%`} />
+        {s.progress.total > 0 && <progress className="run-progress w-16 shrink-0" value={s.progress.percent} max={100} aria-label="진행률" />}
         <span className="min-w-0 flex-1 truncate text-foreground" title={s.parts.join(' · ')}>
           {s.parts.join(' · ')}
         </span>
