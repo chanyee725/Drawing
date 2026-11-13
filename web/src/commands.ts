@@ -2,14 +2,14 @@
 // with fresh state); the menu reads every source each time it opens, so no command list goes stale.
 import { createContext, useContext, useEffect, useRef, type ComponentType } from 'react';
 
-/** Menu sections, in display order. */
+/** Menu sections, in display order: 문서 → 프로젝트 → 동작 (design doc 6 §2.5), then the editor's own sections. */
 export const GROUPS = [
+  { id: 'file', label: '문서' },
+  { id: 'project', label: '프로젝트' },
   { id: 'action', label: '동작' },
   { id: 'view', label: '보기' },
   { id: 'canvas', label: '캔버스' },
   { id: 'block', label: '블록' },
-  { id: 'file', label: '파일' },
-  { id: 'project', label: '프로젝트' },
 ] as const;
 export type CommandGroup = (typeof GROUPS)[number]['id'];
 
