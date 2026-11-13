@@ -175,14 +175,13 @@ function planRoutes(
   const inKey = (p: Plan): string => `${p.e.to}\u0000${p.sb}`;
   const busGap = BUS_GAP + MIN_STUB;
   for (const list of by(outKey).values()) {
-    if (list.length < 2 || new Set(list.map((p) => p.e.to)).size < 2 || list.some((p) => p.gap < busGap)) continue;
-    if (list.filter((p) => !split.has(p.e)).length < 2 || new Set(list.filter((p) => !split.has(p.e)).map((p) => p.e.to)).size < 2) continue;
-    for (const p of list) if (!split.has(p.e)) p.bus = 'out';
+    const members = list.filter((p) => !split.has(p.e));
+    if (members.length < 2 || new Set(members.map((p) => p.e.to)).size < 2 || members.some((p) => p.gap < busGap)) continue;
+    for (const p of members) p.bus = 'out';
   }
   for (const list of by(inKey).values()) {
-    if (list.length < 2 || new Set(list.map((p) => p.e.from)).size < 2 || list.some((p) => p.bus || p.gap < busGap)) continue;
     const members = list.filter((p) => !split.has(p.e));
-    if (members.length < 2 || new Set(members.map((p) => p.e.from)).size < 2) continue;
+    if (members.length < 2 || new Set(members.map((p) => p.e.from)).size < 2 || list.some((p) => p.bus) || members.some((p) => p.gap < busGap)) continue;
     for (const p of members) p.bus = 'in';
   }
 
@@ -321,7 +320,7 @@ function planRoutes(
       if (Math.hypot(pts[3]!.x - pts[2]!.x, pts[3]!.y - pts[2]!.y) < MIN_STUB - 0.01) return false;
       for (const [id, box] of rects) {
         if (skip.has(id)) continue;
-        for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!)) return false;
+        for (let k = 1; k < pts.length; k++) if (segmentHits(box, pts[k - 1]!, pts[k]!, split.has(p.e) ? SPLIT_CLEARANCE : 0)) return false;
       }
       const others = [...fixed, ...plans.filter((o) => !run.includes(o)).map((o) => o.e.points)];
       for (const f of others) {
@@ -386,23 +385,41 @@ function stagger(routed: Plan[], valid: (run: readonly Plan[]) => boolean): void
         return t;
       });
       if (ends.length < 2) return;
+      const shift = (r: Run, d: number): void => {
+        for (const p of r.plans) {
+          const k = across(p.sa) ? 'y' : 'x';
+          p.e.points[1]![k] += d;
+          p.e.points[2]![k] += d;
+        }
+      };
+      const offset = new Map<Run, number>();
+      const reverted: Run[] = [];
       cluster.forEach((r, i) => {
         const d = Math.round((track[i]! - (ends.length - 1) / 2) * STAGGER);
+        offset.set(r, 0);
         if (d === 0) return;
-        for (const p of r.plans) {
-          const pts = p.e.points;
-          const k = across(p.sa) ? 'y' : 'x';
-          pts[1]![k] += d;
-          pts[2]![k] += d;
-        }
-        if (!valid(r.plans)) {
-          for (const p of r.plans) {
-            const k = across(p.sa) ? 'y' : 'x';
-            p.e.points[1]![k] -= d;
-            p.e.points[2]![k] -= d;
-          }
+        shift(r, d);
+        if (valid(r.plans)) offset.set(r, d);
+        else {
+          shift(r, -d);
+          reverted.push(r);
         }
       });
+      // A reverted run sits at its own level again, which may be exactly where another run of the cluster
+      // is: look for a track nobody uses (nearest to the level first) before leaving it there.
+      for (const r of reverted) {
+        const taken = (d: number): boolean => cluster.some((o) => o !== r && offset.get(o) === d);
+        if (!taken(0)) continue;
+        const tries = [1, -1, 2, -2].map((n) => n * STAGGER).filter((d) => !taken(d));
+        for (const d of tries) {
+          shift(r, d);
+          if (valid(r.plans)) {
+            offset.set(r, d);
+            break;
+          }
+          shift(r, -d);
+        }
+      }
     };
     for (const r of list) {
       if (r.lo > reach + 0.5) {
