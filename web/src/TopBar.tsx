@@ -22,6 +22,8 @@ type Props = {
   /** The status is a problem: keep it visible on narrow screens. */
   statusAlert?: boolean;
   view: View;
+  /** Below md: one pane at a time, so no 둘 다; 버전 기록 lives in the ⋯ menu. */
+  narrow?: boolean;
   onView: (v: View) => void;
   onTitle: (t: string) => void;
   /** Set on narrow screens, where the sidebar is collapsed behind this toggle. */
@@ -34,7 +36,7 @@ type Props = {
   onCommands?: () => void;
 };
 
-export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
+export function TopBar({ title, hasFile, status, statusAlert, view, narrow, onView, onTitle, onToggleNav, exportMenu, onHistory, onCommands }: Props) {
   return (
     <header className="flex h-(--h-bar) shrink-0 items-center gap-2 border-b bg-sidebar px-2 md:gap-3 md:px-3">
       {onToggleNav && (
@@ -64,7 +66,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
         <span className="hidden truncate md:inline">{status}</span>
       </span>
       <Segmented className="shrink-0 md:mx-auto" aria-label="보기 방식">
-        {VIEWS.map((v) => (
+        {VIEWS.filter((v) => !narrow || v.id !== 'both').map((v) => (
           <SegmentedItem key={v.id} active={view === v.id} onClick={() => onView(v.id)} className={cn('px-2 md:px-3', FOCUS_RING)}>
             {v.label}
           </SegmentedItem>
@@ -77,7 +79,7 @@ export function TopBar({ title, hasFile, status, statusAlert, view, onView, onTi
         </Button>
       )}
       {onHistory && (
-        <Button variant="outline" size="sm" onClick={onHistory} disabled={!hasFile} aria-haspopup="dialog" className={cn('shrink-0', FOCUS_RING)}>
+        <Button variant="outline" size="sm" onClick={onHistory} disabled={!hasFile} aria-haspopup="dialog" className={cn('hidden shrink-0 md:inline-flex', FOCUS_RING)}>
           <Clock className="hidden md:block" />
           버전 기록
         </Button>
