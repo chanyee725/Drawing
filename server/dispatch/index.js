@@ -91,7 +91,12 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
     return next;
   }
 
-  const tilde = p => (process.env.HOME ? p.replace(process.env.HOME, "~") : p);
+  // Only a whole leading HOME becomes "~" (project.js `home()` undoes exactly that). A trailing slash on
+  // HOME, or HOME as a mere prefix of another folder name, must not change the path.
+  const tilde = p => {
+    const h = (process.env.HOME || "").replace(/\/+$/, "");
+    return h && (p === h || p.startsWith(h + "/")) ? "~" + p.slice(h.length) : p;
+  };
   async function snapshot() {
     return {
       project: { name: path.basename(root), path: tilde(root), branch: await currentBranch(root) },

@@ -14,7 +14,7 @@ export const OFF_MESSAGES = {
   'other-drawing': '이 프로젝트를 다른 Drawing 서버가 쓰고 있어서 실행 기능을 껐어요. 그 서버를 멈추고 다시 시작해 주세요.',
 };
 
-const home = (p) => (process.env.HOME && typeof p === 'string' ? p.replace(/^~(?=$|\/)/, process.env.HOME) : p);
+const home = (p) => (process.env.HOME && typeof p === 'string' ? p.replace(/^~(?=$|\/)/, process.env.HOME.replace(/\/+$/, '')) : p);
 
 /**
  * { root } when workspaceDir sits inside (or is) a git work tree's top level, else { reason }.
