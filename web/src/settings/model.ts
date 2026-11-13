@@ -117,9 +117,10 @@ const canFocus = (el: unknown): el is Focusable =>
  * the opener has already closed, so focus would drop to <body>. Then focus the opener if it is still on screen,
  * else the visible sidebar (menu) button (#230 review). Leaves focus alone when it already landed somewhere.
  */
-export function focusAfterClose(opener: unknown, root: FocusRoot = document): void {
+export function focusAfterClose(opener: unknown, dialog: { contains: (n: never) => boolean } | null, root: FocusRoot = document): void {
   const now = root.activeElement;
-  if (now && now !== root.body) return;
+  // At the close event a focus left inside the closed dialog has not moved on yet: that counts as lost too.
+  if (now && now !== root.body && !dialog?.contains(now as never)) return;
   const target = canFocus(opener) ? opener : Array.from(root.querySelectorAll('[data-slot="sidebar-trigger"]')).find(canFocus);
   target?.focus();
 }

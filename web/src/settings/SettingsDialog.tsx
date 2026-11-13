@@ -68,7 +68,7 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
       aria-labelledby={titleId}
       data-testid="settings-dialog"
       onClose={() => {
-        focusAfterClose(opener.current);
+        focusAfterClose(opener.current, ref.current);
         onClose();
       }}
       className="settings-dialog m-auto h-[min(560px,calc(100dvh-2rem))] w-[min(760px,calc(100vw-2rem))] max-w-none overflow-hidden rounded-lg border bg-background p-0 text-foreground shadow-md max-md:h-[calc(100dvh-1rem)] max-md:w-[calc(100vw-1rem)]"

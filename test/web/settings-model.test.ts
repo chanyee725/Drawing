@@ -188,18 +188,26 @@ test('focus after settings close: keeps a real focus, else the opener, else the 
 
   const elsewhere = mk('elsewhere');
   const opener = mk('opener');
-  focusAfterClose(opener, root(elsewhere));
+  focusAfterClose(opener, null, root(elsewhere));
   assert.equal(opener.focused, 0, 'focus already landed somewhere');
 
-  focusAfterClose(opener, root(body));
+  focusAfterClose(opener, null, root(body));
   assert.equal(opener.focused, 1);
 
   const gone = mk('row in the closed drawer', { connected: false });
-  focusAfterClose(gone, root(body));
+  focusAfterClose(gone, null, root(body));
   assert.equal(gone.focused, 0);
   assert.equal(hidden.focused, 0);
   assert.equal(trigger.focused, 1);
 
-  focusAfterClose(null, root(null));
+  focusAfterClose(null, null, root(null));
   assert.equal(trigger.focused, 2);
+
+  // Focus still sits on a button inside the closed dialog: treated as lost.
+  const inside = mk('close button');
+  const dialog = { contains: (n: unknown) => n === inside };
+  focusAfterClose(gone, dialog, root(inside));
+  assert.equal(trigger.focused, 3);
+  focusAfterClose(opener, dialog, root(elsewhere));
+  assert.equal(opener.focused, 1, 'focus outside the dialog is kept');
 });
