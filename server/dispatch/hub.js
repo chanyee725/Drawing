@@ -122,11 +122,13 @@ export class Hub extends EventEmitter {
     // restart starts every session with an empty transcript. Resuming uses the CLI's own session id.
 
     // Sessions from a previous run have no process. Ones cut off mid-turn are resumed by resumeInterrupted().
+    let colored = false;
     for (const s of Object.values(store.data.sessions)) {
       if (s.status === "running" || s.status === "waiting" || s.status === "starting") { s.status = "idle"; s.interrupted = true; }
-      // Sessions from before cursor colours (E56) get theirs now.
-      if (!AGENT_COLORS.includes(s.color)) s.color = pickColor(this.sessions.map(x => x.color));
+      // Sessions from before cursor colours (E56) get theirs now, saved so a restart does not pick another.
+      if (!AGENT_COLORS.includes(s.color)) { s.color = pickColor(this.sessions.map(x => x.color)); colored = true; }
     }
+    if (colored) store.save();
   }
 
   get port() { return this.portOf(); }

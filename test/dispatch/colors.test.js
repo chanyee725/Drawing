@@ -88,3 +88,32 @@ test("a session gets its colour when it is created, keeps it, and it is saved as
   assert.equal(hub.publicSession(s).color, colors[0]);
   assert.equal(diskView(store.data).sessions[s.id].color, colors[0]);
 });
+
+test("a colour given to an older session on load is saved, so a restart keeps it", async () => {
+  const root = mkdtempSync(path.join(tmpdir(), "drawing-colors-"));
+  dirs.push(root);
+  const store = new Store(root);
+  await store.load();
+  store.data.sessions.old = { id: "old", n: 1, name: "Juno", role: "impl", status: "idle", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  let saves = 0;
+  const save = store.save.bind(store);
+  store.save = () => { saves++; return save(); };
+  const make = (st) => new Hub({ root, store: st, models: MODELS, roles: ROLES, port: 0, limits: new SharedLimits(path.join(root, "limits.json")),
+    spawnCli: () => { throw Object.assign(new Error("no CLI in this test"), { code: "ECLIDENIED" }); } });
+  const hub = make(store);
+  after(() => hub.stopAll());
+  const color = store.data.sessions.old.color;
+  assert.ok(AGENT_COLORS.includes(color));
+  assert.equal(saves, 1);
+  await store.flush();
+  // A restart reads the same colour back and does not save again.
+  const again = new Store(root);
+  await again.load();
+  assert.equal(again.data.sessions.old.color, color);
+  let saves2 = 0;
+  again.save = () => { saves2++; };
+  const hub2 = make(again);
+  after(() => hub2.stopAll());
+  assert.equal(again.data.sessions.old.color, color);
+  assert.equal(saves2, 0);
+});
