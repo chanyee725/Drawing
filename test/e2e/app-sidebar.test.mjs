@@ -111,6 +111,14 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   await page.locator('.ProseMirror').click();
   await page.keyboard.press('a');
   assert.equal(await frame(), 'attached');
+  // ...and to the canvas while it has focus: R picks the rectangle tool, not 최근.
+  const cbox = await page.locator('[data-canvas]').boundingBox();
+  await page.mouse.click(cbox.x + cbox.width - 80, cbox.y + cbox.height - 80);
+  await page.keyboard.press('r');
+  assert.equal(await frame(), 'attached');
+  assert.ok(await page.locator('input[data-testid="toolbar-rectangle"]').isChecked(), 'R picked the rectangle tool');
+  assert.notEqual(await nav.getByRole('button', { name: /최근/ }).getAttribute('aria-current'), 'page');
+  await page.keyboard.press('Escape');
   await shot(page, 'light-doc-1440');
   await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('a');

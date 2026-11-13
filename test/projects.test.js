@@ -146,3 +146,110 @@ test('projects: created follows the file through move, delete and restore', asyn
     assert.deepEqual((await call('GET', '/api/history?path=Q%2Fmoved')).body.versions, []);
   });
 });
+
+test('move with subdocs: a document and its sub-documents folder move together', async () => {
+  await withApp(async ({ ws, outside, call }) => {
+    for (const p of ['A/로그인', 'A/로그인/토큰', 'A/로그인/토큰/만료', 'A/solo', 'B/keep', 'B/clash', 'B/clash/x']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    const docsOf = async (name) => (await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === name)?.docs ?? [];
+
+    let r = await call('POST', '/api/move', { from: 'A/로그인.dpx.json', to: 'B/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 200);
+    assert.equal(r.body.path, 'B/로그인.dpx.json');
+    assert.deepEqual(shape(await docsOf('B')).find((d) => d[1] === '로그인'), ['doc', '로그인', 2, [['doc', '토큰', 1, [['doc', '만료', 0, []]]]]]);
+    assert.deepEqual(shape(await docsOf('A')), [['doc', 'solo', 0, []]]);
+
+    // A document without sub-documents moves alone.
+    assert.equal((await call('POST', '/api/move', { from: 'A/solo.dpx.json', to: 'B/solo.dpx.json', type: 'file', withSubdocs: true })).status, 200);
+
+    // Into its own sub-documents: refused, nothing moves.
+    r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to: 'B/로그인/토큰/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 400);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === '로그인')[2], 2);
+
+    // The sub-documents folder name is taken at the target: refused before the file moves.
+    await mkdir(join(ws, 'A', 'clash'));
+    r = await call('POST', '/api/move', { from: 'B/clash.dpx.json', to: 'A/clash.dpx.json', type: 'file', withSubdocs: true });
+    assert.equal(r.status, 409);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === 'clash')[2], 1);
+
+    // Outside the workspace: refused.
+    for (const to of ['../escape.dpx.json', `${outside}/x.dpx.json`]) {
+      r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to, type: 'file', withSubdocs: true });
+      assert.equal(r.status, 400, to);
+    }
+    await symlink(outside, join(ws, 'link'));
+    r = await call('POST', '/api/move', { from: 'B/로그인.dpx.json', to: 'link/로그인.dpx.json', type: 'file', withSubdocs: true });
+    assert.ok(r.status >= 400, `symlink target status ${r.status}`);
+    assert.equal(shape(await docsOf('B')).find((d) => d[1] === '로그인')[2], 2);
+
+    // withSubdocs only goes with a file move.
+    assert.equal((await call('POST', '/api/move', { from: 'B', to: 'C', type: 'folder', withSubdocs: true })).status, 400);
+  });
+});
+
+test('delete with subdocs: a document and its sub-documents folder go to the trash together', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/plan', 'A/plan/step', 'A/plan/step/deep', 'A/solo', 'A/keep']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await mkdir(join(ws, 'A', 'empty'));
+    assert.equal((await call('POST', '/api/file', { path: 'A/empty' })).status, 201);
+    const docsOf = async () => shape((await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === 'A')?.docs ?? []);
+
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fplan.dpx.json&withSubdocs=1')).status, 200);
+    // Without withSubdocs only the file goes (the old behaviour): A/solo has no folder anyway.
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fsolo.dpx.json')).status, 200);
+    // An empty sub-documents folder goes too, so it does not stay behind as a group.
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fempty.dpx.json&withSubdocs=1')).status, 200);
+    assert.deepEqual(await docsOf(), [['doc', 'keep', 0, []]]);
+    const trashed = (await call('GET', '/api/trash')).body.items.map((i) => i.path).sort();
+    assert.deepEqual(trashed, ['A/empty.dpx.json', 'A/plan.dpx.json', 'A/plan/step.dpx.json', 'A/plan/step/deep.dpx.json', 'A/solo.dpx.json']);
+    // Each one restores on its own.
+    const step = (await call('GET', '/api/trash')).body.items.find((i) => i.path === 'A/plan/step.dpx.json');
+    assert.equal((await call('POST', '/api/trash/restore', { id: step.id })).status, 200);
+    assert.equal((await call('GET', '/api/file?path=A%2Fplan%2Fstep.dpx.json')).status, 200);
+  });
+});
+
+test('delete with subdocs: files other than documents under X/ are never lost', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/plan', 'A/plan/step', 'A/plan/sub/deep', 'A/plan/only/doc']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await writeFile(join(ws, 'A', 'plan', 'notes.md'), 'keep me\n');
+    await writeFile(join(ws, 'A', 'plan', 'sub', '.hidden'), 'keep me too\n');
+
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fplan.dpx.json&withSubdocs=1')).status, 200);
+    const trashed = (await call('GET', '/api/trash')).body.items.map((i) => i.path).sort();
+    assert.deepEqual(trashed, ['A/plan.dpx.json', 'A/plan/only/doc.dpx.json', 'A/plan/step.dpx.json', 'A/plan/sub/deep.dpx.json']);
+    // The documents are gone; the other files stay with the folders that hold them; emptied folders go.
+    const { readdir: ls, readFile: read } = await import('node:fs/promises');
+    assert.equal(await read(join(ws, 'A', 'plan', 'notes.md'), 'utf8'), 'keep me\n');
+    assert.equal(await read(join(ws, 'A', 'plan', 'sub', '.hidden'), 'utf8'), 'keep me too\n');
+    assert.deepEqual((await ls(join(ws, 'A', 'plan'))).sort(), ['notes.md', 'sub']);
+    assert.deepEqual(await ls(join(ws, 'A', 'plan', 'sub')), ['.hidden']);
+  });
+});
+
+test('rename with subdocs: one request, no orphaned sub-documents, no unrelated group taken over', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/login', 'A/login/token', 'A/solo', 'A/new/memo', 'A/other']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await mkdir(join(ws, 'A', 'empty'));
+    assert.equal((await call('POST', '/api/file', { path: 'A/empty' })).status, 201);
+    const docsOf = async () => shape((await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === 'A')?.docs ?? []);
+    const before = await docsOf();
+    const rename = (from, to) => call('POST', '/api/move', { from: `A/${from}.dpx.json`, to: `A/${to}.dpx.json`, type: 'file', withSubdocs: true });
+
+    // login (with sub-documents) onto the name of the unrelated group A/new: refused, nothing moves or is orphaned.
+    assert.equal((await rename('login', 'new')).status, 409);
+    // solo (no sub-documents) onto the same name: refused too, so it never takes the group over as its sub-documents.
+    assert.equal((await rename('solo', 'new')).status, 409);
+    assert.deepEqual(await docsOf(), before);
+
+    // A free name: the document and its sub-documents arrive together; an empty X/ is renamed along.
+    assert.equal((await rename('login', 'signin')).status, 200);
+    assert.equal((await rename('empty', 'vacant')).status, 200);
+    const after = await docsOf();
+    assert.deepEqual(after.find((d) => d[1] === 'signin'), ['doc', 'signin', 1, [['doc', 'token', 0, []]]]);
+    assert.ok(!after.some((d) => d[1] === 'login' || d[1] === 'empty'), 'nothing left under the old names');
+    assert.deepEqual(after.find((d) => d[1] === 'new'), ['group', 'new', 1, [['doc', 'memo', 0, []]]], 'the unrelated group is untouched');
+    const { stat: st } = await import('node:fs/promises');
+    assert.ok((await st(join(ws, 'A', 'vacant'))).isDirectory());
+  });
+});

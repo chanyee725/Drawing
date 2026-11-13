@@ -1,5 +1,6 @@
-// Colour resolution. Our own palette (not Eraser's values): named colours from the DSL map to a
-// stroke/fill pair per theme; hex colours are mixed with the theme background.
+// Colour resolution. Light values follow the measured diagram style (docs/research/eraser/09-examples-style.md
+// §2.1–§2.2); dark values are our own proposal (§2.3): the light "pale fill + strong border" pair turned around,
+// drawn directly in the dark palette instead of inverting the light picture.
 
 import type { Paint } from './scene.ts';
 
@@ -9,62 +10,79 @@ export interface ThemeColors {
   background: string;
   text: string;
   muted: string;
-  /** Neutral node stroke and fill. */
+  /** Neutral node border (`styleMode plain`) and the border of a node that casts a shadow. */
   stroke: string;
+  strongStroke: string;
   fill: string;
-  /** Group box fill when uncoloured. */
+  /** Neutral group box: translucent fill, hairline border, title colour. */
   groupFill: string;
+  groupStroke: string;
+  groupText: string;
+  /** Connector colour; labels take the line colour. */
   edge: string;
+  /** Lighter line (sequence lifelines, dividers). */
+  edgeSoft: string;
+  /** Solid offset shadow, no blur. */
   shadow: string;
-  plate: string;
-  /** Hairline around an edge label's pill. */
-  plateStroke: string;
 }
 
 export const THEMES: Record<Theme, ThemeColors> = {
   light: {
     background: '#ffffff',
-    text: '#1f2329',
+    text: '#242424',
     muted: '#6b7280',
-    stroke: '#8a919c',
+    stroke: '#d0d5dd',
+    strongStroke: '#242424',
     fill: '#ffffff',
-    groupFill: '#f6f7f9',
-    edge: '#7b828d',
-    shadow: 'rgba(15,23,42,0.10)',
-    plate: '#ffffff',
-    plateStroke: '#e3e6ea',
+    groupFill: 'rgba(242,244,247,0.5)',
+    groupStroke: '#eaecf0',
+    groupText: '#475467',
+    edge: '#667085',
+    edgeSoft: '#98a2b3',
+    shadow: '#e8e8e8',
   },
   dark: {
     background: '#17191d',
     text: '#e7e9ec',
-    muted: '#9aa1ab',
-    stroke: '#6d7480',
-    fill: '#23262c',
-    groupFill: '#1d2025',
-    edge: '#9198a3',
-    shadow: 'rgba(0,0,0,0.45)',
-    plate: '#17191d',
-    plateStroke: '#2e3239',
+    muted: '#98a2b3',
+    stroke: '#3a3f47',
+    strongStroke: '#c9cdd3',
+    fill: '#1f2228',
+    groupFill: 'rgba(255,255,255,0.04)',
+    groupStroke: '#2e3239',
+    groupText: '#a7afbb',
+    edge: '#8d96a5',
+    edgeSoft: '#5b6370',
+    shadow: '#0b0c0e',
   },
 };
 
-/** Base hue per DSL colour name: [light stroke, dark stroke]. */
-const NAMED: Record<string, [string, string]> = {
-  blue: ['#3d7be0', '#6fa0f0'],
-  green: ['#2f9e5b', '#5cc486'],
-  red: ['#d9434b', '#ef7a80'],
-  orange: ['#e2731f', '#f39a55'],
-  yellow: ['#c9a00c', '#e5c44a'],
-  purple: ['#8a52d6', '#ad86ec'],
-  pink: ['#d4478f', '#ec7fb5'],
-  teal: ['#1f9a9a', '#4fc4c4'],
-  cyan: ['#1b98c4', '#58bfe3'],
-  gray: ['#7b828d', '#9aa1ab'],
-  grey: ['#7b828d', '#9aa1ab'],
-  black: ['#2a2e35', '#c9cdd3'],
-  white: ['#a3a9b2', '#e7e9ec'],
-  brown: ['#8d6342', '#b78d6a'],
+/** Per DSL colour name: light [fill, border, strong text], dark [border, strong text]. Dark fills mix the border in. */
+interface Named {
+  light: [string, string, string];
+  dark: [string, string];
+}
+
+const NAMED: Record<string, Named> = {
+  blue: { light: ['#eff8ff', '#2e90fa', '#1849a9'], dark: ['#53b1fd', '#84caff'] },
+  indigo: { light: ['#eef4ff', '#444ce7', '#3538cd'], dark: ['#8098f9', '#a4bcfd'] },
+  green: { light: ['#ecfdf3', '#079455', '#085d3a'], dark: ['#47cd89', '#75e0a7'] },
+  red: { light: ['#fef3f2', '#d92d20', '#b42318'], dark: ['#f97066', '#fda29b'] },
+  orange: { light: ['#fffaeb', '#dc6803', '#b54708'], dark: ['#fdb022', '#fec84b'] },
+  yellow: { light: ['#fffaeb', '#fdb022', '#b54708'], dark: ['#fec84b', '#fedf89'] },
+  purple: { light: ['#f4f3ff', '#6938ef', '#5925dc'], dark: ['#9b8afb', '#bdb4fe'] },
+  pink: { light: ['#fdf2fa', '#dd2590', '#c11574'], dark: ['#f670c7', '#faa7e0'] },
+  teal: { light: ['#f0fdf9', '#15b79e', '#107569'], dark: ['#2ed3b7', '#5fe9d0'] },
+  cyan: { light: ['#ecfdff', '#06aed4', '#0e7090'], dark: ['#22ccee', '#67e3f9'] },
+  gray: { light: ['#f2f4f7', '#98a2b3', '#475467'], dark: ['#98a2b3', '#d0d5dd'] },
+  grey: { light: ['#f2f4f7', '#98a2b3', '#475467'], dark: ['#98a2b3', '#d0d5dd'] },
+  black: { light: ['#f2f4f7', '#242424', '#101828'], dark: ['#c9cdd3', '#e7e9ec'] },
+  white: { light: ['#ffffff', '#d0d5dd', '#242424'], dark: ['#e7e9ec', '#f2f4f7'] },
+  brown: { light: ['#faf5f0', '#8d6342', '#6f4c32'], dark: ['#c09a78', '#dcc2aa'] },
 };
+
+/** Dark fills: the border colour mixed 14% over the background (§2.3). */
+const DARK_FILL = 0.14;
 
 /** Palette color names, for editor completion. */
 export const NAMED_COLOR_NAMES: readonly string[] = Object.keys(NAMED);
@@ -101,13 +119,32 @@ function luminance(hex: string): number {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
+const namedOf = (color: string): Named | undefined => (Object.hasOwn(NAMED, color) ? NAMED[color] : undefined);
+
 export function strokeOf(color: string | undefined, theme: Theme): string {
   const t = THEMES[theme];
   if (!color) return t.stroke;
-  const named = (Object.hasOwn(NAMED, color) ? NAMED[color] : undefined);
-  if (named) return theme === 'light' ? named[0] : named[1];
+  const named = namedOf(color);
+  if (named) return theme === 'light' ? named.light[1] : named.dark[0];
   return color;
 }
+
+/** Strong text in a colour (group titles): the palette's dark shade, or the colour itself for a hex. */
+export function strongTextOf(color: string | undefined, theme: Theme): string {
+  if (!color) return THEMES[theme].groupText;
+  const named = namedOf(color);
+  if (named) return theme === 'light' ? named.light[2] : named.dark[1];
+  return color;
+}
+
+/** Pastel fill of a colour: the palette's pale fill (light) or the border mixed over the background. */
+function pastelOf(color: string, theme: Theme): string {
+  const named = namedOf(color);
+  if (named && theme === 'light') return named.light[0];
+  return mix(strokeOf(color, theme), THEMES[theme].background, theme === 'light' ? 0.1 : DARK_FILL);
+}
+
+const rgba = (hex: string, a: number): string => `rgba(${hexToRgb(hex).join(',')},${a})`;
 
 export interface ResolvedPaint {
   fill: string;
@@ -115,20 +152,22 @@ export interface ResolvedPaint {
   text: string;
 }
 
-/** Fill, stroke and text colour for a box. `soft` boxes (groups, frames) get a lighter tint. */
-export function resolvePaint(paint: Paint, theme: Theme, soft = false): ResolvedPaint {
+/**
+ * Fill, stroke and text colour for a box. `soft` boxes (groups, frames) get a translucent tint and a hairline
+ * border; `shadow` boxes without a colour get the strong border that goes with the offset shadow.
+ */
+export function resolvePaint(paint: Paint, theme: Theme, soft = false, shadow = false): ResolvedPaint {
   const t = THEMES[theme];
-  const stroke = strokeOf(paint.color, theme);
+  const stroke = paint.color ? strokeOf(paint.color, theme) : soft ? t.groupStroke : shadow ? t.strongStroke : t.stroke;
   if (paint.mode === 'outline') return { fill: 'none', stroke, text: t.text };
   if (!paint.color) {
-    if (paint.mode === 'bold') return { fill: t.stroke, stroke: t.stroke, text: contrastText(t.stroke) };
+    if (paint.mode === 'bold' && !soft) return { fill: t.groupText, stroke: t.groupText, text: contrastText(t.groupText) };
     return { fill: soft ? t.groupFill : t.fill, stroke, text: t.text };
   }
   if (paint.mode === 'bold' && !soft) return { fill: stroke, stroke, text: contrastText(stroke) };
-  const amount = theme === 'light' ? (soft ? 0.07 : 0.16) : soft ? 0.12 : 0.24;
-  return { fill: mix(stroke, t.background, paint.mode === 'bold' ? amount * 2 : amount), stroke, text: t.text };
+  if (soft) return { fill: rgba(stroke, theme === 'light' ? 0.08 : 0.1), stroke, text: t.text };
+  return { fill: paint.mode === 'bold' ? mix(stroke, t.background, 0.3) : pastelOf(paint.color, theme), stroke, text: t.text };
 }
-
 /** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 function contrastText(fill: string): string {
   const l = luminance(fill);
