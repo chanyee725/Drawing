@@ -251,3 +251,32 @@ test('the only path both modules answer is none: Dispatch paths do not shadow dr
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('pr-tracking route: default on, toggles and persists, header and body checks, broken settings 409', async () => {
+  const { root, ws } = scratchRepo();
+  const { deps } = fakeDeps(root);
+  const { base, stop } = await start(ws, deps);
+  try {
+    const url = `${base}/api/workspace/pr-tracking`;
+    assert.deepEqual(await (await fetch(url)).json(), { on: true });
+    const off = await fetch(url, { method: 'POST', headers: W, body: JSON.stringify({ on: false }) });
+    assert.equal(off.status, 200);
+    assert.deepEqual(await off.json(), { on: false });
+    assert.deepEqual(await (await fetch(url)).json(), { on: false });
+    assert.equal((await fetch(url, { method: 'POST', headers: W, body: JSON.stringify({ on: true }) })).status, 200);
+    assert.deepEqual(await (await fetch(url)).json(), { on: true });
+    const noHeader = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ on: false }) });
+    assert.equal(noHeader.status, 403);
+    assert.deepEqual(await (await fetch(url)).json(), { on: true });
+    for (const bad of [{}, { on: 'no' }, { on: 1 }, null]) {
+      assert.equal((await fetch(url, { method: 'POST', headers: W, body: JSON.stringify(bad) })).status, 400);
+    }
+    writeFileSync(join(ws, '.drawing', 'settings.json'), '{ not json');
+    const broken = await fetch(url, { method: 'POST', headers: W, body: JSON.stringify({ on: false }) });
+    assert.equal(broken.status, 409);
+    assert.match((await broken.json()).error, /읽을 수 없어요/);
+  } finally {
+    await stop();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
