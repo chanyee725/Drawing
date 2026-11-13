@@ -348,7 +348,7 @@ test('sequence: message labels sit on their line and cut it; no bold text (E60)'
   assert.ok(label!.x > Math.min(line!.points[0]!.x, line!.points[1]!.x) && label!.x < Math.max(line!.points[0]!.x, line!.points[1]!.x));
 });
 
-test('sequence dark: flat grey participant boxes without a shadow, bright message labels; light unchanged (E62)', async () => {
+test('sequence dark: flat background-filled participant boxes without a shadow, bright message labels; light unchanged (E62)', async () => {
   const { scene } = await renderDiagram(fixture('sequence-login'));
   const heads = (svg: string): string[] => svg.match(/<g data-role="column"[^>]*>.*?<\/g>/g) ?? [];
   const dark = sceneToSvg(scene, { theme: 'dark' });
@@ -356,7 +356,7 @@ test('sequence dark: flat grey participant boxes without a shadow, bright messag
   assert.ok(heads(dark).length > 0);
   for (const g of heads(dark)) {
     assert.equal((g.match(/<(rect|path|ellipse|polygon)/g) ?? []).length, 1, 'one shape: no offset shadow copy');
-    assert.match(g, /fill="#2b2b2b" stroke="#6b6b6b"/);
+    assert.match(g, /fill="#17191d" stroke="#cfcecc"/);
   }
   for (const g of heads(light)) {
     assert.equal((g.match(/<rect/g) ?? []).length, 2, 'light keeps the offset shadow');
@@ -370,8 +370,8 @@ test('sequence dark: flat grey participant boxes without a shadow, bright messag
   const all = heads(tinted.svg);
   assert.equal(all.length, 4);
   assert.ok(all.every((g) => (g.match(/<rect/g) ?? []).length === 1));
-  assert.equal(all.filter((g) => /stroke="#53b1fd"/.test(g) && !/#2b2b2b/.test(g)).length, 2);
-  assert.equal(all.filter((g) => /fill="#2b2b2b" stroke="#6b6b6b"/.test(g)).length, 2);
+  assert.equal(all.filter((g) => /stroke="#53b1fd"/.test(g) && !/#cfcecc/.test(g)).length, 2);
+  assert.equal(all.filter((g) => /fill="#17191d" stroke="#cfcecc"/.test(g)).length, 2);
 });
 
 test('erd: table titles, key fields and badges are weight 400 (E60)', async () => {

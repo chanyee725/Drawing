@@ -116,14 +116,14 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
 
 function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const soft = b.role === 'group' || b.role === 'frame' || b.role === 'legend';
-  // Sequence participant boxes are flat where the theme says so (dark, §2.4): no shadow, own neutral colours.
+  // Sequence participant boxes are flat where the theme says so (dark, §2.4): no shadow, background fill.
   const flat = b.role === 'column' ? t.sequence : undefined;
   const shadow = b.shadow && !flat;
   const p = resolvePaint(b.paint, theme, soft, shadow);
   let fill = p.fill;
   let stroke = p.stroke;
   if (flat && !b.paint.color && b.paint.mode === 'pastel') {
-    fill = flat.columnFill;
+    fill = t.background;
     stroke = flat.columnStroke;
   }
   if (b.role === 'frame') fill = 'none';
