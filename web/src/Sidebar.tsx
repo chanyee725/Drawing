@@ -1,9 +1,9 @@
 // App sidebar, layout B (design doc 6 §2.1, §3.1): workspace name with search and new-file icons, the views
-// (모든 파일 A, 최근 R, 보관함 B), projects with their nested sub-documents, a one-line model connection summary
-// and settings. Built from the shadcn Sidebar (components/ui/sidebar.tsx).
+// (모든 파일 A, 최근 R, 보관함 B), projects with their nested sub-documents, one row per model with its connection
+// status (SidebarModels.tsx) and settings. Built from the shadcn Sidebar (components/ui/sidebar.tsx).
 import { useEffect, useRef, useState } from 'react';
 import { Archive, ChevronRight, Clock, File, Files, FolderClosed, FolderInput, Moon, MoreHorizontal, Pencil, Plus, Search, Settings, SquarePen, Sun, Trash2 } from 'lucide-react';
-import { api, type DispatchStatus, type DocNode, type Project, type ProjectsView, type ProviderLimits, type ProviderState } from './api';
+import type { DocNode, Project, ProjectsView } from './api';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Kbd } from './components/ui/kbd';
 import {
@@ -23,7 +23,8 @@ import {
 } from './components/ui/sidebar';
 import { FOCUS_RING } from './lib/focus';
 import { cn } from './lib/utils';
-import { openPathsFor, percent, WARN_PERCENT, type Section } from './projectNav';
+import { openPathsFor, type Section } from './projectNav';
+import { SidebarModels } from './SidebarModels';
 import { moveDestinations, moveItemOf, moveTarget, type MoveDestination, type MoveItem } from './sidebarMove';
 
 export const displayName = (n: { name: string; title?: string }) => n.title || n.name.replace(/\.dpx\.json$/, '');
@@ -222,78 +223,6 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
   );
 }
 
-const PROVIDERS = [
-  ['claude', 'Claude'],
-  ['openai', 'Codex'],
-  ['gemini', 'Gemini'],
-] as const;
-
-type ModelLine = { id: string; name: string; connected: boolean; pct: number | null; reached: boolean };
-
-/** Connection and 5-hour usage per provider. GET only: nothing here starts or logs in a CLI. */
-function useModels(): { status: DispatchStatus | null; lines: ModelLine[] } {
-  const [status, setStatus] = useState<DispatchStatus | null>(null);
-  const [providers, setProviders] = useState<Record<string, ProviderState>>({});
-  const [limits, setLimits] = useState<ProviderLimits>({});
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const s = await api.dispatch();
-        if (!alive) return;
-        setStatus(s);
-        if (!s.enabled) return;
-        const [pv, lim] = await Promise.all([api.providers(), api.limits().catch(() => ({}))]);
-        if (!alive) return;
-        setProviders(pv);
-        setLimits(lim);
-      } catch {
-        if (alive) setStatus({ enabled: false });
-      }
-    };
-    void load();
-    const t = setInterval(load, 60_000);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, []);
-  const lines = PROVIDERS.map(([id, name]) => {
-    const connected = !!providers[id]?.connected;
-    const windows = id === 'claude' ? limits.claude?.windows : id === 'openai' ? limits.openai?.windows : undefined;
-    return { id, name, connected, pct: connected ? percent(windows?.[0]?.used) : null, reached: id === 'gemini' && connected && !!limits.gemini?.reached };
-  });
-  return { status, lines };
-}
-
-function ModelStrip() {
-  const { status, lines } = useModels();
-  if (!status) return null;
-  if (!status.enabled) {
-    return (
-      <p className="flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground" title={status.message}>
-        <i aria-hidden className="size-2 shrink-0 rounded-full bg-idle" />
-        모델 연결 꺼짐
-      </p>
-    );
-  }
-  const text = (m: ModelLine) => (!m.connected ? '연결 안 됨' : m.reached ? '한도 도달' : m.pct != null ? `5시간 한도 ${m.pct}% 사용` : '연결됨');
-  return (
-    <ul aria-label="모델 연결" className="flex flex-wrap items-center gap-x-3 gap-y-1 px-2 py-1.5 text-xs text-muted-foreground">
-      {lines.map((m) => {
-        const warn = m.reached || (m.pct != null && m.pct > WARN_PERCENT);
-        return (
-          <li key={m.id} className="inline-flex items-center gap-1.5" aria-label={`${m.name} ${text(m)}`} title={`${m.name}: ${text(m)}`}>
-            <i aria-hidden className={cn('size-2 rounded-full', !m.connected ? 'bg-idle' : warn ? 'bg-warn' : 'bg-ok')} />
-            {m.name}
-            {m.connected && m.pct != null && <span className="tabular-nums">{m.pct}%</span>}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
 function ProjectRow({ pr, open, toggle, p, move }: Omit<RowsProps, 'depth'> & { pr: Project }) {
   const expanded = open.has(pr.path);
   const here = p.section.kind === 'project' && p.section.path === pr.path;
@@ -419,7 +348,7 @@ export function Sidebar(p: Props) {
         {said}
       </p>
       <SidebarFooter>
-        <ModelStrip />
+        <SidebarModels />
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu open={p.settingsOpen} onOpenChange={p.onSettingsOpen}>
