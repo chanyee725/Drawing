@@ -1,5 +1,6 @@
 // ERD: entity tables placed by ELK (layered, left→right) with one fixed port per field row,
 // so relationship lines attach to the fields they name.
+// Text is weight 400 only, as in the reference diagrams (09-examples-style §2.1: no bold inside diagrams).
 
 import type { ErdDiagram, ErdEndpoint, ErdEntity, ErdRelationship } from '../dsl/index.ts';
 import { finishScene, fontSize, measureLabel, round, styleFor, textItem } from './common.ts';
@@ -29,7 +30,7 @@ const typeText = (meta: string[], type?: string): string => [type ?? '', ...meta
 function measureEntity(d: ErdDiagram, e: ErdEntity): EntityGeom {
   const style = styleFor(d, e.attrs, e.span.line);
   const size = fontSize(style);
-  const label = measureLabel(e.label, size, style.typeface, false, Infinity, true);
+  const label = measureLabel(e.label, size, style.typeface, false, Infinity);
   const iconSize = e.attrs.icon ? Math.round(size * 1.4) : 0;
   const headerH = Math.max(label.h, iconSize) + 18;
   let w = label.w + (iconSize ? iconSize + 8 : 0) + 32;
@@ -139,13 +140,13 @@ export async function layoutErd(d: ErdDiagram): Promise<Scene> {
       tables.push({ kind: 'icon', name: g.entity.attrs.icon!, x, y: cy - g.iconSize / 2, size: g.iconSize, paint: style.paint, inside: true });
       x += g.iconSize + 8;
     }
-    tables.push(textItem(g.label.lines, x, cy - g.label.h / 2, { size, font: style.typeface, anchor: 'start', weight: 600, on: style.paint }));
+    tables.push(textItem(g.label.lines, x, cy - g.label.h / 2, { size, font: style.typeface, anchor: 'start', on: style.paint }));
     g.entity.fields.forEach((f, row) => {
       const ry = p.y + g.headerH + row * ROW_H;
       const lh = lineHeightOf(size);
       const badge = KEY_BADGE(f.meta);
-      if (badge) tables.push(textItem([badge], p.x + 10, ry + (ROW_H - lineHeightOf(10)) / 2, { size: 10, font: style.typeface, anchor: 'start', weight: 600, tone: 'muted', color: badge === 'PK' ? 'yellow' : undefined }));
-      tables.push(textItem([f.name], p.x + 10 + BADGE_W, ry + (ROW_H - lh) / 2, { size, font: style.typeface, anchor: 'start', weight: badge === 'PK' ? 600 : 400 }));
+      if (badge) tables.push(textItem([badge], p.x + 10, ry + (ROW_H - lineHeightOf(10)) / 2, { size: 10, font: style.typeface, anchor: 'start', tone: 'muted', color: badge === 'PK' ? 'yellow' : undefined }));
+      tables.push(textItem([f.name], p.x + 10 + BADGE_W, ry + (ROW_H - lh) / 2, { size, font: style.typeface, anchor: 'start' }));
       const t = typeText(f.meta, f.type);
       if (t) tables.push(textItem([t], p.x + g.w - 12, ry + (ROW_H - lineHeightOf(TYPE_SIZE)) / 2, { size: TYPE_SIZE, font: style.typeface, anchor: 'end', tone: 'muted' }));
     });
@@ -168,7 +169,7 @@ export async function layoutErd(d: ErdDiagram): Promise<Scene> {
         const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
         const px = a.x + ((b.x - a.x) / len) * 12;
         const py = a.y + ((b.y - a.y) / len) * 12;
-        labels.push(textItem([text], px, py - 17, { size: 11, font: style.typeface, weight: 600, color: style.paint.color, tone: 'muted' }));
+        labels.push(textItem([text], px, py - 17, { size: 11, font: style.typeface, color: style.paint.color, tone: 'muted' }));
       };
       near(points[0]!, points[1]!, t0);
       near(points[points.length - 1]!, points[points.length - 2]!, t1);
