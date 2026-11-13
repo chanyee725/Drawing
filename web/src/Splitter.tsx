@@ -31,8 +31,10 @@ export function Splitter({ ratio, onRatio, left, right }: Props) {
           if (e.key === 'ArrowLeft') onRatio(clamp(ratio - 0.02));
           if (e.key === 'ArrowRight') onRatio(clamp(ratio + 0.02));
         }}
-        // A 1px line with a 6px hit area: the ::before strip catches the pointer, centred on the line.
-        className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none before:absolute before:inset-y-0 before:-left-[2.5px] before:w-1.5 before:content-[''] hover:bg-ring focus-visible:bg-ring focus-visible:shadow-[0_0_0_1px_var(--ring)] forced-colors:bg-[CanvasText]"
+        // A 1px line with a 6px hit area: the ::before strip starts at the line and reaches right, so it stays off
+        // the left pane's scrollbar.
+        // Forced colors drop box-shadow, so the focus ring falls back to a system-colour outline there.
+        className="relative z-10 w-px shrink-0 cursor-col-resize touch-none bg-border outline-none before:absolute before:inset-y-0 before:left-0 before:w-1.5 before:content-[''] hover:bg-ring focus-visible:bg-ring focus-visible:shadow-[0_0_0_1px_var(--ring)] forced-colors:bg-[CanvasText] forced-colors:focus-visible:outline-2 forced-colors:focus-visible:outline-solid forced-colors:focus-visible:outline-offset-1 forced-colors:focus-visible:outline-[Highlight]"
       />
       <div className="min-w-0 flex-1 overflow-auto">{right}</div>
     </div>

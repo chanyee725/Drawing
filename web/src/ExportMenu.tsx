@@ -30,9 +30,11 @@ type Props = {
  * The option rows look like the header's segmented ToggleGroup (a muted track, the picked item raised) but keep
  * menu radio semantics, so arrow keys reach them inside the menu. Picking one keeps the menu open.
  */
-const track = 'flex h-7 items-center rounded-md bg-muted p-0.5';
+// Keyboard focus draws an outline ring, so the picked-and-focused pill looks different from just picked
+// (the raised background alone did not change). Below md the pills grow to a 40px touch target.
+const track = 'flex h-7 items-center rounded-md bg-muted p-0.5 max-md:h-11';
 const segment =
-  'h-6 flex-none justify-center rounded-[5px] border border-transparent px-2 text-[13px] text-muted-foreground focus:bg-background/60 focus:text-foreground data-[state=checked]:border-border data-[state=checked]:bg-background data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-xs';
+  'h-6 flex-none justify-center rounded-[5px] border border-transparent px-2 text-[13px] text-muted-foreground max-md:h-10 max-md:px-3 focus:bg-background/60 focus:text-foreground focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-offset-0 focus-visible:outline-ring forced-colors:focus-visible:outline-[Highlight] data-[state=checked]:border-border data-[state=checked]:bg-background data-[state=checked]:font-medium data-[state=checked]:text-foreground data-[state=checked]:shadow-xs';
 const label = 'mr-auto px-1 text-[13px] text-muted-foreground';
 
 export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOptions, onImage, onMarkdown, pdfScope, onPdf, disabled, narrow }: Props) {
