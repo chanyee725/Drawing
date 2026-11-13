@@ -213,6 +213,9 @@ function markerMarkup(kind: SceneEdge['end'], from: Point, tip: Point, color: st
   }
 }
 
+/** Opacity of soft (straight-style) connectors: the same colour, lighter. */
+const SOFT_EDGE_OPACITY = 0.55;
+
 function edgeMarkup(e: SceneEdge, theme: Theme): string {
   if (e.points.length < 2) return '';
   const color = e.color ? strokeOf(e.color, theme) : THEMES[theme].edge;
@@ -242,7 +245,8 @@ function edgeMarkup(e: SceneEdge, theme: Theme): string {
   else d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}L${n(ps[ps.length - 1]!.x)} ${n(ps[ps.length - 1]!.y)}`;
   ps = [];
   const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-  return `<g data-edge="${esc(e.id)}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
+  const soft = e.soft ? ` opacity="${SOFT_EDGE_OPACITY}"` : '';
+  return `<g data-edge="${esc(e.id)}"${soft}><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
 function lineMarkup(l: SceneLine, theme: Theme): string {

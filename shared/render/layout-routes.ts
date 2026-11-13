@@ -305,3 +305,51 @@ function stagger(routed: Plan[]): void {
     flush();
   }
 }
+
+/** An edge drawn with `connectorStyle straight`: one diagonal segment between side ports. */
+export interface StraightEdge {
+  from: string;
+  to: string;
+}
+
+/**
+ * Side ports for straight connectors (spec §1.7: full meshes and the straight style deal ports out at
+ * `(i + 1) / (n + 1)` along a side). Each end leaves from the side of its box that faces the other box;
+ * the ends sharing one side are ordered by where the other box sits, so neighbouring lines do not cross
+ * at the side. Returns one `[start, end]` pair per edge, on the boxes' bounding sides.
+ */
+export function straightPorts(rects: ReadonlyMap<string, Rect>, edges: readonly StraightEdge[]): [Point, Point][] {
+  const centre = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  const facing = (r: Rect, o: Rect): Side => {
+    const c = centre(r);
+    const p = centre(o);
+    const dx = (p.x - c.x) / Math.max(1, r.w);
+    const dy = (p.y - c.y) / Math.max(1, r.h);
+    if (Math.abs(dy) >= Math.abs(dx)) return dy < 0 ? 'top' : 'bottom';
+    return dx < 0 ? 'left' : 'right';
+  };
+  const out: [Point, Point][] = edges.map(() => [{ x: 0, y: 0 }, { x: 0, y: 0 }]);
+  const slots = new Map<string, { edge: number; end: 0 | 1; side: Side; key: number }[]>();
+  edges.forEach((e, i) => {
+    const a = rects.get(e.from);
+    const b = rects.get(e.to);
+    if (!a || !b) return;
+    for (const [end, r, o, id] of [[0, a, b, e.from], [1, b, a, e.to]] as const) {
+      const side = facing(r, o);
+      const k = `${id}\u0000${side}`;
+      const list = slots.get(k) ?? [];
+      list.push({ edge: i, end, side, key: across(side) ? centre(o).x : centre(o).y });
+      slots.set(k, list);
+    }
+  });
+  for (const [k, list] of slots) {
+    const id = k.slice(0, k.indexOf('\u0000'));
+    const r = rects.get(id)!;
+    list.sort((p, q) => p.key - q.key || p.edge - q.edge);
+    list.forEach((s, i) => {
+      const [u0, len] = span(r, s.side);
+      out[s.edge]![s.end] = at(s.side, u0 + (len * (i + 1)) / (list.length + 1), sideAt(r, s.side));
+    });
+  }
+  return out;
+}

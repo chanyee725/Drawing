@@ -9,7 +9,7 @@ import { PLATE_PAD } from './text.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
-import { routeEdges } from './layout-routes.ts';
+import { routeEdges, straightPorts } from './layout-routes.ts';
 import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -984,13 +984,23 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
     nodeItems.push(textItem(label.lines, g.iconSize ? x : r.x + r.w / 2, cy - label.h / 2, { size: label.size, font: style.typeface, anchor: g.iconSize ? 'start' : 'middle', on: style.paint }));
   }
 
+  // Spec §1.7: straight connectors join side ports dealt out at (i + 1) / (n + 1), as soft diagonal lines.
+  const straight = base.edges.filter((be) => !be.forcedElbow && be.style.connectorStyle === 'straight');
+  const ports = straightPorts(rects, straight.map((be) => be.edge));
+  const portOf = new Map(straight.map((be, i) => [be, ports[i]!]));
+
   for (const be of base.edges) {
     const { edge: e, style } = be;
     const route = be.forcedElbow ? 'elbow' : style.connectorStyle;
     const a = rects.get(e.from)!;
     const b = rects.get(e.to)!;
     let points: Point[];
-    if (route !== 'elbow') {
+    const port = portOf.get(be);
+    if (port) {
+      const p0 = clipToShape(nodes.get(e.from)?.shape, a, port[0]);
+      const p1 = clipToShape(nodes.get(e.to)?.shape, b, port[1]);
+      points = [p0, p1].map((p) => ({ x: round(p.x), y: round(p.y) }));
+    } else if (route !== 'elbow') {
       const ac = { x: a.x + a.w / 2, y: a.y + a.h / 2 };
       const bc = { x: b.x + b.w / 2, y: b.y + b.h / 2 };
       const p0 = clipToShape(nodes.get(e.from)?.shape, a, bc);
@@ -1022,6 +1032,7 @@ export function composeGraph(d: GraphDiagram, base: GraphBase, layout?: BlockLay
       end: e.endArrow ? 'arrow' : 'none',
       color: style.paint.color,
     };
+    if (port) edge.soft = true;
     edgeItems.push(edge);
     const label = be.label;
     if (label) {
