@@ -2,7 +2,7 @@
 
 대상 7개: `c4-model-food-delivery`, `c4-model-monolith-to-services`, `c4-model-four-levels`, `architecture-review-health-plan`, `business-capability-map-utility`, `enterprise-reference-architecture-airport`, `enterprise-reference-architecture-city`.
 
-조사일 2026-11-13. 출처는 `https://www.eraser.io/examples/<slug>` 와 그 안의 `https://www.eraser.io/embeds/maps/<slug>/`. 캡처와 측정 JSON은 저장소 밖 `/home/bgk/personal/eraser-ref/<slug>/` 에 있어요 (`layout.json`, `styles.json`, `embed.png`, `view-N.png`, `zoom-*.png`, `ours.png`). Eraser 파일은 저장소에 넣지 않았고, 숫자만 옮겼어요.
+조사일 2026-11-13. 출처는 `https://www.eraser.io/examples/<slug>` 와 그 안의 `https://www.eraser.io/embeds/maps/<slug>/`. 캡처와 측정 JSON은 저장소 밖 `eraser-ref/<slug>/` 에 있어요 (`layout.json`, `styles.json`, `embed.png`, `view-N.png`, `zoom-*.png`, `ours.png`). Eraser 파일은 저장소에 넣지 않았고, 숫자만 옮겼어요.
 
 ## 0. 가장 중요한 발견
 
@@ -305,7 +305,7 @@ styleMode plain
 }
 ```
 
-monolith, health-plan, airport, city DSL은 데이터에서 자동 변환해서 길어요(43~136줄). `/home/bgk/personal/eraser-ref/_A/dsl/<slug>.eraser` 에 있어요. 모양 예 (health-plan 앞부분):
+monolith, health-plan, airport, city DSL은 데이터에서 자동 변환해서 길어요(43~136줄). `eraser-ref/_A/dsl/<slug>.eraser` 에 있어요. 모양 예 (health-plan 앞부분):
 
 ```eraser
 direction right

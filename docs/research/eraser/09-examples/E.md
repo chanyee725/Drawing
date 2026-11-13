@@ -2,7 +2,7 @@
 
 대상 slug 7개: `design-drift-travel-booking`, `cloud-network-topology-aws`, `auto-insurance-claim-process`, `procure-to-pay-process-flow`, `hospital-it-service-map`, `outage-replay-ticketing`, `disaster-recovery-airline`, 그리고 목록 페이지 `diagrams`.
 
-- 캡처와 원자료는 저장소 밖 `/home/bgk/personal/eraser-ref/<slug>/`에 있어요: `page.png`, `embed-v<N>.png`(view마다), `embed-dark.png`, `zoom-shape.png`, `zoom-group.png`, `zoom-label.png`(있을 때), `data.json`, `layout.json`, `styles.json`, `computed.json`, `ours.png`(4개 slug). 스크립트는 `/home/bgk/personal/eraser-ref/_E/`(`analyze.py`, `shoot.cjs`, `ours.ts`, `svg2png.cjs`)에 있어요.
+- 캡처와 원자료는 저장소 밖 `eraser-ref/<slug>/`에 있어요: `page.png`, `embed-v<N>.png`(view마다), `embed-dark.png`, `zoom-shape.png`, `zoom-group.png`, `zoom-label.png`(있을 때), `data.json`, `layout.json`, `styles.json`, `computed.json`, `ours.png`(4개 slug). 스크립트는 `eraser-ref/_E/`(`analyze.py`, `shoot.cjs`, `ours.ts`, `svg2png.cjs`)에 있어요.
 - 우리 쪽 렌더는 develop `1f3bb6c` 기준 `shared/render`(ELK)로 만들었어요.
 - **측정 원천:** 임베드 HTML의 `<script id="map-present-data">` JSON(`views[].elements[]`)에 요소마다 저장된 `x/y/width/height`, 연결선 `points`, 스타일 props가 들어 있어요. 배치 수치는 이 좌표에서, 계산 스타일은 `getComputedStyle`로 쟀어요. 화면 bbox와 저장된 좌표는 일치해요(줌 100% 기준 오프셋만 다름).
 - **다크 모드:** 없어요. `prefers-color-scheme: dark`와 `?theme=dark` 둘 다 흰 배경이었고, 데이터의 `theme`는 7개 모두 `light`예요.
@@ -125,7 +125,7 @@ Director approves > Approved
 Director approves > Declined: Rejects
 ```
 
-나머지 세 개(`claim.txt`, `aws.txt`, `hospital.txt`)는 `/home/bgk/personal/eraser-ref/_E/`에 있어요. 구조는 다음과 같아요.
+나머지 세 개(`claim.txt`, `aws.txt`, `hospital.txt`)는 `eraser-ref/_E/`에 있어요. 구조는 다음과 같아요.
 - claim: `Stages{5}` + 역할 그룹 4개 안에 활동 노드
 - aws: `us-east-1 { Edge{CloudFront}, Inspection VPC{Firewall, NAT}, TGW, VPC 4개 }`
 - hospital: `direction down`, 그룹 3개(Business services / Applications / Infrastructure)와 14개 선

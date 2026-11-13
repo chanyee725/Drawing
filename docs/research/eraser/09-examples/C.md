@@ -3,7 +3,7 @@
 대상: `threat-model-payroll` `azure-security-remediation` `attack-path-map-biotech` `pci-scope-map-cinemas` `fedramp-authorization-boundary` `identity-blast-radius-saas` `wan-modernization-restaurants`
 
 - 측정일 2026-11-13. 공개 페이지 `https://www.eraser.io/examples/<slug>` 와 그 안의 iframe `https://www.eraser.io/embeds/maps/<slug>/`.
-- 캡처·측정 원본은 저장소 밖 `/home/bgk/personal/eraser-ref/<slug>/` 에만 있어요: `page.png` `embed.png`(80% 맞춤) `embed-100.png` `embed-view<N>.png` `embed-dark.png` `zoom-*.png` `layout.json` `styles.json` `dark.json`, 깊게 본 4개는 `ours.svg` `ours.png` `ours-scene.json`. 스크립트는 `/home/bgk/personal/eraser-ref/_C/`.
+- 캡처·측정 원본은 저장소 밖 `eraser-ref/<slug>/` 에만 있어요: `page.png` `embed.png`(80% 맞춤) `embed-100.png` `embed-view<N>.png` `embed-dark.png` `zoom-*.png` `layout.json` `styles.json` `dark.json`, 깊게 본 4개는 `ours.svg` `ours.png` `ours-scene.json`. 스크립트는 `eraser-ref/_C/`.
 - Eraser 파일(JS·CSS·폰트·아이콘)은 가져오지 않았어요. 숫자와 캡처만 써요.
 
 ## 핵심 발견 (먼저 읽기)
@@ -72,7 +72,7 @@
 
 ## 우리(develop `1f3bb6c`, `shared/render` + ELK)와의 차이
 
-비교 그림: `/home/bgk/personal/eraser-ref/<slug>/ours.png` vs `embed-100.png` (threat-model, attack-path, identity, WAN 4개).
+비교 그림: `eraser-ref/<slug>/ours.png` vs `embed-100.png` (threat-model, attack-path, identity, WAN 4개).
 
 ### 배치 차이 (먼저)
 
@@ -94,7 +94,7 @@
 
 ## 우리 DSL 코드 (비교에 쓴 것)
 
-`/home/bgk/personal/eraser-ref/_C/dsl/*.eraser` 와 같아요. 대표로 payroll만 싣고 나머지 3개는 그 폴더에 있어요.
+`eraser-ref/_C/dsl/*.eraser` 와 같아요. 대표로 payroll만 싣고 나머지 3개는 그 폴더에 있어요.
 
 ```
 title Copperline Payroll data flows

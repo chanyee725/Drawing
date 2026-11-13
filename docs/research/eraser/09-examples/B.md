@@ -2,7 +2,7 @@
 
 대상 7개: `merger-application-rationalization-credit-unions`, `integration-landscape-distributor`, `data-lineage-hotel-group`, `it-ot-architecture-food-plant`, `ai-governance-map-telecom`, `vdi-architecture-hospital`, `mainframe-modernization-pensions`.
 
-- 조사일: 2026-11-13. 캡처·측정 파일은 저장소 밖 `/home/bgk/personal/eraser-ref/<slug>/`에 있어요 (`page.png`, `embed.png`, `embed-100.png`, `crop-*.png`, `view-*.png`, `ui-*.png`, `layout.json`, `styles.json`, `styles-data.json`, `ours.*`, `compare.png`).
+- 조사일: 2026-11-13. 캡처·측정 파일은 저장소 밖 `eraser-ref/<slug>/`에 있어요 (`page.png`, `embed.png`, `embed-100.png`, `crop-*.png`, `view-*.png`, `ui-*.png`, `layout.json`, `styles.json`, `styles-data.json`, `ours.*`, `compare.png`).
 - 우리 쪽 비교 기준: develop `1f3bb6c`의 `shared/render`.
 - Eraser 파일(JS·CSS·폰트·아이콘)은 가져오지 않았어요. 숫자와 캡처만 써요.
 
@@ -172,7 +172,7 @@ c4-model-food-delivery 값과 같으면 "= C4"로 적었어요.
 
 ### 우리 DSL 코드
 
-`ai-governance-map-telecom` (나머지 3개는 `/home/bgk/personal/eraser-ref/<slug>/ours.eraser`):
+`ai-governance-map-telecom` (나머지 3개는 `eraser-ref/<slug>/ours.eraser`):
 
 ```
 title AI governance map

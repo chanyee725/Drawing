@@ -1,6 +1,6 @@
 # 09-examples · 그룹 D: 네트워크·인프라 예시 7개
 
-조사일 2026-11-13. 대상은 eraser.io/examples의 공개 예시 7개예요. 숫자는 embed(`/embeds/maps/<slug>/`)에서 직접 읽었어요. 캡처와 원자료(`data.json`, `layout.json`, `styles.json`, `compare.png`)는 저장소 밖 `/home/bgk/personal/eraser-ref/<slug>/`에 있어요. Eraser 파일(JS·CSS·폰트·아이콘)은 저장소에 넣지 않았고, 숫자만 옮겼어요.
+조사일 2026-11-13. 대상은 eraser.io/examples의 공개 예시 7개예요. 숫자는 embed(`/embeds/maps/<slug>/`)에서 직접 읽었어요. 캡처와 원자료(`data.json`, `layout.json`, `styles.json`, `compare.png`)는 저장소 밖 `eraser-ref/<slug>/`에 있어요. Eraser 파일(JS·CSS·폰트·아이콘)은 저장소에 넣지 않았고, 숫자만 옮겼어요.
 
 | slug | 뷰 | 흐름(재생, 뷰별 합계) | 필터 | 깊이 비교 |
 |---|---|---|---|---|
