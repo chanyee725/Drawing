@@ -122,7 +122,7 @@ async function writeTemp(tmp, body) {
  * Makes sure `dir` (created when missing) is a real folder inside `root`: no symlink at `dir` or on
  * the way from `root`, so a committed link like `.drawing -> /elsewhere` cannot move our writes out.
  */
-async function ensureDirInside(root, dir) {
+export async function ensureDirInside(root, dir) {
   const realRoot = await realpath(root);
   const rel = relative(root, dir);
   if (!rel || rel.startsWith('..') || rel.startsWith(sep)) throw new LockPathError('lock folder outside its root');
