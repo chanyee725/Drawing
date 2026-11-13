@@ -62,7 +62,7 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
 
   // The bare name went under pipelines/ and the file opened with the template.
   await row('release').waitFor();
-  await page.waitForFunction(() => location.hash.includes('pipelines/release'));
+  await page.waitForFunction(() => decodeURIComponent(location.hash).includes('pipelines/release'));
   const res = await call('GET', '/api/file?path=pipelines/release');
   assert.equal(res.status, 200);
   const f = await res.json();
@@ -75,7 +75,8 @@ test('new pipeline from the sidebar menu gets the template and the plan badge', 
   assert.ok(f.document.content.some((n) => n.type === 'diagram' && n.attrs.blockId === f.blocks[0].id), 'document embeds the diagram');
   await page.getByRole('heading', { name: '목표' }).first().waitFor();
 
-  // Only the pipeline row carries the badge.
+  // Only the pipeline row carries the badge (hidden while the row is hovered, so move the pointer off the sidebar).
+  await page.mouse.move(900, 400);
   const badge = row('release').getByRole('img', { name: '파이프라인: 계획' });
   await badge.waitFor();
   assert.equal(await badge.textContent(), '◐계획');
