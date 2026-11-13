@@ -22,6 +22,7 @@ import {
 export const RUNS_KEEP = 50;
 export const RUNS_KEEP_DAYS = 90;
 const DAY = 24 * 60 * 60 * 1000;
+export const NOTE_MAX = 200;
 
 /**
  * runs: the store's `runs` sidecar API (serial, fileRel, dirOf, trashDirOf, onChange).
@@ -243,6 +244,28 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     hub?.broadcast('run', { file: run.record.file, runId, step: stepId, state });
   }
 
+  /**
+   * The lead's one plain line about a step (note_step): kept on the step as `note`, at most NOTE_MAX characters
+   * on one line. The caller masks keys and emails first; this only trims and caps.
+   */
+  function noteStep(runId, stepId, text) {
+    const run = get(runId);
+    const step = stepOf(run, stepId);
+    const note = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX) : '';
+    if (!note) throw new StoreError(400, 'note text is required');
+    step.note = note;
+    step.noteAt = now();
+    scheduleWrite(run);
+    hub?.broadcast('run', { file: run.record.file, runId, step: stepId, note });
+    return note;
+  }
+
+  /** Step ids of a running run, in plan order (null when the run is not running here). */
+  const stepsOf = (runId) => {
+    const run = active.get(runId);
+    return run ? Object.keys(run.record.steps) : null;
+  };
+
   /** Finish a run (done / failed / stopped): written at once and dropped from memory. */
   async function endRun(runId, state = 'done') {
     const run = get(runId);
@@ -306,5 +329,5 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     for (const run of active.values()) if (run.dirty || run.writeTimer) await writeQuietly(run);
   }
 
-  return { startRun, updateSession, setStepState, endRun, list, read, close, get active() { return [...active.keys()]; } };
+  return { startRun, updateSession, setStepState, noteStep, stepsOf, endRun, list, read, close, get active() { return [...active.keys()]; } };
 }

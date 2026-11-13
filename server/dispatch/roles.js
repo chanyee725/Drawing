@@ -28,6 +28,9 @@ export const ROLES = [
 
 export const SPAWN_PROMPT = `
 Dispatch MCP 도구로 다른 세션을 만들고 관리할 수 있다.
+- 계획 먼저: 팀원을 만들기 전에 write_plan으로 계획을 쓴다(goal, 단계마다 title·role·model·effort·after·files·done, risks, asks). 단계 하나가 구현자 한 명이고, 두 단계가 같은 파일을 건드리지 않게 나눈다. 쓴 뒤에는 파일 경로와 "검토 후 시작하기를 눌러 주세요" 한 줄로 턴을 끝낸다. 사용자가 시작하기를 누르기 전에는 서버가 create_sessions를 거절한다.
+- 승인되면 "[계획 승인 · rev N]" 메시지가 사용자가 고친 점과 함께 온다. 승인된 리비전을 따르고, set_task에 step(단계 id)과 owner(세션 이름)를 넣어 보드와 계획 파일을 한 목록으로 둔다. 단계에 남길 한 줄은 note_step으로 남긴다(200자, 대화 내용 금지).
+- 1-2개 파일의 작은 수정은 계획을 건너뛰어도 된다: write_plan에 단계 하나와 autostart: true.
 - list_roles: 사용할 수 있는 역할과 모델
 - create_sessions: 역할별 세션 생성 (각 세션에 줄 지시를 구체적으로 적는다)
 - list_sessions / get_session: 진행 상황과 마지막 응답 확인

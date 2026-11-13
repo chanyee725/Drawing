@@ -125,6 +125,7 @@ const LEAD_TOOLS = [
         eta_minutes: { type: "number", description: "끝날 때까지 남은 예상 분" },
         note: { type: "string", description: "한 줄 상태" },
         commit: { type: "string", description: "병합한 브랜치 이름이나 커밋. done으로 닫을 때 통합 브랜치 포함 여부를 확인한다. 빈 문자열이면 지운다" },
+        step: { type: "string", description: "승인된 계획의 단계 id. 이 작업이 어느 단계인지 묶는다(owner 세션의 진행이 그 단계에 기록된다)" },
       },
     },
     run: async args => {
@@ -135,6 +136,49 @@ const LEAD_TOOLS = [
         ...(t.open?.length && { open: t.open }),
       };
     },
+  },
+  {
+    name: "write_plan",
+    description: "팀원을 만들기 전에 계획을 파일로 쓴다(문서 + 단계 다이어그램). 같은 계획을 고칠 때는 path 없이 다시 부른다. 쓴 뒤에는 path와 \"검토 후 시작하기를 눌러 주세요\" 한 줄로 턴을 끝낸다. 사용자가 시작하기를 누르기 전에는 create_sessions가 거절된다. 1-2개 파일의 작은 수정은 단계 하나 + autostart: true로 바로 시작할 수 있다.",
+    inputSchema: {
+      type: "object",
+      required: ["goal", "steps"],
+      properties: {
+        path: { type: "string", description: "워크스페이스 안 파일 경로. 생략하면 내 초안을 고치거나 pipelines/<제목>으로 새로 만든다" },
+        title: { type: "string", description: "계획 제목 (생략하면 goal 앞부분)" },
+        goal: { type: "string", description: "목표 한두 문장" },
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["title", "role"],
+            properties: {
+              id: { type: "string", description: "단계 id (영문·숫자·-·_). 생략하면 s1, s2…" },
+              title: { type: "string" },
+              role: { type: "string", description: "역할 id (list_roles 참고)" },
+              model: { type: "string" },
+              effort: { type: "string" },
+              perm: { type: "string", enum: ["manual", "acceptEdits", "auto", "plan"] },
+              n: { type: "integer", minimum: 1, maximum: 4, description: "이 단계의 세션 수" },
+              after: { type: "array", items: { type: "string" }, description: "먼저 끝나야 하는 단계 id" },
+              files: { type: "array", items: { type: "string" }, description: "건드릴 파일. 두 단계가 같은 파일을 건드리지 않게 나눈다" },
+              done: { type: "string", description: "끝 조건 (예: auth.test 통과)" },
+              task: { type: "string", description: "팀원에게 줄 자세한 지시" },
+            },
+          },
+        },
+        risks: { type: "array", items: { type: "string" } },
+        asks: { type: "array", items: { type: "string" }, description: "사용자에게 물어볼 것" },
+        autostart: { type: "boolean", description: "단계가 하나일 때만: 승인 없이 바로 시작" },
+      },
+    },
+    run: async args => api("POST", "/api/pipeline/plan", { ...args, lead: PARENT }),
+  },
+  {
+    name: "note_step",
+    description: "실행 중인 계획의 한 단계에 한 줄 메모를 남긴다(실행 기록에 남는다). 200자까지, 대화 내용을 옮기지 않는다. 예: 리뷰 must-fix 1건 고쳐서 다시 올림",
+    inputSchema: { type: "object", required: ["step", "text"], properties: { step: { type: "string", description: "단계 id" }, text: { type: "string" } } },
+    run: async ({ step, text }) => api("POST", "/api/pipeline/note", { lead: PARENT, step, text }),
   },
   {
     name: "stop_session",

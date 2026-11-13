@@ -1,0 +1,358 @@
+// Pipeline module (E20): the lead writes a plan into a workspace file (write_plan), the person checks it and
+// presses 시작하기, and only then may the lead create teammates. See docs/design/dispatch-integration/3-ux-flow.md
+// §2-3 and 4-operations-and-rules.md G2.
+//
+// Approval state lives in the Dispatch state file as metadata only:
+//   store.data.pipelines[path] = { lead, state: 'plan' | 'running', draftRevision, approvedRevision, approvedAt,
+//                                  runId, steps, links }
+// `steps` is the approved step ids and `links` maps a session id to its step. The lead's draft plan (for the
+// "바뀐 점" list) is kept in memory only, so after a restart the list is empty.
+import { StoreError } from '../workspace/store.js';
+import { FILE_EXT } from '../workspace/model.js';
+import { redact } from '../dispatch/redact.js';
+import { effectiveRoles } from '../dispatch/settings.js';
+import { buildPlanFile, planChanges, writePlanProblem, PLAN_BLOCK_ID } from '../../shared/dispatch/plan-write.ts';
+import { resolvedStep } from '../../shared/dispatch/plan.ts';
+import { planOrderIn } from '../../shared/dispatch/plan-diagram.ts';
+
+const MAX_BODY = 1024 * 1024;
+export const PIPELINE_DIR = 'pipelines';
+const PROVIDER_NAMES = { claude: 'Claude', openai: 'OpenAI Codex', gemini: 'Gemini' };
+
+async function readJson(req) {
+  const chunks = [];
+  let size = 0;
+  for await (const c of req) {
+    size += c.length;
+    if (size > MAX_BODY) throw new StoreError(413, 'body too large');
+    chunks.push(c);
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') ?? {};
+  } catch {
+    throw new StoreError(400, 'invalid JSON');
+  }
+}
+
+function send(res, status, body) {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
+}
+
+/** A file name from a plan title: letters (any script), digits, `-` and `_`; spaces become `-`. */
+export function planFileName(title) {
+  const stem = String(title ?? '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}\s_-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .slice(0, 60)
+    .replace(/-+$/, '');
+  return stem || 'plan';
+}
+
+/** Session fields a run record keeps (record.js pickSession drops anything else). */
+function sessionMeta(s) {
+  const ctxPct = s.ctxWindow > 0 ? Math.round((100 * (s.ctx || 0)) / s.ctxWindow) : undefined;
+  return {
+    sid: s.id, name: s.name, provider: s.provider, model: s.model, effort: s.effort ?? undefined, branch: s.branch ?? undefined,
+    state: s.state, stateSince: s.stateSince, cost: s.cost ?? undefined, ctxPct, tokens: s.usage,
+    ...(s.pr !== undefined && { pr: s.pr }),
+  };
+}
+
+export async function setup(ctx) {
+  const ws = ctx.modules.workspace?.store;
+  const recorder = ctx.modules.runs?.recorder;
+  if (!ws || !recorder) return {};
+  const dispatch = () => (ctx.modules.dispatch?.status?.().enabled ? ctx.modules.dispatch : null);
+  const drafts = new Map(); // path -> the plan as the lead last wrote it (memory only)
+
+  const entries = () => {
+    const d = dispatch();
+    if (!d) return null;
+    return (d.store.data.pipelines ||= {});
+  };
+  const save = () => dispatch()?.store.save();
+  const changed = (path) => {
+    const e = entries()?.[path];
+    ctx.hub.broadcast('pipeline', { path, state: e?.state ?? null });
+  };
+  const leadEntries = (lead, state) =>
+    Object.entries(entries() ?? {})
+      .filter(([, e]) => e.lead === lead && (!state || e.state === state))
+      .sort((a, b) => (b[1].approvedAt ?? 0) - (a[1].approvedAt ?? 0));
+
+  // ---- hub hooks ----
+  const d0 = dispatch();
+  if (d0) {
+    const hub = d0.hub;
+    hub.createGate = (parent) => (leadEntries(parent, 'plan').length ? '계획 승인 전이에요. 사용자가 시작하기를 누르면 [계획 승인] 메시지가 와요' : null);
+    hub.taskStepCheck = (lead, step) => {
+      const running = leadEntries(lead, 'running');
+      if (!running.length) return '실행 중인 계획이 없어요';
+      if (!running.some(([, e]) => e.steps?.includes(step))) return `승인된 계획에 단계 "${step.slice(0, 40)}"가 없어요`;
+      return null;
+    };
+    // Session metadata goes to the run record of its lead's running plan, under the step its task names.
+    const follow = (s) => {
+      if (!s?.parent) return;
+      for (const [, e] of leadEntries(s.parent, 'running')) {
+        const links = (e.links ||= {});
+        let step = links[s.id];
+        if (!step) {
+          const task = hub.tasks.find((t) => t.lead === s.parent && t.step && t.owner === s.name && e.steps?.includes(t.step));
+          if (!task) continue;
+          step = links[s.id] = task.step;
+          save();
+        }
+        try {
+          recorder.updateSession(e.runId, step, sessionMeta(s));
+        } catch {
+          /* the run ended or the step is gone: nothing to record */
+        }
+        return;
+      }
+    };
+    hub.on('session', follow);
+    // A task that names a step and an owner links that owner's session (set_task often comes after create_sessions).
+    hub.on('tasks', () => {
+      for (const s of hub.sessions) if (s.parent && leadEntries(s.parent, 'running').length) follow(hub.publicSession(s));
+    });
+  }
+
+  // File moves carry the approval state along (a folder move moves every file under it).
+  const unsubscribe = ws.runs.onChange((e) => {
+    if (e.kind !== 'move') return;
+    const all = entries();
+    if (!all) return;
+    let moved = false;
+    for (const p of Object.keys(all)) {
+      if (p !== e.from && !p.startsWith(e.from + '/')) continue;
+      const to = e.to + p.slice(e.from.length);
+      all[to] = all[p];
+      delete all[p];
+      if (drafts.has(p)) {
+        drafts.set(to, drafts.get(p));
+        drafts.delete(p);
+      }
+      moved = true;
+    }
+    if (moved) save();
+  });
+
+  const readOrNull = (path) =>
+    ws.readFile(path).catch((err) => {
+      if (err instanceof StoreError && err.status === 404) return null;
+      if (err?.code === 'ENOENT') return null;
+      throw err;
+    });
+
+  /** Why this file cannot start now (empty when it can), and what it would start. */
+  function check(path, file, entry) {
+    const blockers = [];
+    const d = dispatch();
+    const plan = file?.plan ?? null;
+    const steps = plan?.steps ?? [];
+    let sessions = 0;
+    let usesClaude = false;
+    if (!d) blockers.push('Dispatch가 꺼져 있어요');
+    if (!plan || steps.length === 0) blockers.push('단계가 없어요');
+    if (!entry) blockers.push('관리자가 쓴 계획이 아니에요');
+    else if (d && !d.hub.get(entry.lead)) blockers.push('계획을 쓴 관리자 세션이 없어요');
+    if (plan && steps.length) {
+      const roles = d ? effectiveRoles(d.hub.roles, d.store) : [];
+      const missing = new Set();
+      for (const raw of steps) {
+        const s = resolvedStep(plan, raw);
+        sessions += s.n ?? 1;
+        if (!s.role) {
+          blockers.push(`단계 ${s.id}에 역할이 없어요`);
+          continue;
+        }
+        if (!d) continue;
+        const role = roles.find((r) => r.id === s.role);
+        if (!role) {
+          blockers.push(`단계 ${s.id}의 역할 "${s.role.slice(0, 40)}"을 몰라요`);
+          continue;
+        }
+        const modelId = s.model || role.model;
+        const model = d.models.find((m) => m.id === modelId);
+        if (!model) blockers.push(`단계 ${s.id}의 모델 "${String(modelId).slice(0, 60)}"을 몰라요`);
+        else if (!d.hub.isConnected(model.provider)) missing.add(model.provider);
+        else if (model.provider === 'claude') usesClaude = true;
+      }
+      for (const p of missing) blockers.push(`${PROVIDER_NAMES[p] ?? p}가 연결되지 않았어요`);
+      const order = planOrderIn(plan, file.blocks ?? []);
+      if (!order.ok) blockers.push(order.cycle ? `단계가 서로를 기다려요: ${order.cycle.join(' > ')}` : '단계 순서를 알 수 없어요');
+      const guard = d && usesClaude ? d.hub.guardCheck(sessions) : null;
+      if (guard) blockers.push(guard);
+    }
+    return { blockers, sessions };
+  }
+
+  async function status(path) {
+    path = ws.runs.fileRel(path);
+    const file = await readOrNull(path);
+    if (!file) throw new StoreError(404, 'not found');
+    const entry = entries()?.[path] ?? null;
+    const state = entry?.state ?? (file.plan ? 'plan' : null);
+    const { blockers, sessions } = state === 'running' ? { blockers: [], sessions: 0 } : check(path, file, entry);
+    const l = dispatch()?.hub.currentLimits() ?? null;
+    return {
+      path,
+      revision: file.revision,
+      state,
+      lead: entry?.lead ?? null,
+      draftRevision: entry?.draftRevision ?? null,
+      approvedRevision: entry?.approvedRevision ?? null,
+      approvedAt: entry?.approvedAt ?? null,
+      runId: entry?.runId ?? null,
+      blockers,
+      changes: state === 'plan' && entry ? planChanges(drafts.get(path), file.plan) : [],
+      sessions,
+      limits: l ? { five: l.five ?? null, seven: l.seven ?? null, fiveReset: l.fiveReset ?? null, sevenReset: l.sevenReset ?? null } : null,
+    };
+  }
+
+  // ---- write_plan ----
+  async function freePath(title) {
+    const stem = `${PIPELINE_DIR}/${planFileName(title)}`;
+    for (let i = 1; i < 100; i++) {
+      const p = `${stem}${i === 1 ? '' : `-${i}`}${FILE_EXT}`;
+      if (!(await readOrNull(p))) return p;
+    }
+    throw new StoreError(409, '같은 이름의 계획이 너무 많아요');
+  }
+
+  async function writePlan(body) {
+    const d = dispatch();
+    if (!d) throw new StoreError(409, 'Dispatch가 꺼져 있어요');
+    const lead = typeof body.lead === 'string' ? d.hub.get(body.lead) : null;
+    if (!lead || !lead.canSpawn) throw new StoreError(400, '관리자 세션만 계획을 쓸 수 있어요');
+    const input = { title: body.title, goal: body.goal, steps: body.steps, risks: body.risks, asks: body.asks };
+    const problem = writePlanProblem(input);
+    if (problem) throw new StoreError(400, problem);
+    const all = entries();
+    let path;
+    if (typeof body.path === 'string' && body.path.trim()) path = ws.runs.fileRel(body.path.trim().endsWith(FILE_EXT) ? body.path.trim() : body.path.trim() + FILE_EXT);
+    else {
+      // Without a path, a lead revises its own draft.
+      const own = leadEntries(lead.id, 'plan')[0];
+      path = own ? own[0] : null;
+    }
+    const existing = path ? all[path] : null;
+    if (existing?.state === 'running') throw new StoreError(409, '실행 중인 계획은 바꿀 수 없어요. 바뀐 점은 note_step으로 남겨 주세요');
+    if (existing && existing.lead !== lead.id) throw new StoreError(409, '다른 관리자가 쓴 계획이에요');
+    const current = path ? await readOrNull(path) : null;
+    if (current && !existing && current.plan) throw new StoreError(409, '사람이 쓴 계획 파일이에요. path 없이 새로 써 주세요');
+    let revision;
+    let built;
+    if (current) {
+      const prevId = current.plan?.block ?? PLAN_BLOCK_ID;
+      const prev = (current.blocks ?? []).find((b) => b.id === prevId) ?? null;
+      built = buildPlanFile(input, prev);
+      const blocks = prev ? current.blocks.map((b) => (b.id === prev.id ? built.block : b)) : [...(current.blocks ?? []), built.block];
+      const r = await ws.writeFile(path, { revision: current.revision, title: built.title, document: built.document, canvas: current.canvas, blocks, plan: built.plan });
+      revision = r.revision;
+    } else {
+      built = buildPlanFile(input, null);
+      path ??= await freePath(built.title);
+      const r = await ws.createFile(path, { title: built.title, document: built.document, blocks: [built.block], plan: built.plan });
+      path = r.path;
+      revision = r.revision;
+    }
+    all[path] = { lead: lead.id, state: 'plan', draftRevision: revision, approvedRevision: null, approvedAt: null, runId: null, steps: [], links: {} };
+    drafts.set(path, built.plan);
+    save();
+    ctx.hub.broadcast('workspace', { kind: 'change', path, revision });
+    changed(path);
+    const out = { path, revision, state: 'plan' };
+    if (body.autostart === true && built.plan.steps.length === 1) {
+      const started = await start({ path, revision }, { auto: true });
+      return { ...out, state: 'running', runId: started.runId };
+    }
+    return out;
+  }
+
+  // ---- 시작하기 ----
+  async function start(body, { auto = false } = {}) {
+    const d = dispatch();
+    if (!d) throw new StoreError(409, 'Dispatch가 꺼져 있어요');
+    if (typeof body.path !== 'string') throw new StoreError(400, 'path is required');
+    const path = ws.runs.fileRel(body.path);
+    if (!Number.isInteger(body.revision)) throw new StoreError(400, 'revision is required');
+    const entry = entries()[path];
+    if (entry?.state === 'running') throw new StoreError(409, '이미 실행 중이에요');
+    const file = await readOrNull(path);
+    if (!file) throw new StoreError(404, 'not found');
+    if (file.revision !== body.revision) throw new StoreError(409, '계획이 바뀌었어요. 다시 확인해 주세요', { revision: file.revision });
+    const { blockers } = check(path, file, entry);
+    if (blockers.length) throw new StoreError(409, blockers[0], { blockers });
+    const changes = planChanges(drafts.get(path), file.plan);
+    const record = await recorder.startRun({ file: path, plan: file.plan, revision: file.revision });
+    Object.assign(entry, { state: 'running', approvedRevision: file.revision, approvedAt: Date.now(), runId: record.id, steps: Object.keys(record.steps), links: {} });
+    save();
+    const lines = [
+      `[계획 승인 · rev ${file.revision}] ${path}`,
+      auto ? '단계 하나짜리 계획이라 바로 시작했다.' : '사용자가 이 계획으로 시작하기를 눌렀다.',
+      changes.length ? `바뀐 점(네 초안 이후 사용자가 고친 것):\n${changes.map((c) => `- ${c}`).join('\n')}` : '바뀐 점: 없음',
+      `승인된 리비전을 따른다. 단계마다 create_sessions로 팀원을 만들고, set_task에 step(${record && Object.keys(record.steps).join(', ')})과 owner(세션 이름)를 넣는다. 단계에 남길 한 줄은 note_step으로 남긴다.`,
+    ];
+    try {
+      d.hub.send(entry.lead, lines.join('\n'));
+    } catch (err) {
+      // The lead never heard of it: the run did not really start.
+      Object.assign(entry, { state: 'plan', approvedRevision: null, approvedAt: null, runId: null, steps: [] });
+      save();
+      await recorder.endRun(record.id, 'stopped').catch(() => {});
+      throw new StoreError(409, err.message);
+    }
+    changed(path);
+    return { path, state: 'running', runId: record.id, revision: file.revision, changes };
+  }
+
+  // ---- note_step ----
+  function note(body) {
+    if (!dispatch()) throw new StoreError(409, 'Dispatch가 꺼져 있어요');
+    if (typeof body.lead !== 'string' || typeof body.step !== 'string') throw new StoreError(400, 'lead and step are required');
+    const text = redact(String(body.text ?? '')).replace(/\s+/g, ' ').trim();
+    if (!text) throw new StoreError(400, 'text가 비어 있어요');
+    const running = leadEntries(body.lead, 'running').find(([, e]) => e.steps?.includes(body.step));
+    if (!running) throw new StoreError(409, leadEntries(body.lead, 'running').length ? `승인된 계획에 단계 "${body.step.slice(0, 40)}"가 없어요` : '실행 중인 계획이 없어요');
+    const [path, e] = running;
+    return { path, step: body.step, note: recorder.noteStep(e.runId, body.step, text.slice(0, 200)) };
+  }
+
+  const route = (method, path, fn) => ({
+    method,
+    path,
+    async handler(req, res, _ctx, _m, url) {
+      try {
+        const body = method === 'GET' ? null : await readJson(req);
+        send(res, 200, await fn(body, url.searchParams));
+      } catch (err) {
+        if (!(err instanceof StoreError)) throw err;
+        send(res, err.status, { error: err.message, ...(err.revision !== undefined && { revision: err.revision }), ...(err.blockers && { blockers: err.blockers }) });
+      }
+    },
+  });
+
+  return {
+    status,
+    writePlan,
+    start,
+    note,
+    close: () => unsubscribe(),
+    routes: [
+      route('GET', '/api/pipeline', (_b, q) => {
+        const p = q.get('path');
+        if (typeof p !== 'string') throw new StoreError(400, 'path is required');
+        return status(p);
+      }),
+      route('POST', '/api/pipeline/plan', (b) => writePlan(b)),
+      route('POST', '/api/pipeline/start', (b) => start(b)),
+      route('POST', '/api/pipeline/note', (b) => note(b)),
+    ],
+  };
+}
