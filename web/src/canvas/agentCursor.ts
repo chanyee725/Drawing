@@ -144,6 +144,25 @@ export function applyCursor(cursors: ReadonlyMap<string, Cursor>, e: CursorEvent
   return next;
 }
 
+/**
+ * applyCursor as the page does it: a new place glides on from where the cursor was last drawn (`clocks`, which may
+ * lag the event clock, see shownCursor). An event without a place keeps the glide as it is: rewriting its moveAt
+ * would restart the drawn glide from its start.
+ */
+export function applyCursorDrawn(
+  cursors: ReadonlyMap<string, Cursor>,
+  clocks: ReadonlyMap<string, GlideClock>,
+  e: CursorEvent,
+  now: number,
+  reduced: boolean,
+): ReadonlyMap<string, Cursor> {
+  const old = e && typeof e.sid === 'string' ? cursors.get(e.sid) : undefined;
+  const hasPlace = !!e && finite(e.x) && finite(e.y);
+  const base = old && hasPlace ? new Map(cursors).set(old.sid, lastDrawn(clocks, old, now)) : cursors;
+  const next = applyCursor(base, e, now, reduced);
+  return next === base ? cursors : next;
+}
+
 /** Drop cursors that have faded out; returns the same map when none did. */
 export function pruneGone(cursors: ReadonlyMap<string, Cursor>, now: number): ReadonlyMap<string, Cursor> {
   let next: Map<string, Cursor> | null = null;

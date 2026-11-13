@@ -1,6 +1,6 @@
 // Live agent cursors (E56) for the whole page, fed by `cursor` events from the shared event stream. Memory only.
 import { useSyncExternalStore } from 'react';
-import { applyCursor, lastDrawn, pruneGone, type Cursor, type CursorEvent, type GlideClock } from './agentCursor.ts';
+import { applyCursorDrawn, pruneGone, type Cursor, type CursorEvent, type GlideClock } from './agentCursor.ts';
 
 let cursors: ReadonlyMap<string, Cursor> = new Map();
 /** How much of each cursor's glide has been drawn (AgentCursors). Here, not in the layer: it outlives a remount. */
@@ -25,12 +25,7 @@ export const reducedMotion = () =>
 
 /** One `cursor` event from the server. */
 export function applyCursorEvent(e: CursorEvent) {
-  const t = now();
-  // A new place glides on from where the cursor was last drawn, which may lag the event clock (see shownCursor).
-  const old = e && typeof e.sid === 'string' ? cursors.get(e.sid) : undefined;
-  const base = old ? new Map(cursors).set(old.sid, lastDrawn(glideClocks, old, t)) : cursors;
-  const next = applyCursor(base, e, t, reducedMotion());
-  set(next === base ? cursors : next);
+  set(applyCursorDrawn(cursors, glideClocks, e, now(), reducedMotion()));
 }
 
 /** Drop cursors that have faded out. */

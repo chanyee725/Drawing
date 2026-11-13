@@ -123,3 +123,25 @@ test('a glide first drawn long after it started (file not open then) is not repl
   assert.deepEqual(positionAt(k, t, false), { x: 0, y: 300 });
   assert.equal(moving(k, t, false), false);
 });
+
+test('an event without a place after a landed glide does not restart the glide (#254)', async () => {
+  const { applyCursorDrawn, shownCursor } = await import('../../web/src/canvas/agentCursor.ts');
+  const clocks = new Map();
+  let m = applyCursorDrawn(new Map(), clocks, ev(0, 0), 0, false);
+  m = applyCursorDrawn(m, clocks, ev(0, 300), 1000, false);
+  // Frames draw the glide until it lands at (0,300).
+  let t = 1000;
+  let k = shownCursor(clocks, m.get('s1')!, t);
+  while (moving(k, t, false)) k = shownCursor(clocks, m.get('s1')!, (t += 16));
+  assert.deepEqual(positionAt(k, t, false), { x: 0, y: 300 });
+  // "Still editing", no place: the cursor stays, and the next frame does not jump back to the glide's start.
+  const before = m.get('s1')!;
+  m = applyCursorDrawn(m, clocks, ev(), t + 10, false);
+  assert.equal(m.get('s1')!.moveAt, before.moveAt);
+  assert.equal(m.get('s1')!.editAt, t + 10);
+  const next = shownCursor(clocks, m.get('s1')!, t + 16);
+  assert.deepEqual(positionAt(next, t + 16, false), { x: 0, y: 300 });
+  // A new place still glides on from where it was drawn.
+  m = applyCursorDrawn(m, clocks, ev(0, 600), t + 20, false);
+  assert.deepEqual(m.get('s1')!.from, { x: 0, y: 300 });
+});
