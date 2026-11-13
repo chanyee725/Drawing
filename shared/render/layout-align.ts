@@ -26,6 +26,11 @@ export interface AlignTree {
    * obstacles for the boxes that are. Their own insides are still aligned.
    */
   readonly fixed?: ReadonlySet<string>;
+  /**
+   * Groups whose children are all grid cells (spec §1.2 exception): still snapped and reordered, but never
+   * banded, so they keep the width fitted to their cells.
+   */
+  readonly fitted?: ReadonlySet<string>;
 }
 
 export interface AlignEdge {
@@ -303,6 +308,8 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
     if (set.length < 2) return;
     const rowsOf = set.map((g) => (tree.kids.get(g) ?? []).filter((k) => rects.has(k)).sort((a, b) => rects.get(a)!.x - rects.get(b)!.x));
     if (rowsOf.some((ks) => ks.length === 0) || rowsOf.every((ks) => ks.length < 2)) return;
+    // Grid cells stay as packed (spec §1.4); moving only the other children would run them into the cells.
+    if (rowsOf.some((ks) => ks.some((k) => !movable(tree, k)))) return;
     const cy = (k: string): number => rects.get(k)!.y + rects.get(k)!.h / 2;
     if (rowsOf.some((ks) => ks.some((k) => Math.abs(cy(k) - cy(ks[0]!)) > 0.5))) return;
     const cols = Math.max(...rowsOf.map((ks) => ks.length));
@@ -334,7 +341,7 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
    * take the column's left and right.
    */
   const bands = (ids: readonly string[]): void => {
-    const groups = ids.filter((id) => isGroup(tree, id) && rects.has(id) && movable(tree, id));
+    const groups = ids.filter((id) => isGroup(tree, id) && rects.has(id) && movable(tree, id) && !tree.fitted?.has(id));
     if (groups.length < 2) return;
     for (const rows of [true, false]) {
       // Union-find over pairs that share most of one axis and are apart on the other.

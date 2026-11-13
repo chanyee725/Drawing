@@ -561,9 +561,9 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   const order = definitionOrder(d);
   const edges: GraphEdge[] = d.edges.filter((e) => parent.has(e.from) && parent.has(e.to));
   const free = freeChildren(edges, parent);
-  // Free root nodes share one size only when they really go in a grid (at least two free root children).
-  const rootFree = d.children.filter((c) => free(c));
-  const loose = new Set(rootFree.length >= 2 ? rootFree.filter((c) => c.kind === 'node').map((c) => c.id) : []);
+  // Free root nodes share one size (they go in the root grid). A lone one forms a set of one, so it keeps
+  // its own size anyway.
+  const loose = new Set(d.children.filter((c) => c.kind === 'node' && free(c)).map((c) => c.id));
   unifySizes(nodes.values(), parent, rootLayers(d, parent, order), loose);
 
   // ELK reads spacing per parent, so every group gets its own values (else ELK's 20 px default).
@@ -604,6 +604,8 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   };
   /** Free nodes and groups placed in a grid: alignment leaves them where the grid put them (spec §1.4). */
   const gridded = new Set<string>();
+  /** Groups whose children all went in one grid: they keep the grid's fitted size (spec §1.2 exception). */
+  const gridGroups = new Set<string>();
 
   /** Lay out `top` (the diagram's children, or one free group) with ELK; free siblings go in grids. */
   const layoutScope = async (top: readonly GraphChild[]): Promise<Piece> => {
@@ -623,6 +625,8 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
         const block = await gridOf(loose);
         const id = `grid:${key}`;
         grids.set(id, block);
+        // A group whose children all went in the grid keeps the grid's fitted width (spec §1.2 exception).
+        if (linked.length === 0 && key !== '') gridGroups.add(key);
         // Spec §1.4: the unconnected rest of a partly connected parent goes at its end.
         const last = linked.length > 0 ? { layoutOptions: { 'elk.layered.layering.layerConstraint': 'LAST' } } : {};
         out.push({ id, width: block.w, height: block.h, ...last });
@@ -761,6 +765,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       pad: (id) => ({ top: groups.get(id)!.header, side: GROUP_PAD.side, bottom: GROUP_PAD.bottom }),
       order,
       fixed: gridded,
+      fitted: gridGroups,
     },
     rects,
     baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points })),

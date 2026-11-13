@@ -124,6 +124,21 @@ test('merge: stacked grid bands keep their fitted widths and left edge, not wide
     assert.equal(rect(b, 'Q1').x - q!.x, 16, `${dir}: content starts at the side padding, not centred`);
     assert.equal(rect(b, 'R1').x - r!.x, 16);
   }
+  // A group with an edge whose children are all grid cells is not banded with its neighbour either.
+  const linked = await base([...band('P', 5), ...band('Q', 3), 'P > Q'].join('\n'));
+  const [p, q] = ['P', 'Q'].map((id) => rect(linked, id));
+  assert.equal(q!.w, 544, `Q keeps the width fitted to its 3 cells (P is ${p!.w})`);
+  assert.ok(q!.w < p!.w);
+  assert.equal(rect(linked, 'Q1').x - q!.x, 16, 'cells stay where the grid packed them');
+  // A group with both linked children and grid cells: banded, but its cells are not pulled into columns.
+  const mixed = await base(['G1 {', '  A', '  B', '  C', '  N1', '  N2', '}', 'G2 {', '  D', '  E', '  N3', '  N4', '}', 'A > D', 'C > E'].join('\n'));
+  const boxes = [...mixed.rects].filter(([id]) => !id.startsWith('G'));
+  for (const [i, [a, ra]] of boxes.entries()) {
+    for (const [c, rc] of boxes.slice(i + 1)) {
+      const hit = ra.x < rc.x + rc.w && rc.x < ra.x + ra.w && ra.y < rc.y + rc.h && rc.y < ra.y + ra.h;
+      assert.ok(!hit, `${a} and ${c} do not overlap`);
+    }
+  }
 });
 
 test('merge: every ELK run forces model order at its root, never on a group (elkjs 0.12 throws there)', async () => {
@@ -149,12 +164,26 @@ test('merge: every ELK run forces model order at its root, never on a group (elk
   }
 });
 
-test('merge: source order holds in every ELK run, the root next to a grid and a free group', async () => {
-  const root = await base(['D', 'S3', 'S1', 'S2', 'D > S1', 'D > S2', 'D > S3', 'Note 1', 'Note 2'].join('\n'));
-  const xs = ['S3', 'S1', 'S2'].map((id) => rect(root, id).x);
-  assert.deepEqual([...xs].sort((a, c) => a - c), xs, 'root run');
-  const group = await base(['Free {', '  D', '  S3', '  S1', '  S2', '}', 'Other {', '  Z', '}', 'D > S1', 'D > S2', 'D > S3'].join('\n'));
-  const gx = ['S3', 'S1', 'S2'].map((id) => rect(group, id).x);
-  assert.deepEqual([...gx].sort((a, c) => a - c), gx, 'free group run (order restored after ELK)');
-  assertOrthogonal(group);
+test('merge: ELK itself keeps source order in the root run (forceNodeModelOrder, before any post-processing)', async () => {
+  const proto = ELK.prototype as { layout: (g: ElkNode, ...rest: unknown[]) => Promise<ElkNode> };
+  const real = proto.layout;
+  const outs: ElkNode[] = [];
+  proto.layout = function (g, ...rest) {
+    return real.call(this, g, ...rest).then((o) => (outs.push(structuredClone(o)), o));
+  };
+  try {
+    await base(['D', 'S3', 'S1', 'S2', 'D > S1', 'D > S2', 'D > S3', 'Note 1', 'Note 2'].join('\n'));
+  } finally {
+    proto.layout = real;
+  }
+  const kids = outs[0]!.children ?? [];
+  const xs = ['S3', 'S1', 'S2'].map((id) => kids.find((k) => k.id === `n:${id}`)!.x!);
+  assert.deepEqual([...xs].sort((a, c) => a - c), xs, `raw ELK x: ${JSON.stringify(xs)}`);
+});
+
+test('merge: a free group run gets source order back after ELK (alignLayout reorder)', async () => {
+  // ELK swaps X and Y here to untangle the edges; ELK does not honour model order inside a group.
+  const b = await base(['Free {', '  A', '  B', '  X', '  Y', '}', 'Other {', '  Z', '}', 'A > Y', 'B > X'].join('\n'));
+  assert.ok(rect(b, 'X').x < rect(b, 'Y').x, 'X stands before Y, as written');
+  assertOrthogonal(b);
 });
