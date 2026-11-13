@@ -1011,11 +1011,45 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
 }
 
 /**
+ * What a route around boxes must avoid among `ids`: other boxes are blocks; a divider that spans its row is
+ * a band (cross it, never run along it) plus a block for its label.
+ */
+function obstacles(
+  ids: Iterable<string>,
+  nodes: ReadonlyMap<string, NodeGeom>,
+  rects: ReadonlyMap<string, Rect>,
+  spans: ReadonlyMap<string, Rect>,
+): { blocks: Rect[]; bands: Rect[] } {
+  const blocks: Rect[] = [];
+  const bands: Rect[] = [];
+  for (const id of ids) {
+    const r = rects.get(id);
+    if (!r) continue;
+    const span = spans.get(id);
+    const g = nodes.get(id);
+    if (!span || !g) {
+      blocks.push(r);
+      continue;
+    }
+    bands.push(span);
+    if (g.label.lines.some((l) => l.trim())) {
+      const half = g.label.w / 2 + DIVIDER_GAP;
+      blocks.push({ x: span.x + span.w / 2 - half, y: span.y + span.h / 2 - g.label.h / 2, w: half * 2, h: g.label.h });
+    }
+  }
+  return { blocks, bands };
+}
+
+const growRect = (r: Rect, m: number): Rect => ({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
+
+/**
  * Real routes for the edges that cross a divider row (#244): around the other nodes and groups of the
  * rows' scope and the divider labels, never along a divider line, inside the group when the rows are in
- * one. Parallel edges between the same two nodes are routed one after the other, each kept off the routes
- * already found (never along them), so they run on their own tracks. An edge with no such route keeps its
- * elbow.
+ * one. Edges are routed one after the other, each kept off the routes already found (never along them), so
+ * they run on their own tracks; crossing edges not routed yet do not count (their placeholders are about
+ * to move). When nothing fits (#255): retry with room for a track per crossing edge outside the boxes,
+ * then allow running along other edges, then both (a group's rows then leave the group). Running along a
+ * line or outside the group beats running through nodes.
  */
 function routeAcross(
   d: GraphDiagram,
@@ -1039,8 +1073,15 @@ function routeAcross(
     for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.add(p);
     return out;
   };
-  const pairKey = (be: BaseEdge): string => [be.edge.from, be.edge.to].sort().join('\u0000');
-  // Parallel edges not routed yet: their placeholder elbows sit on the tracks the first one needs.
+  const all = [...rects.values()];
+  const x0 = Math.min(...all.map((r) => r.x)) - 2 * ROUTE_GAP;
+  const y0 = Math.min(...all.map((r) => r.y)) - 2 * ROUTE_GAP;
+  const x1 = Math.max(...all.map((r) => r.x + r.w)) + 2 * ROUTE_GAP;
+  const y1 = Math.max(...all.map((r) => r.y + r.h)) + 2 * ROUTE_GAP;
+  const root: Rect = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  // One outside track per crossing edge on every side is always enough room.
+  const room = (list.length + 1) * ROUTE_GAP;
+  // Crossing edges not routed yet: their placeholder elbows sit on the tracks the others need.
   const waiting = new Set(list);
   for (const be of list) {
     waiting.delete(be);
@@ -1048,38 +1089,24 @@ function routeAcross(
     if (from === to) continue;
     const scope = scopeOf.get(be.edge.id);
     const skip = new Set([...chain(from), ...chain(to)]);
-    const blocks: Rect[] = [];
-    const bands: Rect[] = [];
-    for (const [id, r] of rects) {
-      if (skip.has(id) || !within(scope, id)) continue;
-      const span = spans.get(id);
-      const g = nodes.get(id);
-      if (!span || !g) {
-        blocks.push(r);
-        continue;
-      }
-      bands.push(span);
-      if (g.label.lines.some((l) => l.trim())) {
-        const half = g.label.w / 2 + DIVIDER_GAP;
-        blocks.push({ x: span.x + span.w / 2 - half, y: span.y + span.h / 2 - g.label.h / 2, w: half * 2, h: g.label.h });
-      }
-    }
-    let bounds: Rect;
+    const { blocks, bands } = obstacles([...rects.keys()].filter((id) => !skip.has(id) && within(scope, id)), nodes, rects, spans);
+    let bounds = root;
     if (scope !== undefined) {
       const gr = rects.get(scope)!;
       const header = headerOf(scope);
       bounds = { x: gr.x + 4, y: gr.y + header - ROUTE_GAP, w: gr.w - 8, h: gr.h - header + ROUTE_GAP - 4 };
-    } else {
-      const all = [...rects.values()];
-      const x0 = Math.min(...all.map((r) => r.x)) - 2 * ROUTE_GAP;
-      const y0 = Math.min(...all.map((r) => r.y)) - 2 * ROUTE_GAP;
-      const x1 = Math.max(...all.map((r) => r.x + r.w)) + 2 * ROUTE_GAP;
-      const y1 = Math.max(...all.map((r) => r.y + r.h)) + 2 * ROUTE_GAP;
-      bounds = { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
     }
-    const lines = others.filter((o) => o !== be && !(waiting.has(o) && pairKey(o) === pairKey(be))).map((o) => o.points);
-    const route = routeAround(rects.get(from)!, rects.get(to)!, blocks, bands, bounds, lines);
-    if (route) be.points = route.map((p) => ({ x: round(p.x), y: round(p.y) }));
+    const lines = others.filter((o) => o !== be && !waiting.has(o)).map((o) => o.points);
+    const wide = growRect(bounds, room);
+    const tries: [Rect, Point[][]][] = scope === undefined
+      ? [[bounds, lines], [wide, lines], [wide, []]]
+      : [[bounds, lines], [bounds, []], [wide, lines], [wide, []]];
+    for (const [box, along] of tries) {
+      const route = routeAround(rects.get(from)!, rects.get(to)!, blocks, bands, box, along);
+      if (!route) continue;
+      be.points = route.map((p) => ({ x: round(p.x), y: round(p.y) }));
+      break;
+    }
   }
 }
 

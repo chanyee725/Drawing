@@ -78,10 +78,23 @@ function axis(values: number[]): number[] {
 }
 
 /**
+ * Extra tracks ROUTE_GAP apart in the margin between `lo` (the bounds' side) and `hi` (the nearest wall):
+ * wider bounds give the router more outside tracks, so many loop-back edges each find their own.
+ */
+function lanes(lo: number, hi: number): number[] {
+  const out: number[] = [];
+  for (let v = lo + ROUTE_GAP; v < hi - ROUTE_GAP / 2; v += ROUTE_GAP) out.push(v);
+  return out;
+}
+
+const merge = (a: number[], b: number[]): number[] => [...new Set([...a, ...b])].sort((p, q) => p - q);
+
+/**
  * Route from box `a` to box `b`, leaving and entering at a side's middle, never through `blocks` (other
  * nodes, groups, divider labels; kept ROUTE_GAP away), never along a `band` (a divider's line: crossing it
  * is fine, running on it is not), and inside `bounds`. Fewest bends first, then shortest. Undefined when no
  * route exists. It never runs along one of `lines` (the other edges' routes); crossing them is fine.
+ * The margin between `bounds` and the outermost walls holds a track every ROUTE_GAP.
  */
 export function routeAround(
   a: Rect,
@@ -94,11 +107,19 @@ export function routeAround(
   const walls = [...blocks, a, b].map((r) => grow(r, ROUTE_GAP));
   const from = ports(a);
   const to = ports(b);
-  const xs = axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)])
-    .filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
+  const x0 = Math.min(...walls.map((r) => r.x));
+  const x1 = Math.max(...walls.map((r) => r.x + r.w));
+  const y0 = Math.min(...walls.map((r) => r.y));
+  const y1 = Math.max(...walls.map((r) => r.y + r.h));
+  const xs = merge(
+    axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)]),
+    [...lanes(bounds.x, x0), ...lanes(-(bounds.x + bounds.w), -x1).map((v) => -v)],
+  ).filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
   const inBand = (x: number, y: number): boolean => bands.some((r) => x >= r.x && x <= r.x + r.w && y > r.y && y < r.y + r.h);
-  const ys = axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)])
-    .filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
+  const ys = merge(
+    axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)]),
+    [...lanes(bounds.y, y0), ...lanes(-(bounds.y + bounds.h), -y1).map((v) => -v)],
+  ).filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
   const xi = new Map(xs.map((x, i) => [x, i]));
   const yi = new Map(ys.map((y, i) => [y, i]));
   const W = xs.length;
