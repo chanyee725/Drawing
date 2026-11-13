@@ -101,6 +101,7 @@ export const fontSize = (s: ElementStyle): number => FONT_SIZE[s.textSize];
 export function itemBounds(item: SceneItem): { x0: number; y0: number; x1: number; y1: number } {
   switch (item.kind) {
     case 'box':
+    case 'badge':
       return { x0: item.x, y0: item.y, x1: item.x + item.w, y1: item.y + item.h };
     case 'icon':
       return { x0: item.x, y0: item.y, x1: item.x + item.size, y1: item.y + item.size };

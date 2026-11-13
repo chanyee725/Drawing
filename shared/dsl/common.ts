@@ -2,8 +2,11 @@ import type { Token } from './tokenizer.ts';
 import type { ArrowStyle, Attrs, Diagnostic, DiagramBase, Severity, Span } from './types.ts';
 
 const ELEMENT_KEYS = ['icon', 'color', 'label', 'link', 'colorMode', 'styleMode', 'typeface', 'textSize'];
-/** `subtitle` is our extension (a node's second line); Eraser has no such key and its code still parses. */
-export const GRAPH_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'wrap', 'connectorStyle', 'subtitle']);
+/**
+ * Our extensions, which Eraser's code never uses (so it still parses): `subtitle` (a node's second line),
+ * `badge` and `badgeColor` (a chip on the top-right corner).
+ */
+export const GRAPH_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'wrap', 'connectorStyle', 'subtitle', 'badge', 'badgeColor']);
 export const SEQUENCE_KEYS = new Set(ELEMENT_KEYS);
 export const ERD_KEYS = new Set(ELEMENT_KEYS);
 export const LEGEND_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'connection', 'position']);
@@ -11,6 +14,8 @@ export const LEGEND_KEYS = new Set([...ELEMENT_KEYS, 'shape', 'connection', 'pos
 export const SHAPES = [
   'rectangle', 'circle', 'cylinder', 'diamond', 'document', 'ellipse',
   'hexagon', 'oval', 'parallelogram', 'star', 'trapezoid', 'triangle',
+  // Our extension: a horizontal line broken by the node's label.
+  'divider',
 ];
 
 export const ENUMS: Record<string, readonly string[]> = {
@@ -178,7 +183,7 @@ function validateValue(c: Cursor, key: string, value: string, span: Span): void 
   const allowed = ENUMS[key];
   if (allowed && !(key === 'shape' && !c.checkShapes) && !allowed.includes(value)) {
     c.warn(span, `Unknown ${key} '${value}'. Use one of: ${allowed.join(', ')}`);
-  } else if (key === 'color' && value.startsWith('#') && !HEX_RE.test(value)) {
+  } else if ((key === 'color' || key === 'badgeColor') && value.startsWith('#') && !HEX_RE.test(value)) {
     c.warn(span, `Invalid hex color '${value}'`);
   }
 }
