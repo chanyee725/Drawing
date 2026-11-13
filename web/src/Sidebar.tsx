@@ -173,6 +173,11 @@ function DocRows({ nodes, ...rest }: RowsProps & { nodes: DocNode[] }) {
   );
 }
 
+// Right-hand slots, from the edge: ⋯ menu, chevron (fixed width), then the count. The row's text stops before
+// them: 56px on wide screens (24px actions), 92px below md where both actions are 44px touch targets.
+const ROW_SLOTS = 'pr-14 max-md:pr-[92px]';
+const COUNT = 'min-w-5 text-right';
+
 const DROP_ROW = 'data-[drop=over]:bg-accent data-[drop=over]:text-foreground data-[drop=over]:outline-2 data-[drop=over]:outline-ring forced-colors:data-[drop=over]:outline-[Highlight]';
 
 function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode }) {
@@ -190,7 +195,7 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
         data-move-path={n.path}
         aria-current={active ? 'page' : undefined}
         aria-expanded={n.type === 'group' ? expanded : undefined}
-        className={cn('pr-14 font-normal text-muted-foreground hover:text-foreground aria-[current=page]:font-medium', DROP_ROW)}
+        className={cn(ROW_SLOTS, 'font-normal text-muted-foreground hover:text-foreground aria-[current=page]:font-medium', DROP_ROW)}
         {...dragProps(moveItemOf(n))}
         {...(n.type === 'group' ? drop : refuseDrop)}
         onClick={() => (n.type === 'doc' ? p.onOpen(n.path) : toggle(n.path))}
@@ -198,7 +203,7 @@ function DocRow({ n, depth, open, toggle, p, move }: RowsProps & { n: DocNode })
         {n.type === 'doc' ? <File className="size-[15px]! text-muted-foreground" aria-hidden /> : <FolderClosed className="size-[15px]! text-muted-foreground" aria-hidden />}
         <span className="truncate">{label}</span>
         {n.type === 'doc' && n.pipeline && <PipelineBadge state={n.pipeline.state} />}
-        {has && !expanded && <SidebarMenuBadge aria-label={`하위 ${n.count}개`}>{n.count}</SidebarMenuBadge>}
+        {has && !expanded && <SidebarMenuBadge className={COUNT} aria-label={`하위 ${n.count}개`}>{n.count}</SidebarMenuBadge>}
       </SidebarMenuButton>
       {has && n.type === 'doc' && (
         <SidebarMenuAction aria-label={`${label} 하위 문서 ${expanded ? '접기' : '펼치기'}`} aria-expanded={expanded} className="right-7 max-md:right-11" onClick={() => toggle(n.path)}>
@@ -225,7 +230,7 @@ const PIPELINE_MARKS: Record<PipelineMark['state'], { glyph: string; text: strin
 
 function PipelineBadge({ state }: { state: PipelineMark['state'] }) {
   const m = PIPELINE_MARKS[state] ?? PIPELINE_MARKS.plan;
-  // The row's pr-14 keeps it clear of the row actions.
+  // The row's right padding (ROW_SLOTS) keeps it clear of the row actions.
   return (
     <span role="img" aria-label={`파이프라인: ${m.text}`} title={`파이프라인 ${m.text}`} className="ml-auto flex shrink-0 items-center gap-0.5 rounded-sm px-1 text-[11px] leading-4 text-foreground">
       <span aria-hidden style={m.dot ? { color: m.dot } : undefined} className={m.dot ? undefined : 'text-muted-foreground'}>
@@ -246,7 +251,7 @@ function ProjectRow({ pr, open, toggle, p, move }: Omit<RowsProps, 'depth'> & { 
         data-move-path={pr.path}
         aria-current={here ? 'page' : undefined}
         aria-expanded={expanded}
-        className={cn('pr-14', DROP_ROW)}
+        className={cn(ROW_SLOTS, DROP_ROW)}
         {...drop}
         onClick={() => {
           p.onSection({ kind: 'project', path: pr.path });
@@ -255,7 +260,7 @@ function ProjectRow({ pr, open, toggle, p, move }: Omit<RowsProps, 'depth'> & { 
       >
         <ProjectMark p={pr} />
         <span className="truncate">{pr.name}</span>
-        {!expanded && pr.count > 0 && <SidebarMenuBadge>{pr.count}</SidebarMenuBadge>}
+        {!expanded && pr.count > 0 && <SidebarMenuBadge className={COUNT}>{pr.count}</SidebarMenuBadge>}
       </SidebarMenuButton>
       <SidebarMenuAction aria-label={`${pr.name} ${expanded ? '접기' : '펼치기'}`} aria-expanded={expanded} className="right-7 max-md:right-11" onClick={() => toggle(pr.path)}>
         <ChevronRight className={cn('transition-transform', expanded && 'rotate-90')} />
