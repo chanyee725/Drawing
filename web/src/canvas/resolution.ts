@@ -11,9 +11,11 @@
 
 /** Smallest and largest variant factors. */
 export const MIN_SCALE = 1 / 8;
-export const MAX_SCALE = 4;
-/** Keep a variant's bitmap under this many pixels (Excalidraw caps element canvases at the same). */
-const MAX_AREA = 16_777_216;
+// 2x (not 4x) and a 4M-pixel cap: Excalidraw cannot drop image files, so every variant shown stays in memory
+// with its decoded bitmap; a 4x variant of a big block alone was up to 64 MB.
+export const MAX_SCALE = 2;
+/** Keep a variant's bitmap under this many pixels. */
+const MAX_AREA = 4_194_304;
 
 /**
  * Variant factor for a picture `w`×`h` (its own units) shown at `pixelsPerUnit` device pixels per unit
@@ -35,10 +37,9 @@ const SEP = '--k';
 export const variantId = (fileId: string, k: number) => (k === 1 ? fileId : `${fileId}${SEP}${String(k).replace('.', 'p')}`);
 
 /** The picture's own file id for a variant id (or for the picture's own id). */
-export const baseFileId = (id: string) => {
-  const i = id.indexOf(SEP);
-  return i < 0 ? id : id.slice(0, i);
-};
+// Only a suffix counts: an id may itself contain "--k" (block ids are any non-empty string).
+const VARIANT_SUFFIX = /--k\d+(?:p\d+)?$/;
+export const baseFileId = (id: string) => id.replace(VARIANT_SUFFIX, '');
 
 /** The SVG with its intrinsic size multiplied by `k`; the viewBox keeps the drawing the same. */
 export function scaleSvg(svg: string, k: number): string {

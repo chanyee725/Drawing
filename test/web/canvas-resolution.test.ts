@@ -7,11 +7,11 @@ test('pictureScale picks the power of two at or above the pixels per unit', () =
   assert.equal(pictureScale(1, 900, 400), 1);
   assert.equal(pictureScale(1.25, 900, 400), 2);
   assert.equal(pictureScale(2, 900, 400), 2);
-  assert.equal(pictureScale(2.01, 900, 400), 4);
+  assert.equal(pictureScale(2.01, 900, 400), MAX_SCALE, 'capped at 2x to keep memory down');
   assert.equal(pictureScale(0.6, 900, 400), 1);
   assert.equal(pictureScale(0.3, 900, 400), 0.5);
   // The shown size is never more than 2x below the variant: thin strokes are not skipped.
-  for (const f of [0.13, 0.4, 0.75, 1, 1.5, 2.6, 3.9]) {
+  for (const f of [0.13, 0.4, 0.75, 1, 1.5, 1.9]) {
     const k = pictureScale(f, 300, 200);
     assert.ok(k >= f && k / f < 2, `factor ${f} → ${k}`);
   }
@@ -22,9 +22,10 @@ test('pictureScale stays within its limits and the bitmap area cap', () => {
   assert.equal(pictureScale(0.001, 100, 100), MIN_SCALE);
   assert.equal(pictureScale(Number.NaN, 100, 100), 1);
   assert.equal(pictureScale(0, 100, 100), 1);
-  // A huge picture gets a smaller variant so its bitmap stays under ~16M pixels.
-  const k = pictureScale(4, 3000, 2000);
-  assert.ok(3000 * 2000 * k * k <= 16_777_216, `k=${k}`);
+  assert.equal(MAX_SCALE, 2);
+  // A big picture gets a smaller variant so its bitmap stays under ~4M pixels.
+  const k = pictureScale(2, 3000, 2000);
+  assert.ok(3000 * 2000 * k * k <= 4_194_304, `k=${k}`);
 });
 
 test('variant ids keep the picture id and come back to it', () => {
@@ -35,6 +36,9 @@ test('variant ids keep the picture id and come back to it', () => {
   assert.match(variantId('blk_a_1', 0.125), /^[A-Za-z0-9_-]+$/);
   assert.equal(baseFileId('blk_a_1--k2'), 'blk_a_1');
   assert.equal(baseFileId('blk_a_1'), 'blk_a_1');
+  // Only a trailing variant suffix is dropped: an id may contain "--k" itself.
+  assert.equal(baseFileId('step--kafka'), 'step--kafka');
+  assert.equal(baseFileId('step--kafka--k0p5'), 'step--kafka');
 });
 
 test('scaleSvg multiplies only the root size, not the drawing', () => {
