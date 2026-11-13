@@ -97,6 +97,53 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   await claude.getByRole('button', { name: 'Claude 연결', exact: true }).waitFor();
   assert.equal(await claude.getByTestId('provider-status').textContent(), '연결 안 됨');
 
+  // #219 review fixes, with a CLI login simulated by rewriting /api/state (the fakes are always logged in).
+  const posts = [];
+  page.on('request', (r) => r.method() === 'POST' && r.url().includes('/api/providers/') && posts.push(new URL(r.url()).pathname));
+  // (3) A double click sends one request: the second click while the first runs is dropped.
+  await page.route('**/api/providers/openai/login', async (route) => {
+    await new Promise((r) => setTimeout(r, 400));
+    await route.continue();
+  });
+  const codex = dialog.locator('li[data-provider="openai"]');
+  await codex.getByRole('button', { name: 'Codex 연결', exact: true }).dblclick();
+  await codex.getByRole('button', { name: 'Codex 연결 끊기' }).waitFor();
+  assert.equal(posts.filter((p) => p === '/api/providers/openai/login').length, 1, `one login request: ${posts}`);
+  await page.unroute('**/api/providers/openai/login');
+  await codex.getByRole('button', { name: 'Codex 연결 끊기' }).click();
+  await codex.getByRole('button', { name: 'Codex 연결', exact: true }).waitFor();
+  // (1) Gemini login runs, then ends without connecting: polling stops and the dialog says so.
+  let busy = true;
+  await page.route('**/api/state', async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.providers.gemini = { ...body.providers.gemini, busy, connected: false, error: null };
+    await route.fulfill({ response: res, json: body });
+  });
+  await dialog.getByRole('button', { name: '실행' }).click();
+  await dialog.getByRole('button', { name: '모델 연결' }).click();
+  const gemini = dialog.locator('li[data-provider="gemini"]');
+  await gemini.getByRole('button', { name: 'Gemini 취소' }).waitFor();
+  busy = false;
+  await dialog.getByText('로그인이 끝났지만 연결되지 않았어요. 다시 해 주세요.').waitFor({ timeout: 5000 });
+  let polls = 0;
+  page.on('request', (r) => r.url().endsWith('/api/state') && polls++);
+  await page.waitForTimeout(2500);
+  assert.equal(polls, 0, 'no polling once the login ended');
+  // (2) Closing the dialog while a login runs cancels it.
+  busy = true;
+  await dialog.getByRole('button', { name: '다시 확인' }).click();
+  await gemini.getByRole('button', { name: 'Gemini 취소' }).waitFor();
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  for (let i = 0; i < 50 && !posts.includes('/api/providers/gemini/cancel'); i++) await page.waitForTimeout(50);
+  assert.ok(posts.includes('/api/providers/gemini/cancel'), `cancel sent on close: ${posts}`);
+  await page.unroute('**/api/state');
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: '명령 찾기' }).fill('설정 열기');
+  await page.getByRole('option', { name: /^설정 열기/ }).first().click();
+  await dialog.waitFor();
+
   // 3. 실행: guard fields read from the Dispatch settings.
   await dialog.getByRole('button', { name: '실행' }).click();
   await dialog.getByLabel('5시간 한도 (%)').waitFor();
@@ -139,6 +186,19 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
     assert.ok(h >= 44, `target ≥ 44px at 390px, got ${h}`);
   }
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'settings-models-390.png') });
+  // Every row has a visible status dot, also when not connected.
+  for (const dot of await rows.locator('i[aria-hidden]').all()) assert.notEqual(await dot.evaluate((e) => getComputedStyle(e).backgroundColor), 'rgba(0, 0, 0, 0)');
+
+  // 7. 390px: a sidebar model row in the drawer closes the drawer and opens 설정 on 모델 연결.
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  await page.getByRole('button', { name: '메뉴 열기' }).click();
+  const drawer = page.getByRole('dialog').getByRole('navigation', { name: '사이드바' });
+  await drawer.waitFor();
+  await drawer.getByRole('button', { name: /^Codex / }).click();
+  await dialog.waitFor();
+  assert.equal(await current(), '모델 연결');
+  await drawer.waitFor({ state: 'detached' });
 
   // Only fakes ran, and none of them was asked to log out of the CLI itself.
   assert.ok(fake.calls().every((c) => !(c.bin === 'claude' && c.args.join(' ') === 'auth logout')));

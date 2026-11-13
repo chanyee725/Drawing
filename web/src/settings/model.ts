@@ -65,9 +65,6 @@ export function providerRows(providers: Partial<Record<string, ProviderInfo>>, l
   });
 }
 
-/** Any provider still mid-login: the dialog keeps polling while this is true. */
-export const anyBusy = (providers: Partial<Record<string, ProviderInfo>>) => PROVIDER_IDS.some((id) => !!providers[id]?.busy);
-
 /** A percent field (1..100) as the 0..1 fraction the guard stores; null when out of range or not a number. */
 export function fractionFrom(input: string): number | null {
   const n = Number(input.trim());
@@ -80,4 +77,38 @@ export function wholeFrom(input: string, min: number, max: number): number | nul
   const n = Number(input.trim());
   if (!input.trim() || !Number.isInteger(n) || n < min || n > max) return null;
   return n;
+}
+
+/** Providers whose CLI login is running now. The dialog cancels these when it closes (#219 review). */
+export const busyIds = (providers: Partial<Record<string, ProviderInfo>>): ProviderId[] => PROVIDER_IDS.filter((id) => !!providers[id]?.busy);
+
+/** Polling stops after this long even if the server still says a login runs; 다시 확인 checks again. */
+export const LOGIN_POLL_LIMIT_MS = 10 * 60_000;
+
+/**
+ * Logins that ended since the last check without connecting and without an error of their own: the CLI exited
+ * but the provider is still off. The dialog says so instead of waiting forever (#219 review).
+ */
+export function loginsEndedUnconnected(before: readonly string[], providers: Partial<Record<string, ProviderInfo>>): ProviderId[] {
+  return PROVIDER_IDS.filter((id) => before.includes(id) && !providers[id]?.busy && !providers[id]?.connected && !providers[id]?.error);
+}
+
+export const LOGIN_ENDED_NOTE = '로그인이 끝났지만 연결되지 않았어요. 다시 해 주세요.';
+
+/**
+ * Wraps an async action so a second call while the first runs is dropped (double clicks before the button
+ * turns disabled). Returns false for a dropped call.
+ */
+export function oneAtATime<A extends unknown[]>(fn: (...a: A) => Promise<unknown>): (...a: A) => Promise<boolean> {
+  let running = false;
+  return async (...a: A) => {
+    if (running) return false;
+    running = true;
+    try {
+      await fn(...a);
+    } finally {
+      running = false;
+    }
+    return true;
+  };
 }

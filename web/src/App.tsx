@@ -809,7 +809,12 @@ export function App() {
       onToggleTheme={toggleTheme}
       // The 설정 row opens the settings dialog instead of its old menu.
       settingsOpen={false}
-      onSettingsOpen={(o) => o && openSettings('general')}
+      onSettingsOpen={(o) => {
+        if (!o) return;
+        // On a phone the drawer closes first, so the dialog is not opened under the drawer's focus trap.
+        setNavOpen(false);
+        openSettings('general');
+      }}
     />
   );
 

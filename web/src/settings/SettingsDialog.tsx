@@ -2,12 +2,28 @@
 // settings. showModal() gives the inert page, focus containment, Esc and focus return to the opener.
 // Model connect/disconnect goes through the server's provider routes, which run the user's own CLI login;
 // nothing here reads, shows or keeps a token, key or account name: status and percentages only.
-import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type DispatchSettings, type ProviderInfo } from '../api';
 import { Switch } from '../components/ui/switch';
 import { cn } from '../lib/utils';
 import type { ThemePref } from '../theme';
-import { anyBusy, fractionFrom, providerRows, SECTIONS, THEME_CHOICES, wholeFrom, type LimitsView, type ProviderRow, type SettingsSection } from './model';
+import { MODELS_CHANGED } from './context';
+import {
+  busyIds,
+  fractionFrom,
+  LOGIN_ENDED_NOTE,
+  LOGIN_POLL_LIMIT_MS,
+  loginsEndedUnconnected,
+  oneAtATime,
+  providerRows,
+  SECTIONS,
+  THEME_CHOICES,
+  wholeFrom,
+  type LimitsView,
+  type ProviderId,
+  type ProviderRow,
+  type SettingsSection,
+} from './model';
 
 type Props = {
   section: SettingsSection;
@@ -25,6 +41,16 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
     const d = ref.current;
     if (d && !d.open) d.showModal();
   }, []);
+  // Logins still running when the dialog goes away are cancelled, so no CLI login is left behind unseen.
+  const logins = useRef<ProviderId[]>([]);
+  useEffect(
+    () => () => {
+      for (const id of logins.current) void api.providerCancel(id).catch(() => {});
+      logins.current = [];
+    },
+    [],
+  );
+  const onLogins = useCallback((ids: ProviderId[]) => (logins.current = ids), []);
   const current = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0];
   return (
     <dialog
@@ -72,7 +98,7 @@ export function SettingsDialog({ section, onSection, onClose, themePref, onTheme
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             {section === 'general' && <GeneralPanel pref={themePref} onPref={onThemePref} />}
-            {section === 'models' && <ModelsPanel />}
+            {section === 'models' && <ModelsPanel onLogins={onLogins} />}
             {section === 'run' && <RunPanel />}
           </div>
         </section>
@@ -102,56 +128,81 @@ function GeneralPanel({ pref, onPref }: { pref: ThemePref; onPref: (t: ThemePref
 
 type Load<T> = { kind: 'loading' } | { kind: 'off'; message: string } | { kind: 'ok'; value: T };
 
-function ModelsPanel() {
+function ModelsPanel({ onLogins }: { onLogins: (ids: ProviderId[]) => void }) {
   const [state, setState] = useState<Load<{ providers: Record<string, ProviderInfo>; limits: LimitsView }>>({ kind: 'loading' });
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Logins seen running at the last load, to notice one that ended without connecting.
+  const running = useRef<ProviderId[]>([]);
   const load = useCallback(async () => {
     try {
       const d = await api.dispatch();
       if (!d.enabled) return setState({ kind: 'off', message: d.message ?? '이 서버에선 모델 연결을 쓸 수 없어요.' });
       const [s, limits] = await Promise.all([api.dispatchState(), api.limits().catch(() => ({}))]);
-      setState({ kind: 'ok', value: { providers: s.providers ?? {}, limits: limits as LimitsView } });
+      const providers = s.providers ?? {};
+      if (loginsEndedUnconnected(running.current, providers).length) setError(LOGIN_ENDED_NOTE);
+      running.current = busyIds(providers);
+      onLogins(running.current);
+      setState({ kind: 'ok', value: { providers, limits: limits as LimitsView } });
+      window.dispatchEvent(new Event(MODELS_CHANGED));
     } catch {
       setState({ kind: 'off', message: '모델 상태를 불러오지 못했어요.' });
     }
-  }, []);
+  }, [onLogins]);
   useEffect(() => {
     void load();
   }, [load]);
-  // While a CLI login runs, check back every 2 s until it ends.
-  const busy = state.kind === 'ok' && anyBusy(state.value.providers);
+  // While a CLI login runs, check back every 2 s until it ends, and give up after LOGIN_POLL_LIMIT_MS.
+  const busy = state.kind === 'ok' && busyIds(state.value.providers).length > 0;
   useEffect(() => {
     if (!busy) return;
-    const t = setInterval(() => void load(), 2000);
+    const started = Date.now();
+    const t = setInterval(() => {
+      if (Date.now() - started > LOGIN_POLL_LIMIT_MS) {
+        clearInterval(t);
+        setError('로그인을 너무 오래 기다렸어요. 다시 확인을 눌러 주세요.');
+        return;
+      }
+      void load();
+    }, 2000);
     return () => clearInterval(t);
   }, [busy, load]);
 
-  const act = async (row: ProviderRow) => {
-    setPending(row.id);
-    setError(null);
-    try {
-      if (row.action === 'connect') await api.providerLogin(row.id);
-      else if (row.action === 'disconnect') await api.providerLogout(row.id);
-      else if (row.action === 'cancel') await api.providerCancel(row.id);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '요청이 실패했어요.');
-    } finally {
-      setPending(null);
-    }
-  };
-  const recheck = async () => {
-    setPending('refresh');
-    try {
-      await api.providerRefresh();
-      await load();
-    } catch {
-      setError('다시 확인하지 못했어요.');
-    } finally {
-      setPending(null);
-    }
-  };
+  // One request at a time: a double click before the buttons turn disabled is dropped.
+  const act = useMemo(
+    () =>
+      oneAtATime(async (row: ProviderRow) => {
+        setPending(row.id);
+        setError(null);
+        try {
+          if (row.action === 'connect') await api.providerLogin(row.id);
+          else if (row.action === 'disconnect') await api.providerLogout(row.id);
+          else if (row.action === 'cancel') await api.providerCancel(row.id);
+          await load();
+        } catch (e) {
+          setError(e instanceof Error ? e.message : '요청이 실패했어요.');
+        } finally {
+          setPending(null);
+        }
+      }),
+    [load],
+  );
+  const recheck = useMemo(
+    () =>
+      oneAtATime(async () => {
+        setPending('refresh');
+        setError(null);
+        try {
+          await api.providerRefresh();
+          await load();
+        } catch {
+          setError('다시 확인하지 못했어요.');
+        } finally {
+          setPending(null);
+        }
+      }),
+    [load],
+  );
 
   if (state.kind === 'loading') return <p className="text-sm text-muted-foreground">불러오는 중이에요…</p>;
   if (state.kind === 'off') return <p className="text-sm text-muted-foreground">{state.message}</p>;
@@ -162,7 +213,7 @@ function ModelsPanel() {
       <ul aria-label="모델" className="flex flex-col divide-y rounded-md border">
         {rows.map((r) => (
           <li key={r.id} data-provider={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5">
-            <i aria-hidden className={cn('size-2 shrink-0 rounded-full', r.tone === 'ok' ? 'bg-ok' : r.tone === 'warn' ? 'bg-warn' : 'bg-idle')} />
+            <i aria-hidden className={cn('size-2 shrink-0 rounded-full', r.tone === 'ok' ? 'bg-ok' : r.tone === 'warn' ? 'bg-warn' : 'bg-muted-foreground')} />
             <div className="flex min-w-0 flex-1 flex-col">
               <span className="text-sm font-medium">{r.name}</span>
               <span className="text-xs text-muted-foreground" data-testid="provider-status">
