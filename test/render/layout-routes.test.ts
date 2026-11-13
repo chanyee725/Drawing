@@ -82,18 +82,20 @@ test('routes: a label that would cover another moves in 24 px steps along its li
   const beta = labels.find((l) => l.lines[0] === 'beta')!;
   const gamma = labels.find((l) => l.lines[0] === 'gamma')!;
   assert.ok(Math.hypot(beta.x - gamma.x, beta.y - gamma.y) > 20, 'labels no longer stack');
-  // gamma sits on its line (S2 > L1), 24 px past the middle towards L1.
+  // The two lines cross at their middles, so neither label stays on the crossing: each moves along its own
+  // line towards its end node, in 24 px steps (beta one step, gamma two: its first step still touches beta).
   const es = scene.items.filter((i) => i.kind === 'edge') as E[];
-  const mid = (e: E) => ({ x: (e.points[0]!.x + e.points[1]!.x) / 2, y: (e.points[0]!.y + e.points[1]!.y) / 2 });
-  // Text y is the top of the label; beta stayed on its middle, which gives the offset to the centre.
-  const dy = mid(es[1]!).y - beta.y;
-  const g = { x: gamma.x, y: gamma.y + dy };
-  const m = mid(es[2]!);
-  const end = es[2]!.points[1]!;
-  // Steps of 24 px until the plate is clear (one step still touches beta here, so two).
-  const moved = Math.hypot(g.x - m.x, g.y - m.y);
-  assert.ok(moved >= 23 && Math.abs(moved / 24 - Math.round(moved / 24)) < 0.06, `moved ${moved} px`);
-  assert.ok(Math.hypot(g.x - end.x, g.y - end.y) < Math.hypot(m.x - end.x, m.y - end.y), 'towards the end node');
+  const run = (e: E, label: T) => {
+    const [p, q] = e.points as [{ x: number; y: number }, { x: number; y: number }];
+    const len = Math.hypot(q.x - p.x, q.y - p.y);
+    // Distance from the line's middle along the line, read from the label's x (the text x is its centre).
+    return { moved: ((label.x - (p.x + q.x) / 2) / (q.x - p.x)) * len, towardsEnd: Math.sign(label.x - (p.x + q.x) / 2) === Math.sign(q.x - p.x) };
+  };
+  const b = run(es[1]!, beta);
+  const g = run(es[2]!, gamma);
+  assert.ok(b.towardsEnd && g.towardsEnd, 'towards the end node');
+  assert.ok(Math.abs(Math.abs(b.moved) - 24) < 0.5, `beta moved ${b.moved} px`);
+  assert.ok(Math.abs(Math.abs(g.moved) - 48) < 0.5, `gamma moved ${g.moved} px`);
 });
 
 test('routes: an edge that keeps its old route is not overlapped by the bus of its fan', async () => {
@@ -119,4 +121,105 @@ test('routes: an edge that keeps its old route is not overlapped by the bus of i
       }
     }
   }
+});
+
+// #198: unit tests drive routeEdges with hand-made boxes and old routes.
+import type { Rect } from '../../shared/render/layout-align.ts';
+import type { RouteEdge } from '../../shared/render/layout-routes.ts';
+
+const box = (x: number, y: number, w = 100, h = 40): Rect => ({ x, y, w, h });
+const route = (from: string, to: string, ...pts: [number, number][]): RouteEdge => ({ from, to, points: pts.map(([x, y]) => ({ x, y })), keep: false });
+const flat = (e: RouteEdge) => e.points.map((p) => [p.x, p.y]);
+const noParents = (rects: Map<string, Rect>) => new Map([...rects.keys()].map((k) => [k, undefined]));
+
+test('routes: replanning runs more than once when a kept route blocks another edge, and each kept route stays as it was', async () => {
+  const { routeEdges } = await import('../../shared/render/layout-routes.ts');
+  // e1 cannot go straight (M1 is in the way), so it keeps a detour that runs down x = 300; that makes e2's
+  // straight line at x = 300 a second failure, found only on the second pass.
+  const rects = new Map<string, Rect>([['A1', box(0, 0)], ['M1', box(0, 150)], ['B1', box(0, 300)], ['A2', box(250, 0)], ['B2', box(250, 300)]]);
+  const e1 = route('A1', 'B1', [50, 40], [50, 60], [300, 60], [300, 280], [50, 280], [50, 300]);
+  const e2 = route('A2', 'B2', [300, 40], [300, 300]);
+  const before = [flat(e1), flat(e2)];
+  routeEdges(rects, noParents(rects), [e1, e2]);
+  assert.deepEqual([flat(e1), flat(e2)], before, 'both keep their old routes');
+});
+
+test('routes: a kept old route does not take a port slot on the side it enters', async () => {
+  const { routeEdges } = await import('../../shared/render/layout-routes.ts');
+  const rects = new Map<string, Rect>([['X', box(300, 0)], ['Y', box(0, 200)], ['Z', box(-250, 190)]]);
+  // Z enters Y's left side, so it is no facing edge: it must not push X > Y off the middle of Y's top.
+  const side = route('Z', 'Y', [-150, 210], [0, 210]);
+  const down = route('X', 'Y', [350, 40], [350, 100], [50, 100], [50, 200]);
+  routeEdges(rects, noParents(rects), [side, down]);
+  assert.equal(down.points[down.points.length - 1]!.x, 50, 'the only port on Y\'s top is its middle');
+  assert.deepEqual(flat(side), [[-150, 210], [0, 210]], 'Z > Y untouched');
+});
+
+test('routes: a fan-in shares one port and merges 24 px before the side', async () => {
+  const { routeEdges, BUS_GAP } = await import('../../shared/render/layout-routes.ts');
+  const rects = new Map<string, Rect>([['A', box(0, 0)], ['B', box(250, 0)], ['T', box(100, 200)]]);
+  const a = route('A', 'T', [50, 40], [150, 200]);
+  const b = route('B', 'T', [300, 40], [150, 200]);
+  routeEdges(rects, noParents(rects), [a, b]);
+  for (const e of [a, b]) {
+    const end = e.points[e.points.length - 1]!;
+    assert.deepEqual([end.x, end.y], [150, 200], 'one port on T');
+    assert.equal(e.points[2]!.y, 200 - BUS_GAP, 'merges on the bus level');
+  }
+});
+
+test('routes: a jog that stagger would push into a stub shorter than 8 px stays where it was', async () => {
+  const { routeEdges, STAGGER } = await import('../../shared/render/layout-routes.ts');
+  const run = (gap: number) => {
+    const rects = new Map<string, Rect>([['A1', box(0, 0)], ['B1', box(150, 40 + gap)], ['A2', box(120, 0)], ['B2', box(300, 40 + gap)]]);
+    const e1 = route('A1', 'B1', [50, 40], [200, 40 + gap]);
+    const e2 = route('A2', 'B2', [170, 40], [350, 40 + gap]);
+    routeEdges(rects, noParents(rects), [e1, e2]);
+    return [e1, e2];
+  };
+  // Roomy gap: the two overlapping jogs are dealt out STAGGER apart.
+  const [r1, r2] = run(60);
+  assert.equal(Math.abs(r1!.points[1]!.y - r2!.points[1]!.y), STAGGER);
+  // Gap 16: a stub is 8 px; moving a jog 3 px would leave one stub at 5, so both stay on the middle.
+  const [t1, t2] = run(16);
+  assert.equal(t1!.points[1]!.y, t2!.points[1]!.y);
+  assert.equal(t1!.points[1]!.y, 48);
+});
+
+test('routes: a label never sits on a run it shares with another line or on its split point', async () => {
+  const { renderDiagram } = await import('../../shared/render/index.ts');
+  const code = ['H', 'A', 'B', 'C', 'D', 'H > A: one', 'H > B: two', 'H > C: three', 'H > D: four', 'A > D: x'].join('\n');
+  const { scene } = await renderDiagram(code, { type: 'flowchart' });
+  type E = { kind: 'edge'; id: string; points: { x: number; y: number }[] };
+  type T = { kind: 'text'; plate?: boolean; lines: string[]; x: number; y: number; h?: number };
+  const es = scene.items.filter((i) => i.kind === 'edge') as E[];
+  const labels = scene.items.filter((i) => i.kind === 'text' && (i as T).plate) as T[];
+  const dist = (c: { x: number; y: number }, p: { x: number; y: number }, q: { x: number; y: number }) => {
+    const dx = q.x - p.x;
+    const dy = q.y - p.y;
+    const t = Math.max(0, Math.min(1, ((c.x - p.x) * dx + (c.y - p.y) * dy) / (dx * dx + dy * dy || 1)));
+    return Math.hypot(p.x + dx * t - c.x, p.y + dy * t - c.y);
+  };
+  const names = ['one', 'two', 'three', 'four', 'x'];
+  names.forEach((name, i) => {
+    const l = labels.find((t) => t.lines[0] === name)!;
+    const c = { x: l.x, y: l.y + 11 }; // text y is the plate top; labels here are one line (about 22 px tall)
+    for (const [j, other] of es.entries()) {
+      if (j === i) continue;
+      for (let k = 1; k < other.points.length; k++) assert.ok(dist(c, other.points[k - 1]!, other.points[k]!) > 6, `'${name}' sits on ${other.id}`);
+    }
+  });
+});
+
+test('routes: a bus member blocked on the bus level leaves the bus instead of running down its siblings', async () => {
+  const { renderDiagram } = await import('../../shared/render/index.ts');
+  const code = ['H', 'A', 'B', 'C', 'D', 'H > A: one', 'H > B: two', 'H > C: three', 'H > D: four', 'A > D: x'].join('\n');
+  const { scene } = await renderDiagram(code, { type: 'flowchart' });
+  type E = { kind: 'edge'; id: string; points: { x: number; y: number }[] };
+  const es = scene.items.filter((i) => i.kind === 'edge') as E[];
+  const [, b, c] = es as [E, E, E];
+  // H > C used to leave H's shared port and run beside H > B for 69 px before jogging.
+  assert.notEqual(c.points[0]!.x, b.points[0]!.x, 'H > C has a port of its own');
+  const sharedRun = c.points.slice(1).reduce((n, q, k) => (q.x === c.points[k]!.x && q.x === b.points[0]!.x ? n + Math.abs(q.y - c.points[k]!.y) : n), 0);
+  assert.ok(sharedRun <= 30, `${sharedRun} px beside H > B`);
 });

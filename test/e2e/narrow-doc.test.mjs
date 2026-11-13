@@ -61,7 +61,7 @@ test('narrow document screen: one pane at a time, ⋯ menu, a frame click goes t
   await page.waitForSelector('.doc-editor');
 
   // One pane: the document shows, the canvas does not, and the view switch has no 둘 다.
-  const views = page.getByRole('group', { name: '보기 방식' });
+  const views = page.getByRole('toolbar', { name: '보기 방식' });
   assert.equal(await views.getByRole('button', { name: '둘 다' }).count(), 0, 'no 둘 다 below md');
   assert.equal(await views.getByRole('button', { name: '문서' }).getAttribute('aria-pressed'), 'true');
   assert.equal(await page.locator('.excalidraw').count(), 0, 'canvas pane is not shown next to the document');
@@ -74,7 +74,7 @@ test('narrow document screen: one pane at a time, ⋯ menu, a frame click goes t
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   assert.ok(overflow <= 0, `page scrolls sideways by ${overflow}px`);
 
-  // ⋯ holds 버전 기록 and the export actions, and is a 44px touch target.
+  // ⋯ holds 버전 기록 (내보내기 is its own icon button) and is a 44px touch target.
   const more = page.getByRole('button', { name: '더 보기' });
   const size = await more.evaluate((n) => n.getBoundingClientRect());
   assert.ok(size.width >= 44 && size.height >= 44, `⋯ is ${size.width}x${size.height}`);

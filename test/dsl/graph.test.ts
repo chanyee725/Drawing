@@ -220,3 +220,13 @@ test("an edge label and a node label in quotes keep their '}' (the unquoted form
   assert.ok(json.includes('x}y') && json.includes('ok } fine'));
   assert.ok(fmt(parseFlowchart('A [label: x}y]').diagnostics).some((d) => d.includes("put the text in quotes")));
 });
+
+test('E40: subtitle attribute and nodeStyle global parse without warnings', () => {
+  const { ast, diagnostics } = parseArchitecture(['nodeStyle icon', 'Web [icon: react, subtitle: React SPA]'].join('\n'));
+  assert.deepEqual(diagnostics, []);
+  assert.equal(ast.styles.nodeStyle, 'icon');
+  assert.deepEqual(ast.children[0]!.attrs, { icon: 'react', subtitle: 'React SPA' });
+  const bad = parseArchitecture('nodeStyle round\nA');
+  assert.equal(bad.diagnostics.length, 1);
+  assert.match(bad.diagnostics[0]!.message, /Unknown nodeStyle 'round'. Use one of: box, icon/);
+});

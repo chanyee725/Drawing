@@ -58,7 +58,9 @@ test('version history: list, preview, restore', { skip: !ON && 'set DRAW_E2E=1, 
     await new Promise((r) => setTimeout(r, 100));
   }
 
-  await page.getByRole('button', { name: '버전 기록' }).click();
+  // 버전 기록 lives in the header's ⋯ menu (E46).
+  await page.getByRole('button', { name: '더 보기' }).click();
+  await page.getByRole('menuitem', { name: '버전 기록' }).click();
   const dialog = page.getByRole('dialog', { name: '버전 기록' });
   await dialog.waitFor();
   const items = dialog.getByRole('list', { name: '저장된 버전' }).getByRole('button');

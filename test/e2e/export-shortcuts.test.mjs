@@ -198,6 +198,8 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
       await page.locator(sel).click();
     };
     const open = async () => {
+      // The previous menu may still be playing its close animation; reopening now would race it (#218).
+      await page.getByRole('menu', { name: '내보내기' }).waitFor({ state: 'detached' });
       await page.keyboard.press('Control+e');
       await page.getByRole('menu', { name: '내보내기' }).waitFor();
     };
@@ -378,6 +380,14 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     assert.ok((await mzoom()) < up, 'palette zoom out on a Mac');
     await run('화면 크기 100%');
     assert.equal(await mzoom(), 100);
+    // The palette shows the Mac glyphs for copy-as-image.
+    await mp.keyboard.press('Meta+k');
+    await dlg.waitFor();
+    await mp.keyboard.type('이미지로 복사');
+    assert.match(await dlg.locator('[role=option]').first().innerText(), /⇧⌥C/);
+    assert.doesNotMatch(await dlg.innerText(), /Shift\+Alt\+C/);
+    await mp.keyboard.press('Escape');
+    await dlg.waitFor({ state: 'detached' });
     // Cmd+E opens the menu with a Mac tooltip; Ctrl+E does not.
     assert.equal(await mp.getByRole('button', { name: '내보내기', exact: true }).getAttribute('title'), '내보내기 (⌘E)');
     await mp.mouse.click(1300, 800);
@@ -386,6 +396,9 @@ test('export and shortcuts in a headless browser', { skip: !ON && 'set DRAW_E2E=
     assert.equal(await mp.getByRole('menu', { name: '내보내기' }).count(), 0, 'Ctrl+E must not open the menu on a Mac');
     await mp.keyboard.press('Meta+e');
     await mp.getByRole('menu', { name: '내보내기' }).waitFor();
+    // #175: the option groups are not wrapped in a named group inside the menu.
+    assert.equal(await mp.getByRole('menu', { name: '내보내기' }).getByRole('group', { name: '이미지 옵션' }).count(), 0);
+    assert.equal(await mp.getByRole('menu', { name: '내보내기' }).getByRole('group').count(), 2);
     await mctx.close();
   });
 

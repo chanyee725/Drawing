@@ -13,26 +13,28 @@ type Props = {
   /** Show a "created" column (the project home does, the dashboard keeps it short). */
   showCreated?: boolean;
   label: string;
+  /** Files with a run going now: their row gets a 실행 중 badge. */
+  running?: ReadonlySet<string>;
 };
 
-export function DocList({ rows, onOpen, onToggle, onDelete, showCreated = true, label }: Props) {
+export function DocList({ rows, onOpen, onToggle, onDelete, showCreated = true, label, running }: Props) {
   return (
-    <ul role="tree" aria-label={label} className="m-0 list-none p-0">
+    // A plain list, not role=tree: rows hold their own buttons, so Tab moves through them and the
+    // chevron is a disclosure button (aria-expanded) rather than a tree item needing arrow-key handling.
+    <ul aria-label={label} className="m-0 list-none p-0">
       {rows.map(({ doc, depth, subs, expandable, expanded }) => (
         <li
           key={doc.path}
-          role="treeitem"
-          aria-level={depth + 1}
-          aria-expanded={expandable ? expanded : undefined}
           data-doc-row={doc.path}
-          className="group flex items-center gap-1 rounded-md pr-2 text-sm hover:bg-accent/60"
+          data-depth={depth}
+          className="group flex items-center gap-1 border-b pr-2 text-sm hover:bg-accent/60"
           style={{ height: ROW_HEIGHT, paddingLeft: depth * INDENT + 4 }}
         >
           {expandable ? (
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`${doc.title} ${expanded ? '접기' : '펼치기'}`}
+              aria-label={`${doc.title} 하위 문서`}
               aria-expanded={expanded}
               onClick={() => onToggle(doc.path)}
             >
@@ -45,14 +47,21 @@ export function DocList({ rows, onOpen, onToggle, onDelete, showCreated = true, 
             <span className="flex min-w-0 flex-1 items-center gap-2 text-muted-foreground">
               <FolderClosed className="size-4 shrink-0" />
               <span className="truncate">{doc.title}</span>
+              {expandable && !expanded && <span className="shrink-0 text-[13px] tabular-nums">하위 {subs}</span>}
             </span>
           ) : (
             <button type="button" onClick={() => onOpen(doc.path)} className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
               <File className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate">{doc.title}</span>
+              {expandable && !expanded && <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums">하위 {subs}</span>}
+              {running?.has(doc.path) && (
+                <span className="inline-flex shrink-0 items-center gap-1.5 rounded-sm border px-1.5 text-xs leading-[17px] text-foreground">
+                  <span aria-hidden className="size-1.5 rounded-full bg-ok" />
+                  실행 중
+                </span>
+              )}
             </button>
           )}
-          {expandable && !expanded && <span className="shrink-0 text-[13px] text-muted-foreground">하위 {subs}개</span>}
           {showCreated && <span className="hidden w-20 shrink-0 text-right text-[13px] text-muted-foreground md:block">{relativeTime(doc.createdAt)}</span>}
           <span className="w-20 shrink-0 text-right text-[13px] text-muted-foreground">{relativeTime(doc.modifiedAt)}</span>
           {!doc.bundle && (

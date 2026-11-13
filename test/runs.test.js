@@ -246,6 +246,11 @@ test('runs API: list, read, POST stub', async () => {
     assert.equal((await res.json()).runs[0].id, run.id);
     res = await fetch(`${base}/api/runs/run?path=a.dpx.json&id=${run.id}`);
     assert.equal((await res.json()).id, run.id);
+    res = await fetch(`${base}/api/runs/active`);
+    assert.deepEqual(await res.json(), { files: ['a.dpx.json'] });
+    await recorder.endRun(run.id, 'done');
+    res = await fetch(`${base}/api/runs/active`);
+    assert.deepEqual(await res.json(), { files: [] });
     res = await fetch(`${base}/api/runs?path=../x`);
     assert.equal(res.status, 400);
     res = await fetch(`${base}/api/runs`);

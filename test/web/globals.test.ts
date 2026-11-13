@@ -75,3 +75,15 @@ test('each picker default draws the same as leaving the line out', async () => {
     }
   }
 });
+
+test('node shape picker: nodeStyle reads and writes the global line', () => {
+  const code = 'title T\nWeb [icon: react]';
+  assert.equal(readGlobal(code, 'nodeStyle'), null);
+  const icon = writeGlobal(code, 'nodeStyle', 'icon');
+  assert.equal(icon, 'title T\nnodeStyle icon\nWeb [icon: react]');
+  assert.equal(readGlobal(icon, 'nodeStyle'), 'icon');
+  const box = writeGlobal(icon, 'nodeStyle', 'box');
+  assert.equal(readGlobal(box, 'nodeStyle'), 'box');
+  assert.equal(writeGlobal(box, 'nodeStyle', null), code);
+  assert.deepEqual(parse(icon, 'cloud-architecture').diagnostics, []);
+});

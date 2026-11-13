@@ -21,8 +21,8 @@ export type DpxFile = {
 export type TreeNode =
   | { type: 'folder'; name: string; path: string; children: TreeNode[] }
   | { type: 'file'; name: string; path: string; title: string; revision: number | null; mtime?: string; created?: string; pipeline?: PipelineMark };
-/** Tree mark of a pipeline file. Only `plan` (draft) exists until runs are recorded (E21). */
-export type PipelineMark = { state: 'plan' };
+/** Tree mark of a pipeline file: draft (`plan`), a run in progress, the newest run stopped or failed (`paused`), or done. */
+export type PipelineMark = { state: 'plan' | 'running' | 'paused' | 'done' };
 
 /** Projects view (GET /api/workspace/projects, docs/workspace-api.md). Times are ISO strings. */
 export type DocNode = {
@@ -151,6 +151,8 @@ const toDoc = (n: DocNodeDto): ProjectDoc => ({
   children: n.children.map(toDoc),
 });
 export const projectsApi = {
+  /** Files with a run going now (GET /api/runs/active). */
+  running: () => call<{ files: string[] }>('GET', '/api/runs/active').then((r) => r.files),
   projects: () =>
     call<{ projects: ProjectDto[]; loose: DocNodeDto[] }>('GET', '/api/workspace/projects').then(
       (r): ProjectsResponse => ({
