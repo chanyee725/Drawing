@@ -308,7 +308,7 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
       setResets(new Set(pics.flatMap((p, i) => (p.layoutReset ? [blocks[i]!.id] : []))));
       for (const p of pics) sizes.current.set(p.fileId, p);
       const files = api.getFiles();
-      const add = pics.filter((p) => !files[p.fileId]).map(fileData);
+      const add = pics.filter((p) => !files[p.fileId]).map((p) => fileData(p));
       if (add.length) api.addFiles(add);
       const els = api.getSceneElementsIncludingDeleted();
       const index = new Map(blocks.map((b, i) => [b.id, i]));
