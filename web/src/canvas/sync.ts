@@ -268,6 +268,32 @@ export function findFreeSpot(w: number, h: number, taken: readonly Rect[], gap =
   return { x: minX, y: round(Math.max(...taken.map((r) => r.y + r.h)) + gap) };
 }
 
+type PicSize = { width: number; height: number };
+
+/**
+ * Where a block's image goes. A placed block keeps its spot and width (height follows the picture);
+ * a block never placed gets the picture's own size and a spot clear of everything in `taken`.
+ */
+function placeBlock<B extends BlockGeom>(b: B, p: PicSize, taken: Rect[]): B {
+  if (!isUnplaced(b)) return { ...b, h: fitHeight(b.w, p.width, p.height) };
+  const spot = findFreeSpot(p.width, p.height, taken);
+  const out = { ...b, ...spot, w: p.width, h: p.height };
+  taken.push(out);
+  return out;
+}
+
+/**
+ * Place a batch of blocks shown for the first time (`pics[i]` is block i's picture). Blocks with a spot are
+ * counted first, at the height their picture gives them, so blocks still to place keep clear of all of them.
+ * `taken` (what is on the canvas already) gets the new boxes added.
+ */
+export function placeBlocks<B extends BlockGeom>(list: readonly B[], pics: readonly PicSize[], taken: Rect[]): B[] {
+  list.forEach((b, i) => {
+    if (!isUnplaced(b)) taken.push({ x: b.x, y: b.y, w: b.w, h: fitHeight(b.w, pics[i]!.width, pics[i]!.height) });
+  });
+  return list.map((b, i) => placeBlock(b, pics[i]!, taken));
+}
+
 export const newBlockId = () => `b_${Math.random().toString(36).slice(2, 10)}`;
 
 /**

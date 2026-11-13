@@ -14,7 +14,7 @@ import type {
   TextSize,
   Typeface,
 } from './scene.ts';
-import { FONT_SIZE, lineHeightOf, linesWidth, textWidth, wrapText } from './text.ts';
+import { FONT_SIZE, PLATE_PAD, lineHeightOf, linesWidth, textWidth, wrapText } from './text.ts';
 import { sanitizeColor } from './theme.ts';
 
 export const PAD = 24;
@@ -105,7 +105,7 @@ export function itemBounds(item: SceneItem): { x0: number; y0: number; x1: numbe
     case 'icon':
       return { x0: item.x, y0: item.y, x1: item.x + item.size, y1: item.y + item.size };
     case 'text': {
-      const w = linesWidth(item.lines, item.size, item.font, item.weight === 600) + (item.plate ? 8 : 0);
+      const w = linesWidth(item.lines, item.size, item.font, item.weight === 600) + (item.plate ? PLATE_PAD * 2 : 0);
       const x0 = item.anchor === 'start' ? item.x : item.anchor === 'end' ? item.x - w : item.x - w / 2;
       return { x0, y0: item.y, x1: x0 + w, y1: item.y + item.lines.length * item.lineHeight };
     }

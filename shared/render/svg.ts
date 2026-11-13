@@ -5,7 +5,7 @@ import { round } from './common.ts';
 import { iconFor } from './icons.ts';
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { FONT_FAMILY, linesWidth } from './text.ts';
+import { FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
 import { THEMES, resolvePaint, strokeOf } from './theme.ts';
 import type { Theme } from './theme.ts';
 
@@ -114,9 +114,12 @@ function textMarkup(tx: SceneText, theme: Theme): string {
   if (tx.color) fill = strokeOf(tx.color, theme);
   const out: string[] = [];
   if (tx.plate) {
-    const w = linesWidth(tx.lines, tx.size, tx.font, tx.weight === 600) + 8;
-    const x0 = tx.anchor === 'start' ? tx.x - 4 : tx.anchor === 'end' ? tx.x - w + 4 : tx.x - w / 2;
-    out.push(`<rect x="${n(x0)}" y="${n(tx.y - 2)}" width="${n(w)}" height="${n(tx.lines.length * tx.lineHeight + 4)}" rx="4" fill="${t.plate}"/>`);
+    // A small pill behind the label, like a chip on the line: room on both ends, round ends, a hairline edge.
+    const w = linesWidth(tx.lines, tx.size, tx.font, tx.weight === 600) + PLATE_PAD * 2;
+    const h = tx.lines.length * tx.lineHeight + 4;
+    const x0 = tx.anchor === 'start' ? tx.x - PLATE_PAD : tx.anchor === 'end' ? tx.x - w + PLATE_PAD : tx.x - w / 2;
+    const rx = tx.lines.length > 1 ? Math.min(8, h / 2) : h / 2;
+    out.push(`<rect x="${n(x0)}" y="${n(tx.y - 2)}" width="${n(w)}" height="${n(h)}" rx="${n(rx)}" fill="${t.plate}" stroke="${t.plateStroke}" stroke-width="1"/>`);
   }
   const spans = tx.lines
     .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
@@ -232,7 +235,7 @@ function edgeMarkup(e: SceneEdge, theme: Theme): string {
   else d = `M${n(ps[0]!.x)} ${n(ps[0]!.y)}L${n(ps[ps.length - 1]!.x)} ${n(ps[ps.length - 1]!.y)}`;
   ps = [];
   const dash = e.dashed ? ' stroke-dasharray="6 5"' : '';
-  return `<g data-edge="${esc(e.id)}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
+  return `<g data-edge="${esc(e.id)}"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
 function lineMarkup(l: SceneLine, theme: Theme): string {

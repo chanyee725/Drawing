@@ -5,6 +5,7 @@ import { finishScene, fontSize, measureLabel, round, styleFor, textItem } from '
 import type { ElementStyle, Label } from './common.ts';
 import { absolutePositions, edgeOffset, runElk } from './elk.ts';
 import type { ElkExtendedEdge, ElkNode } from './elk.ts';
+import { PLATE_PAD } from './text.ts';
 import { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
 import type { BlockLayout } from './block-layout.ts';
 import type { Point, Scene, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
@@ -268,7 +269,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       id: `e:${e.id}`,
       sources: [elkId(e.from)],
       targets: [elkId(e.to)],
-      labels: label ? [{ id: `l:${e.id}`, text: e.label!, width: Math.ceil(label.w + 8), height: label.h + 4 }] : [],
+      labels: label ? [{ id: `l:${e.id}`, text: e.label!, width: Math.ceil(label.w + PLATE_PAD * 2), height: label.h + 4 }] : [],
     };
   });
 

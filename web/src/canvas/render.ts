@@ -4,6 +4,7 @@ import { analyzeDiagram, nextPreview, renderPreview, type Preview, type RenderOu
 import type { ReconcileReason } from '../../../shared/render/overrides.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
 import { drawSig, fileIdFor, hash, type BlockLike, type OriginAnchor } from './sync.ts';
+import { svgDataURL } from './resolution.ts';
 
 export type BlockPicture = { fileId: string; dataURL: string; /** The picture as SVG text (for export). */ svg: string; width: number; height: number;
   /** Number of errors in the code that is drawn now; when above 0 the picture is the last good one (or a placeholder). */ errors: number;
@@ -17,13 +18,6 @@ type Drawn = { svg: string; width: number; height: number; errors?: number; last
 
 const MIN = 40;
 const MAX_PICTURES = 200;
-
-const toDataURL = (svg: string) => {
-  const bytes = new TextEncoder().encode(svg);
-  let bin = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return `data:image/svg+xml;base64,${btoa(bin)}`;
-};
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
@@ -66,7 +60,7 @@ function picture(blockId: string, r: Drawn): BlockPicture {
   const fileId = `blk_${blockId}_${hash(r.svg)}`;
   let p = pictures.get(fileId);
   if (!p) {
-    p = { fileId, dataURL: toDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false };
+    p = { fileId, dataURL: svgDataURL(r.svg), svg: r.svg, width: Math.max(MIN, r.width), height: Math.max(MIN, r.height), errors: 0, lastGood: false, failed: false };
     pictures.set(fileId, p);
     if (pictures.size > MAX_PICTURES) pictures.delete(pictures.keys().next().value!);
   }
