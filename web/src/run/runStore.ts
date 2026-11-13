@@ -33,6 +33,9 @@ export function setStill(still: boolean) {
   if (still !== state.still) emit({ ...state, still });
 }
 
+/** Tests only: listen to every store change. */
+export const subscribeForTests = subscribe;
+
 export const runStepsFor = (blockId: string): readonly RunStep[] | undefined => state.steps.get(blockId);
 
 export function useRunSteps(blockId: string | undefined): readonly RunStep[] | undefined {

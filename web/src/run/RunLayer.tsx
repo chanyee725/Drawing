@@ -15,6 +15,8 @@ type Props = {
   top: number;
   /** CSS px per scene unit (picture scale × zoom). */
   scale: number;
+  /** No room above the picture (it touches the top of a clipped view): the motion switch sits inside its corner. */
+  motionInside?: boolean;
 };
 
 /** Below this scale the labels are too small to read and hidden (§5 "hidden below 40 % zoom"). */
@@ -29,14 +31,14 @@ export function textWidth(s: string, size = LABEL_FONT): number {
   return Math.ceil(w);
 }
 
-export function RunLayer({ scene, steps, left, top, scale }: Props) {
+export function RunLayer({ scene, steps, left, top, scale, motionInside }: Props) {
   const model = useMemo(() => overlayModel(scene, steps), [scene, steps]);
   const still = useStill();
   if (!model.nodes.length) return null;
   const moving = model.nodes.some((n) => n.live) || model.edges.some((e) => e.kind === 'flow');
   const labels = scale >= MIN_LABEL_SCALE;
   return (
-    <div className="run-layer" data-run-layer="" data-still={still ? '' : undefined} style={{ left, top, width: scene.width * scale, height: scene.height * scale }}>
+    <div className="run-layer" data-run-layer="" data-still={still ? '' : undefined} data-motion-inside={motionInside ? '' : undefined} style={{ left, top, width: scene.width * scale, height: scene.height * scale }}>
       <svg role="group" aria-label="실행 상태" viewBox={`0 0 ${scene.width} ${scene.height}`} width="100%" height="100%" overflow="visible">
         {model.edges.map((e) => (
           <path key={e.key} className="run-edge" data-edge-kind={e.kind} d={pathData(e.points)} stroke={e.color} />
