@@ -25,6 +25,9 @@ const liveElements = (canvas: unknown): CanvasEl[] => {
 
 export type FrameInfo = { id: string; name: string; /** False for an unnamed frame, whose name is its number ("프레임 2"). */ named: boolean };
 
+/** What the canvas gives a new frame: it counts as unnamed, so the document says "프레임 2", not "프레임 프레임". */
+export const DEFAULT_FRAME_NAME = '프레임';
+
 /** Frames on the canvas, in canvas order. An unnamed frame is numbered among the unnamed ones only: 프레임 1, 프레임 2 (a named frame in between does not shift them). */
 export function framesOf(canvas: unknown): FrameInfo[] {
   let unnamed = 0;
@@ -32,12 +35,12 @@ export function framesOf(canvas: unknown): FrameInfo[] {
     .filter((e) => e.type === 'frame' || e.type === 'magicframe')
     .map((e) => {
       const name = typeof e.name === 'string' ? e.name.trim() : '';
-      return name ? { id: e.id, name, named: true } : { id: e.id, name: `프레임 ${++unnamed}`, named: false };
+      return name && name !== DEFAULT_FRAME_NAME ? { id: e.id, name, named: true } : { id: e.id, name: `프레임 ${++unnamed}`, named: false };
     });
 }
 
 /** A frame as the document calls it: a given name reads "프레임 구조도", a numbered one stays "프레임 2". */
-export const frameLabel = (f: { name: string; named: boolean }) => (f.named ? `프레임 ${f.name}` : f.name);
+export const frameLabel = (f: { name: string; named: boolean }) => (f.named && !f.name.startsWith(DEFAULT_FRAME_NAME) ? `프레임 ${f.name}` : f.name);
 
 type Placed = { x: number; y: number; w: number; h: number };
 type FrameBox = { x: number; y: number; width: number; height: number };
@@ -97,6 +100,11 @@ export function docShapeProblem(document: unknown): string | null {
 }
 
 /** A document with no content at all (new files start like this). */
+/** True when the document has something to print: some text, a diagram or a frame (empty paragraphs do not count). */
+export function docHasContent(document: unknown): boolean {
+  const walk = (n: DocNode): boolean => n.type === DIAGRAM_NODE || n.type === FRAME_NODE || (typeof n.text === 'string' && n.text.trim() !== '') || (n.content?.some(walk) ?? false);
+  return !docShapeProblem(document) && ((document as DocJSON).content?.some(walk) ?? false);
+}
 export const isEmptyDoc = (document: unknown) => !docShapeProblem(document) && !(document as DocJSON).content?.length;
 
 /**

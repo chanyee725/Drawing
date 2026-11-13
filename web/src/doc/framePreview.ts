@@ -33,7 +33,12 @@ export async function renderFrame(scene: readonly CanvasEl[], frameId: string, d
   const { clip: box, images } = blockPlacements({ x: fx, y: fy, width: fw, height: fh }, blocks, pad);
   if (images.length) {
     // Always the light picture: a dark export puts an invert filter on the whole SVG, which would invert a dark one twice.
-    const pics = await Promise.all(images.map((b) => renderBlock(blocks.find((x) => x.id === b.id) as Block, 'light')));
+    const byId = new Map(blocks.map((x) => [x.id, x]));
+    const placed = images.flatMap((b) => {
+      const block = byId.get(b.id);
+      return block ? [{ b, block }] : [];
+    });
+    const pics = await Promise.all(placed.map((p) => renderBlock(p.block, 'light')));
     const clipId = `frame-clip-${frameId.replace(/[^\w-]/g, '_')}`;
     const clip = document.createElementNS(SVG_NS, 'clipPath');
     clip.setAttribute('id', clipId);
@@ -46,7 +51,7 @@ export async function renderFrame(scene: readonly CanvasEl[], frameId: string, d
     const layer = document.createElementNS(SVG_NS, 'g');
     layer.setAttribute('clip-path', `url(#${clipId})`);
     layer.setAttribute('data-frame-blocks', '');
-    images.forEach((b, i) => {
+    placed.forEach(({ b }, i) => {
       const img = document.createElementNS(SVG_NS, 'image');
       img.setAttribute('href', pics[i].dataURL);
       img.setAttribute('x', String(b.x));

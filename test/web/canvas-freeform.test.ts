@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bindArrows, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
+import { bindArrows, frameFor, sceneToFreeform } from '../../web/src/canvas/freeform.ts';
 import type { Scene } from '../../shared/render/scene.ts';
 import { layoutDiagram } from '../../shared/render/index.ts';
 import { parseArchitecture, parseFlowchart } from '../../shared/dsl/index.ts';
@@ -97,4 +97,70 @@ test('a group title shares groupIds with its dashed rectangle so they move toget
   assert.equal(ids.length, 1);
   assert.deepEqual(title.groupIds, ids);
   assert.equal(a.groupIds, undefined);
+});
+
+// Nested groups: the inner one has an icon before its title; one note sits outside every box.
+const NESTED: Scene = {
+  type: 'cloud-architecture',
+  width: 600,
+  height: 340,
+  items: [
+    { kind: 'box', id: 'outer', role: 'group', shape: 'rectangle', x: 0, y: 0, w: 600, h: 300, paint: { mode: 'pastel' }, shadow: false },
+    { kind: 'text', x: 14, y: 12, lines: ['Cloud'], size: 12, lineHeight: 16, anchor: 'start', weight: 600, font: 'clean', tone: 'normal' },
+    { kind: 'box', id: 'inner', role: 'group', shape: 'rectangle', x: 100, y: 60, w: 300, h: 200, paint: { color: 'green', mode: 'pastel' }, shadow: false },
+    { kind: 'icon', name: 'server', x: 114, y: 71, size: 17, paint: { color: 'green', mode: 'pastel' } },
+    { kind: 'text', x: 139, y: 72, lines: ['VPC'], size: 12, lineHeight: 16, anchor: 'start', weight: 600, font: 'clean', tone: 'normal' },
+    { kind: 'box', id: 'n', role: 'node', shape: 'rectangle', x: 150, y: 120, w: 100, h: 40, paint: { mode: 'pastel' }, shadow: true },
+    { kind: 'text', x: 200, y: 132, lines: ['API'], size: 14, lineHeight: 18, anchor: 'middle', weight: 400, font: 'clean', tone: 'normal' },
+    { kind: 'icon', name: 'server', x: 160, y: 130, size: 16, paint: { mode: 'pastel' }, inside: true },
+    { kind: 'text', x: 20, y: 316, lines: ['note'], size: 12, lineHeight: 16, anchor: 'start', weight: 400, font: 'clean', tone: 'muted' },
+  ],
+};
+
+test('nested groups: each title joins its own (smallest) group, a note outside every box stays loose', () => {
+  const sk = sceneToFreeform(NESTED, { x: 0, y: 0, width: 600 }, counter()).skeletons;
+  const [outer, inner, node] = sk;
+  const text = (s: string) => sk.find((x) => x.type === 'text' && x.text === s)!;
+  assert.deepEqual(text('Cloud').groupIds, outer.groupIds);
+  assert.deepEqual(text('VPC').groupIds, inner.groupIds);
+  assert.notDeepEqual(outer.groupIds, inner.groupIds);
+  assert.equal(text('note').groupIds, undefined);
+  assert.equal(node.groupIds, undefined);
+  assert.equal((node.label as { text: string }).text, 'API');
+  assert.equal(sk.filter((x) => x.type === 'text').length, 3, 'the node label is bound, not loose');
+  assert.ok(sk.every((x) => x.type !== 'image'), 'no icons');
+});
+
+test('a group title takes its left-out icon slot instead of leaving a gap', () => {
+  const sk = sceneToFreeform(NESTED, { x: 1000, y: 0, width: 1200 }, counter()).skeletons;
+  const text = (s: string) => sk.find((x) => x.type === 'text' && x.text === s)!;
+  assert.equal(text('VPC').x, 1000 + 114 * 2, 'starts where the icon was');
+  assert.equal(text('Cloud').x, 1000 + 14 * 2, 'a title without an icon stays put');
+  assert.equal(text('note').x, 1000 + 20 * 2);
+});
+
+test('a real architecture group with an icon converts without an icon gap', async () => {
+  const d = parseArchitecture('VPC [icon: server] {\n  Inner [icon: database] {\n    API [icon: server]\n  }\n  Worker\n}\nDB [icon: database]\nAPI > DB\nWorker > DB');
+  const scene = await layoutDiagram(d.ast);
+  const groups = scene.items.filter((i) => i.kind === 'box' && i.role === 'group');
+  assert.equal(groups.length, 2, 'fixture has an inner group');
+  const { skeletons } = sceneToFreeform(scene, { x: 0, y: 0, width: scene.width }, counter());
+  for (const name of ['VPC', 'Inner']) {
+    const g = groups.find((b) => b.kind === 'box' && b.id === name)!;
+    const title = skeletons.find((s) => s.type === 'text' && s.text === name)!;
+    assert.ok(g.kind === 'box' && Math.abs((title.x as number) - (g.x + 14)) < 0.5, `${name} title at the group's padding, got ${title.x} vs ${g.kind === 'box' && g.x}`);
+  }
+  assert.deepEqual(skeletons.filter((s) => s.type === 'rectangle' && s.label).map((s) => (s.label as { text: string }).text).sort(), ['API', 'DB', 'Worker']);
+});
+
+test('frameFor: the image keeps its own frame, else the smallest live frame that holds it whole', () => {
+  const r = (id: string, type: string, x: number, y: number, width: number, height: number, more = {}) => ({ id, type, x, y, width, height, ...more });
+  const img = r('img', 'image', 100, 100, 200, 100);
+  const big = r('big', 'frame', 0, 0, 1000, 1000);
+  const small = r('small', 'frame', 50, 50, 400, 300);
+  const part = r('part', 'frame', 150, 0, 400, 400);
+  assert.equal(frameFor(img, [img, big, small, part]), 'small');
+  assert.equal(frameFor(img, [img, r('gone', 'frame', 50, 50, 300, 200, { isDeleted: true }), big]), 'big');
+  assert.equal(frameFor(img, [img, part, r('rect', 'rectangle', 0, 0, 1000, 1000)]), null, 'partly inside or not a frame');
+  assert.equal(frameFor({ ...img, frameId: 'own' }, [img, small]), 'own');
 });

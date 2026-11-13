@@ -1,9 +1,9 @@
 // Workspace file store: one `*.dpx.json` per diagram file, sub-folders = folders.
 // Writes are atomic (temp file in the same dir + rename) and serialized; stale writes are refused by revision.
 import { watch } from 'node:fs';
-import { link, mkdir, readdir, readFile, rename, rm, stat, lstat, unlink, writeFile } from 'node:fs/promises';
+import { link, mkdir, readdir, readFile, rename, rm, rmdir, stat, lstat, unlink, writeFile } from 'node:fs/promises';
 import { createHash, randomBytes } from 'node:crypto';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { createResolver, parseRelPath, PathError } from './paths.js';
 import { FILE_EXT, FORMAT_VERSION, newFile, normalizeContent, parseStored, ValidationError } from './model.js';
 
@@ -103,9 +103,19 @@ export function createStore(
     }
   }
 
-  async function ensureParent(abs) {
-    await mkdir(dirname(abs), { recursive: true });
+  // A file where a folder is needed (ENOTDIR deeper down, EEXIST for the last one) is a clash the caller can fix: 409.
+  const asParentClash = (err) => {
+    if (err?.code === 'ENOTDIR' || err?.code === 'EEXIST') return new StoreError(409, 'a parent in the path is a file');
+    return err;
+  };
+  async function ensureDir(dir) {
+    try {
+      await mkdir(dir, { recursive: true });
+    } catch (err) {
+      throw asParentClash(err);
+    }
   }
+  const ensureParent = (abs) => ensureDir(dirname(abs));
 
   async function loadStored(abs) {
     let text;
@@ -235,9 +245,23 @@ export function createStore(
       await rm(toDir, { recursive: true, force: true });
       await mkdir(dirname(toDir), { recursive: true });
       await rename(fromDir, toDir);
+      await pruneEmptyHistoryParents(fromDir);
     } catch {}
   }
-  const dropHistory = (rel) => historyDirOf(rel).then((d) => rm(d, { recursive: true, force: true })).catch(() => {});
+  // Remove now-empty parent folders of a history dir that moved or went away, up to (not including) `.drawing/history`.
+  async function pruneEmptyHistoryParents(dir) {
+    try {
+      const root = await fsr.resolveInternal(...HISTORY_DIR);
+      for (let d = dirname(dir); d.startsWith(root + sep) && d !== root; d = dirname(d)) await rmdir(d); // throws (ENOTEMPTY) at the first non-empty one
+    } catch {}
+  }
+  const dropHistory = (rel) =>
+    historyDirOf(rel)
+      .then(async (d) => {
+        await rm(d, { recursive: true, force: true });
+        await pruneEmptyHistoryParents(d);
+      })
+      .catch(() => {});
 
   // ---- trash: deleted files stay restorable for TRASH_DAYS ----
   // `.drawing/trash/<ms>-<hex>/` holds `meta.json` {path, deletedAt}, `file.json` (the content when we saw it go)
@@ -265,6 +289,7 @@ export function createStore(
       if (text != null) await writeFile(join(dir, 'file.json'), text, { mode: 0o644 });
       if (hasHistory) await rename(histDir, join(dir, 'history'));
       await rm(histDir, { recursive: true, force: true });
+      await pruneEmptyHistoryParents(histDir);
       if (purge) await purgeTrash([id]);
       return id;
     } catch {
@@ -329,7 +354,11 @@ export function createStore(
   async function trash() {
     return serial(async () => {
       await purgeTrash([], { cap: false }).catch(() => {}); // listing only ages entries out; the cap is enforced when something is deleted
-      const items = (await trashEntries()).map((e) => ({ id: e.id, path: e.path, deletedAt: e.deletedAt })).reverse();
+      const items = [];
+      for (const e of (await trashEntries()).reverse()) {
+        // No saved copy of the content (deleted outside the app): restoring brings back the newest history snapshot.
+        items.push({ id: e.id, path: e.path, deletedAt: e.deletedAt, fromSnapshot: !(await plainFile(join(e.dir, 'file.json'))) });
+      }
       return { items };
     });
   }
@@ -347,8 +376,7 @@ export function createStore(
         abs = await wrapPath(rel);
       } catch (err) {
         // A file now sits where one of the folders used to be: say so instead of a generic failure.
-        if (err?.code === 'ENOTDIR') throw new StoreError(409, 'a parent in the path is a file');
-        throw err;
+        throw asParentClash(err);
       }
       if (await statOrNull(abs)) throw new StoreError(409, 'a file already exists at that path');
       const histDir = join(dir, 'history');
@@ -461,7 +489,9 @@ export function createStore(
   async function createFile(rel, { title } = {}) {
     rel = checkedFileRel(rel);
     checkFolderNames(rel.split('/').slice(0, -1));
-    const abs = await wrapPath(rel);
+    const abs = await wrapPath(rel).catch((err) => {
+      throw asParentClash(err);
+    });
     const fresh = newFile({ title: typeof title === 'string' ? title : basename(rel, FILE_EXT) });
     return serial(async () => {
       await ensureParent(abs);
@@ -585,9 +615,11 @@ export function createStore(
 
   async function moveFile(from, fromAbs, toRel) {
     checkFolderNames(toRel.split('/').slice(0, -1));
-    const toAbs = await wrapPath(toRel);
-    if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
-    await mkdir(dirname(toAbs), { recursive: true });
+    const toAbs = await wrapPath(toRel).catch((err) => {
+      throw asParentClash(err);
+    });
+    if (await statOrNull(toAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    await ensureDir(dirname(toAbs));
     await rename(fromAbs, toAbs);
     forget(from, false);
     await adopt(toRel, toAbs);
@@ -598,9 +630,11 @@ export function createStore(
   async function moveFolder(from, fromAbs, toRel) {
     checkFolderNames(toRel.split('/'));
     if (toRel === from || toRel.startsWith(from + '/')) throw new StoreError(400, 'cannot move a folder into itself');
-    const toAbs = await wrapPath(toRel);
-    if (await statOrNull(toAbs)) throw new StoreError(409, 'target already exists');
-    await mkdir(dirname(toAbs), { recursive: true });
+    const toAbs = await wrapPath(toRel).catch((err) => {
+      throw asParentClash(err);
+    });
+    if (await statOrNull(toAbs).catch((err) => Promise.reject(asParentClash(err)))) throw new StoreError(409, 'target already exists');
+    await ensureDir(dirname(toAbs));
     await rename(fromAbs, toAbs);
     forget(from, true);
     knownDirs.add(toRel);
