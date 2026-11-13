@@ -156,7 +156,11 @@ function textMarkup(tx: SceneText, { theme, t, c }: Ctx): string {
     .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
     .join('');
   const weight = tx.weight === 600 ? ' font-weight="600"' : '';
-  const family = tx.font === 'clean' ? '' : ` font-family="${esc(FONT_FAMILY[tx.font])}"`;
+  // No mono face is embedded, so whichever monospace the viewer has is scaled to the 0.6em advance the layout
+  // measured with (text.ts). A style property, because browsers ignore it as an attribute; renderers without
+  // `font-size-adjust` keep the font's own width.
+  const adjust = tx.font === 'mono' ? ' style="font-size-adjust:ch-width 0.6"' : '';
+  const family = tx.font === 'clean' ? '' : ` font-family="${esc(FONT_FAMILY[tx.font])}"${adjust}`;
   return `<text font-size="${tx.size}"${weight}${family} fill="${c(fill)}" text-anchor="${tx.anchor}" xml:space="preserve">${spans}</text>`;
 }
 
