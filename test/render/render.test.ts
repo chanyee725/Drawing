@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import os from 'node:os';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { parse } from '../../shared/dsl/index.ts';
@@ -41,11 +40,32 @@ test('deterministic: same code renders the same SVG twice', async () => {
   }
 });
 
-/** Timing bound in ms: tight on a quiet machine, loose on CI or when the machine is busy (other sessions share it). */
-const timingBudget = (quiet: number, loose: number): number =>
-  process.env.CI || os.loadavg()[0]! > os.availableParallelism() / 2 ? loose : quiet;
+/**
+ * Fixed pure-JS workload (objects, Map, sort; about 13 ms), timed right before each layout in the same
+ * process. Other sessions and parallel test files slow both by about the same factor, so the ratio of
+ * the two minimums stays put under load while a real slowdown of the layout still moves it.
+ */
+function reference(): number {
+  let sum = 0;
+  for (let r = 0; r < 12; r++) {
+    const m = new Map<string, { id: string; x: number; y: number[] }>();
+    const a: { id: string; x: number; y: number[] }[] = [];
+    for (let i = 0; i < 4000; i++) {
+      const o = { id: `n${(i * 7919) % 4000}`, x: (i * 31) % 997, y: [i, i + 1] };
+      a.push(o);
+      m.set(o.id, o);
+    }
+    a.sort((p, q) => p.x - q.x || p.y[0]! - q.y[0]!);
+    for (const o of a) sum += m.get(o.id)!.y[1]! & 7;
+  }
+  return sum;
+}
 
-test('performance: 100-node architecture diagram lays out in under 150 ms (450 ms when the machine is busy)', async () => {
+// Layout of the diagram below is about 8.5x the reference (E37, Nov 2026); 13x leaves room for noise and
+// catches a ~1.5x slowdown.
+const MAX_RATIO = 13;
+
+test(`performance: 100-node architecture diagram lays out in under ${MAX_RATIO}x a fixed reference workload`, async () => {
   const lines: string[] = [];
   for (let g = 0; g < 5; g++) {
     lines.push(`G${g} [icon: aws] {`);
@@ -54,16 +74,23 @@ test('performance: 100-node architecture diagram lays out in under 150 ms (450 m
   }
   for (let g = 0; g < 5; g++) for (let i = 0; i < 19; i++) lines.push(`N${g}_${i} > N${(g + (i % 3 === 0 ? 1 : 0)) % 5}_${i + 1}: e${i}`);
   const code = lines.join('\n');
-  await renderDiagram(code); // warm-up (JIT)
-  const times: number[] = [];
-  for (let i = 0; i < 5; i++) {
-    const t0 = performance.now();
+  for (let i = 0; i < 3; i++) {
+    await renderDiagram(code); // warm-up (JIT)
+    reference();
+  }
+  let lay = Infinity;
+  let ref = Infinity;
+  for (let i = 0; i < 7; i++) {
+    let t0 = performance.now();
+    reference();
+    ref = Math.min(ref, performance.now() - t0);
+    t0 = performance.now();
     const r = await renderDiagram(code);
-    times.push(performance.now() - t0);
+    lay = Math.min(lay, performance.now() - t0);
     assert.equal(r.scene.items.filter((it) => it.kind === 'icon').length, 105);
   }
-  times.sort((a, b) => a - b);
-  assert.ok(times[2]! < timingBudget(150, 450), `median ${times[2]!.toFixed(1)} ms`);
+  const ratio = lay / ref;
+  assert.ok(ratio < MAX_RATIO, `layout ${lay.toFixed(1)} ms = ${ratio.toFixed(1)}x reference ${ref.toFixed(1)} ms`);
 });
 
 test('colour values cannot inject markup', async () => {
