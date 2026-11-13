@@ -17,6 +17,8 @@ export interface ThemeColors {
   edge: string;
   shadow: string;
   plate: string;
+  /** Hairline around an edge label's pill. */
+  plateStroke: string;
 }
 
 export const THEMES: Record<Theme, ThemeColors> = {
@@ -30,6 +32,7 @@ export const THEMES: Record<Theme, ThemeColors> = {
     edge: '#7b828d',
     shadow: 'rgba(15,23,42,0.10)',
     plate: '#ffffff',
+    plateStroke: '#e3e6ea',
   },
   dark: {
     background: '#17191d',
@@ -41,6 +44,7 @@ export const THEMES: Record<Theme, ThemeColors> = {
     edge: '#9198a3',
     shadow: 'rgba(0,0,0,0.45)',
     plate: '#17191d',
+    plateStroke: '#2e3239',
   },
 };
 
