@@ -7,12 +7,13 @@ import { finishScene, fontSize, measureLabel, round, styleFor, textItem } from '
 import type { ElementStyle, Label } from './common.ts';
 import { absolutePositions, edgeOffset, runElk } from './elk.ts';
 import type { ElkExtendedEdge, ElkNode, ElkPort } from './elk.ts';
-import type { Marker, Point, Scene, SceneItem } from './scene.ts';
+import type { Marker, Paint, Point, Scene, SceneItem, Typeface } from './scene.ts';
 import { lineHeightOf, textWidth } from './text.ts';
 
 const ROW_H = 26;
 const TYPE_SIZE = 12;
-const BADGE_W = 24;
+const KEY_GAP = 10;
+const PK_PAINT: Paint = { color: 'orange', mode: 'outline' };
 
 interface EntityGeom {
   entity: ErdEntity;
@@ -24,7 +25,15 @@ interface EntityGeom {
   h: number;
 }
 
-const KEY_BADGE = (meta: string[]): string => (meta.includes('pk') ? 'PK' : meta.includes('fk') ? 'FK' : '');
+/** Key mark of a field, written lowercase at the right end of its row (09-examples-style §2.4). */
+const keyText = (meta: string[]): string => (meta.includes('pk') ? 'pk' : meta.includes('fk') ? 'fk' : '');
+/** Types and key marks are monospaced; a hand-drawn diagram keeps its own face. */
+const typeFont = (face: Typeface): Typeface => (face === 'rough' ? 'rough' : 'mono');
+/** Width of the key column: the widest key mark of the table plus its gap, 0 when no field has one. */
+const keyColumn = (e: ErdEntity, face: Typeface): number => {
+  const w = Math.max(0, ...e.fields.map((f) => textWidth(keyText(f.meta), TYPE_SIZE, typeFont(face))));
+  return w ? w + KEY_GAP : 0;
+};
 const typeText = (meta: string[], type?: string): string => [type ?? '', ...meta.filter((m) => m !== 'pk' && m !== 'fk')].join(' ').trim();
 
 function measureEntity(d: ErdDiagram, e: ErdEntity): EntityGeom {
@@ -34,8 +43,9 @@ function measureEntity(d: ErdDiagram, e: ErdEntity): EntityGeom {
   const iconSize = e.attrs.icon ? Math.round(size * 1.4) : 0;
   const headerH = Math.max(label.h, iconSize) + 18;
   let w = label.w + (iconSize ? iconSize + 8 : 0) + 32;
+  const keyW = keyColumn(e, style.typeface);
   for (const f of e.fields) {
-    const row = BADGE_W + textWidth(f.name, size, style.typeface) + 24 + textWidth(typeText(f.meta, f.type), TYPE_SIZE, style.typeface) + 24;
+    const row = 12 + textWidth(f.name, size, style.typeface) + 24 + textWidth(typeText(f.meta, f.type), TYPE_SIZE, typeFont(style.typeface)) + keyW + 12;
     w = Math.max(w, row);
   }
   w = Math.ceil(Math.max(w, 180));
@@ -58,11 +68,11 @@ function endMarkers(r: ErdRelationship): [Marker, Marker] {
 function chenLabels(r: ErdRelationship): [string, string] {
   switch (r.cardinality) {
     case 'one-to-many':
-      return ['1', 'N'];
+      return ['1', '*'];
     case 'many-to-one':
-      return ['N', '1'];
+      return ['*', '1'];
     case 'many-to-many':
-      return ['M', 'N'];
+      return ['*', '*'];
     default:
       return ['1', '1'];
   }
@@ -135,20 +145,23 @@ export async function layoutErd(d: ErdDiagram): Promise<Scene> {
     tables.push({ kind: 'box', id: g.entity.id, role: 'entity', shape: 'rectangle', x: p.x, y: p.y, w: g.w, h: g.h, paint: { mode: style.paint.mode === 'outline' ? 'outline' : 'pastel' }, shadow });
     tables.push({ kind: 'box', role: 'entity-header', shape: 'rectangle', x: p.x, y: p.y, w: g.w, h: g.headerH, paint: style.paint, shadow: false });
     const cy = p.y + g.headerH / 2;
-    let x = p.x + 14;
-    if (g.iconSize) {
-      tables.push({ kind: 'icon', name: g.entity.attrs.icon!, x, y: cy - g.iconSize / 2, size: g.iconSize, paint: style.paint, inside: true });
-      x += g.iconSize + 8;
-    }
-    tables.push(textItem(g.label.lines, x, cy - g.label.h / 2, { size, font: style.typeface, anchor: 'start', on: style.paint }));
+    // Title on the left, the table's icon at the right end of the header.
+    if (g.iconSize) tables.push({ kind: 'icon', name: g.entity.attrs.icon!, x: p.x + g.w - 14 - g.iconSize, y: cy - g.iconSize / 2, size: g.iconSize, paint: style.paint, inside: true });
+    tables.push(textItem(g.label.lines, p.x + 14, cy - g.label.h / 2, { size, font: style.typeface, anchor: 'start', on: style.paint }));
+    const mono = typeFont(style.typeface);
+    const keyW = keyColumn(g.entity, style.typeface);
+    const smallY = (ROW_H - lineHeightOf(TYPE_SIZE)) / 2;
     g.entity.fields.forEach((f, row) => {
       const ry = p.y + g.headerH + row * ROW_H;
       const lh = lineHeightOf(size);
-      const badge = KEY_BADGE(f.meta);
-      if (badge) tables.push(textItem([badge], p.x + 10, ry + (ROW_H - lineHeightOf(10)) / 2, { size: 10, font: style.typeface, anchor: 'start', tone: 'muted', color: badge === 'PK' ? 'yellow' : undefined }));
-      tables.push(textItem([f.name], p.x + 10 + BADGE_W, ry + (ROW_H - lh) / 2, { size, font: style.typeface, anchor: 'start' }));
+      // A thin rule between rows; the header's own border separates it from the first row.
+      if (row > 0) tables.push({ kind: 'line', points: [{ x: p.x, y: ry }, { x: p.x + g.w, y: ry }], dashed: false, tone: 'muted' });
+      tables.push(textItem([f.name], p.x + 12, ry + (ROW_H - lh) / 2, { size, font: style.typeface, anchor: 'start' }));
       const t = typeText(f.meta, f.type);
-      if (t) tables.push(textItem([t], p.x + g.w - 12, ry + (ROW_H - lineHeightOf(TYPE_SIZE)) / 2, { size: TYPE_SIZE, font: style.typeface, anchor: 'end', tone: 'muted' }));
+      if (t) tables.push(textItem([t], p.x + g.w - 12 - keyW, ry + smallY, { size: TYPE_SIZE, font: mono, anchor: 'end', tone: 'muted' }));
+      const key = keyText(f.meta);
+      // `pk` in the orange palette's text shade (readable on the table fill in both themes); `fk` stays muted.
+      if (key) tables.push(textItem([key], p.x + g.w - 12, ry + smallY, { size: TYPE_SIZE, font: mono, anchor: 'end', ...(key === 'pk' ? { tone: 'group' as const, on: PK_PAINT } : { tone: 'muted' as const }) }));
     });
   }
 
