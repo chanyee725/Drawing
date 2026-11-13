@@ -44,7 +44,7 @@ export type ProjectsView = { projects: Project[]; loose: DocNode[] };
 
 /** Model connection summary for the sidebar (Dispatch routes; GET only, nothing here starts a CLI). */
 export type DispatchStatus = { enabled: boolean; reason?: string; message?: string };
-export type ProviderState = { installed: boolean | null; connected: boolean };
+export type ProviderState = { installed: boolean | null; connected: boolean; busy?: boolean; url?: string | null; error?: string | null };
 export type LimitWindow = { label: string; used: number | null; reset: number | null };
 export type ProviderLimits = {
   claude?: { windows: LimitWindow[] } | null;
@@ -91,6 +91,11 @@ export const api = {
   dispatch: () => call<DispatchStatus>('GET', '/api/dispatch'),
   providers: () => call<{ providers: Record<string, ProviderState> }>('GET', '/api/state').then((r) => r.providers ?? {}),
   limits: () => call<ProviderLimits>('GET', '/api/limits'),
+  /** Connect a provider: uses the CLI's existing login, or starts its own browser login (`connected` false). */
+  providerLogin: (id: string) => call<{ ok: boolean; connected: boolean }>('POST', `/api/providers/${id}/login`, {}),
+  providerCancel: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${id}/cancel`, {}),
+  /** Disconnects from Drawing only; the CLI stays logged in. */
+  providerLogout: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${id}/logout`, {}),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
   /** `content`: starting document, canvas, blocks and plan (a template); defaults to an empty file. */
   createFile: (path: string, title: string, content?: Partial<Pick<DpxFile, 'document' | 'canvas' | 'blocks' | 'plan'>>) =>
