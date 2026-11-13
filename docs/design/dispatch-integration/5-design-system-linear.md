@@ -12,7 +12,7 @@ public look, not measured values.
    (`Dispatch/web/components.json:1-7`, `Dispatch/web/src/index.css:9-43`). One token file serves both apps.
 2. **Dark first, light kept.** Default to the OS, but tune dark first. Three surfaces + one 1px border step,
    low-contrast grey ramp, no accent hue: primary, focus and selection are neutral (shadcn stock, doc 6 §4.1).
-3. **Type: Inter Variable 13px for UI, 15px for the document body**, Pretendard as the Korean fallback. Bundle
+3. **Type (superseded by doc 6 §4.2: Pretendard only, UI 14px, document body 16px).** First draft: Inter Variable 13px for UI, 15px for the document body, Pretendard as the Korean fallback. Bundle
    both as files (no CDN), per CLAUDE.md.
 4. **Density: 28px rows/controls, 4px grid, 6px radius, almost no shadows** (only on floating layers).
 5. **Command menu at the centre:** keep `Ctrl/Cmd+K` (`web/src/App.tsx:496`) and rebuild it on `cmdk`, so every
@@ -54,7 +54,7 @@ Traits we want, as rules we can check:
 | Dense | Default row/control 28px, compact 24px; sidebar 220px; top bar 44px |
 | Thin borders | Always 1px; in dark, white at 6–10% alpha instead of a solid grey |
 | Low-contrast greys | 4 text steps, 3 surface steps; surfaces differ by ~2–3 L in oklch |
-| Inter 13px | UI 13px/20px, meta 12px/16px, titles 14–15px 600; tabular numbers on counts and times |
+| Pretendard 14px (doc 6 §4.2) | first draft: UI 13px/20px, meta 12px/16px, titles 14–15px 600; tabular numbers on counts and times |
 | Keyboard first | Every action has a command entry; shortcuts shown as `kbd` in menus; visible focus ring |
 | Command menu centre | `Ctrl/Cmd+K` opens one menu for navigation + actions; context menus reuse its items |
 | Quiet colour | Colour only means something: accent = focus/selection, status/role = information |
@@ -68,30 +68,30 @@ screens, or marketing gradients (section 7).
 > theme in [6-app-shell-projects.md §4](6-app-shell-projects.md) (no custom greys, no accent hue; colour only for
 > status). Type moved to Pretendard only at about 108% (doc 6 §4.2). The status and role colours below still apply.
 
-Names follow shadcn so `ui/*` works unchanged; extras are ours. Values are oklch, hue 270–285 (cool grey with a
-touch of hue). Starting values; tune with a headless screenshot pass.
+Names follow shadcn so `ui/*` works unchanged; extras are ours. Values are oklch, pure neutral (chroma 0). Superseded
+by doc 6 §4.1; kept only as a record of the first draft.
 
 ### 3.1 Colour
 
 | Token | Dark (superseded, see doc 6 §4.1) | Light (superseded) | Use |
 |---|---|---|---|
-| `--background` | `oklch(0.16 0.006 0)` | `oklch(0.99 0.002 0)` | app frame, doc page |
-| `--panel` (new) | `oklch(0.185 0.007 0)` | `oklch(0.975 0.003 0)` | sidebar, top bar, inspector |
-| `--card` / `--popover` | `oklch(0.21 0.008 0)` | `oklch(1 0 0)` | menus, dialogs, cards |
-| `--muted` / `--secondary` | `oklch(0.24 0.008 0)` | `oklch(0.955 0.004 0)` | inputs, segmented bg, code |
+| `--background` | `oklch(0.16 0 0)` | `oklch(0.99 0 0)` | app frame, doc page |
+| `--panel` (new) | `oklch(0.185 0 0)` | `oklch(0.975 0 0)` | sidebar, top bar, inspector |
+| `--card` / `--popover` | `oklch(0.21 0 0)` | `oklch(1 0 0)` | menus, dialogs, cards |
+| `--muted` / `--secondary` | `oklch(0.24 0 0)` | `oklch(0.955 0 0)` | inputs, segmented bg, code |
 | `--accent` (shadcn: hover row) | `oklch(1 0 0 / 5%)` | `oklch(0 0 0 / 4%)` | hover, selected row bg |
-| `--border` | `oklch(1 0 0 / 8%)` | `oklch(0.91 0.004 0)` | every 1px line |
-| `--border-strong` (new) | `oklch(1 0 0 / 14%)` | `oklch(0.86 0.005 0)` | input, focus-less outlines |
-| `--foreground` | `oklch(0.94 0.004 0)` | `oklch(0.2 0.01 0)` | primary text |
-| `--text-2` (new) | `oklch(0.78 0.008 0)` | `oklch(0.38 0.01 0)` | secondary text |
-| `--muted-foreground` | `oklch(0.62 0.01 0)` | `oklch(0.53 0.012 0)` | meta, placeholders |
-| `--text-4` (new) | `oklch(0.48 0.01 0)` | `oklch(0.68 0.01 0)` | disabled, hints |
+| `--border` | `oklch(1 0 0 / 8%)` | `oklch(0.91 0 0)` | every 1px line |
+| `--border-strong` (new) | `oklch(1 0 0 / 14%)` | `oklch(0.86 0 0)` | input, focus-less outlines |
+| `--foreground` | `oklch(0.94 0 0)` | `oklch(0.2 0 0)` | primary text |
+| `--text-2` (new) | `oklch(0.78 0 0)` | `oklch(0.38 0 0)` | secondary text |
+| `--muted-foreground` | `oklch(0.62 0 0)` | `oklch(0.53 0 0)` | meta, placeholders |
+| `--text-4` (new) | `oklch(0.48 0 0)` | `oklch(0.68 0 0)` | disabled, hints |
 | `--primary` | see doc 6 §4.1 | see doc 6 §4.1 | primary button (neutral) |
 | `--ring` / focus | see doc 6 §4.1 | see doc 6 §4.1 | 2px focus ring (neutral) |
 | `--destructive` | `oklch(0.68 0.19 25)` | `oklch(0.58 0.21 25)` | errors, delete |
 | `--ok --warn --bad --idle` | from Dispatch dark/monitor (`index.css:60-63,153-156`) | from Dispatch light (`index.css:30-33`) | session status |
 | `--role-*` | Dispatch dark (`index.css:65-70`) | Dispatch light (`index.css:35-40`) | agent role lanes |
-| `--dot` | `oklch(1 0 0 / 7%)` | `oklch(0.86 0.004 0)` | canvas grid |
+| `--dot` | `oklch(1 0 0 / 7%)` | `oklch(0.86 0 0)` | canvas grid |
 
 `--accent` is shadcn's neutral hover colour. There is no accent hue (2026-11-13); section 8 covers migrating today's `--accent` call sites.
 
@@ -99,7 +99,7 @@ touch of hue). Starting values; tune with a headless screenshot pass.
 
 | Token | Value |
 |---|---|
-| `--font-sans` | `"Inter Variable", "Pretendard Variable", system-ui, sans-serif` |
+| `--font-sans` | `"Pretendard Variable", Pretendard, system-ui, sans-serif` (doc 6 §4.2; Inter dropped) |
 | `--font-mono` | `ui-monospace, "JetBrains Mono", Menlo, monospace` (system only; nothing new to bundle) |
 | `text-xs` | 12px / 16px, meta, kbd, badges |
 | `text-sm` (UI default) | 13px / 20px |
