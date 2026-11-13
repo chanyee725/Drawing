@@ -190,6 +190,8 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   assert.equal(await current(), '일반');
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'detached' });
+  // Opened from the command menu (gone by now): focus lands on the 설정 row, not on <body> (#242).
+  assert.equal(await page.evaluate(() => document.activeElement?.hasAttribute('data-settings-trigger')), true);
   await page.locator('body').click({ position: { x: 600, y: 400 } });
   await page.keyboard.press('Comma');
   await dialog.waitFor();
@@ -202,6 +204,11 @@ test('settings dialog: entry points, sections, provider connect/disconnect with 
   await page.keyboard.press('p');
   await page.waitForTimeout(200);
   assert.equal(await page.getByRole('combobox', { name: '명령 찾기' }).count(), 0, 'no command menu over the settings dialog');
+  assert.equal(await dialog.count(), 1);
+  // The dashboard's create keys stay quiet too: the native <dialog> has no role attribute (#242).
+  for (const k of ['d', 'c', 'p', '/']) await page.keyboard.press(k);
+  await page.waitForTimeout(200);
+  assert.equal(await page.locator('main[data-screen="dashboard"]').count(), 1, 'no new file behind the settings dialog');
   assert.equal(await dialog.count(), 1);
 
   // 6. 390px: dialog fits, section and action targets are at least 44px tall.

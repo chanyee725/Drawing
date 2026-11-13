@@ -184,7 +184,7 @@ test('focus after settings close: keeps a real focus, else the opener, else the 
   };
   const hidden = mk('hidden trigger', { visible: false });
   const trigger = mk('trigger');
-  const root = (active: unknown) => ({ activeElement: active, body, querySelectorAll: () => [hidden, trigger] });
+  const root = (active: unknown) => ({ activeElement: active, body, querySelectorAll: (s: string) => (s.includes('sidebar-trigger') ? [hidden, trigger] : []) });
 
   const elsewhere = mk('elsewhere');
   const opener = mk('opener');
@@ -210,4 +210,11 @@ test('focus after settings close: keeps a real focus, else the opener, else the 
   assert.equal(trigger.focused, 3);
   focusAfterClose(opener, dialog, root(elsewhere));
   assert.equal(opener.focused, 1, 'focus outside the dialog is kept');
+
+  // Desktop, opened from the command menu: the palette input is gone, so the visible 설정 row wins over the menu button.
+  const row = mk('settings row');
+  const rootWithRow = { activeElement: body, body, querySelectorAll: (s: string) => (s.includes('data-settings-trigger') ? [row] : [hidden, trigger]) };
+  focusAfterClose(gone, null, rootWithRow);
+  assert.equal(row.focused, 1);
+  assert.equal(trigger.focused, 3);
 });

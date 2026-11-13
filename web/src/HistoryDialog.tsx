@@ -42,8 +42,9 @@ function Rendered({ v, dark }: { v: HistoryVersion; dark: boolean }) {
       const [{ renderBlock }, { versionHtml }] = await Promise.all([import('./canvas/render'), import('./doc/previewHtml')]);
       const pictures = new Map<string, string>();
       for (const b of v.blocks) pictures.set(b.id, (await renderBlock({ ...b, id: `history:${v.id}:${b.id}` }, dark ? 'dark' : 'light')).svg);
-      const html = versionHtml(v.document, pictures);
-      const embedded = new Set(html === null ? [] : [...html.matchAll(/data-block-id="([^"]*)"/g)].map((m) => m[1]));
+      const doc = versionHtml(v.document, pictures);
+      const html = doc?.html ?? null;
+      const embedded = new Set(doc?.embedded ?? []);
       const rest = v.blocks.filter((b) => !embedded.has(b.id)).map((b) => pictures.get(b.id) ?? '');
       const elements = ((v.canvas as { elements?: unknown[] } | null)?.elements ?? []).filter((e) => !(e as { isDeleted?: boolean }).isDeleted && (e as { type?: string }).type !== 'image');
       if (elements.length) {
@@ -66,7 +67,7 @@ function Rendered({ v, dark }: { v: HistoryVersion; dark: boolean }) {
     <>
       {out?.html != null ? (
         // The HTML comes from the editor's schema serializer and our own renderers, not from raw file text.
-        <div className="doc-editor history-doc min-h-0! [&_figure]:my-3 [&_figure_svg]:h-auto [&_figure_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: out.html }} />
+        <div className="doc-editor min-h-0! [&_figure]:my-3 [&_figure_svg]:h-auto [&_figure_svg]:max-w-full" dangerouslySetInnerHTML={{ __html: out.html }} />
       ) : (
         text
       )}
