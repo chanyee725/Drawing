@@ -1,7 +1,7 @@
 import { Download } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { ImageKind } from './export/actions';
-import { IS_MAC } from './platform';
+import { COPY_IMAGE_SHORTCUT, IS_MAC } from './platform';
 import { SCALES, describeExport, type ExportOptions } from './export/options';
 import { Button } from './components/ui/button';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger } from './components/ui/dropdown-menu';
@@ -42,7 +42,7 @@ export function ExportMenu({ open, onOpen, canvasReady, selected, options, onOpt
   const items: { label: string; hint: string; kbd?: string; off: boolean; run: () => void; id: string }[] = [
     { id: 'svg', label: 'SVG로 내보내기', hint: `${scope} · ${describeExport({ ...options, scale: 1 }).split(' · ').slice(1).join(' · ')}`, off: !canvasReady, run: () => onImage('svg') },
     { id: 'png', label: 'PNG로 내보내기', hint: `${scope} · ${describeExport(options)}`, off: !canvasReady, run: () => onImage('png') },
-    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', off: !canvasReady, run: () => onImage('copy') },
+    { id: 'copy', label: '이미지로 복사', hint: describeExport(options), kbd: COPY_IMAGE_SHORTCUT, off: !canvasReady, run: () => onImage('copy') },
     {
       id: 'pdf',
       label: 'PDF로 저장(인쇄)',
