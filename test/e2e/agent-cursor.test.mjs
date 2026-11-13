@@ -28,7 +28,15 @@ const freePort = () =>
 
 const rect = (id, x, y) => ({ id, type: 'rectangle', x, y, width: 120, height: 60, angle: 0, strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid', strokeWidth: 2, strokeStyle: 'solid', roughness: 1, opacity: 100, groupIds: [], frameId: null, roundness: null, seed: 1, version: 1, versionNonce: 1, isDeleted: false, boundElements: null, updated: 1, link: null, locked: false });
 
-test('agent cursor: a fake session edits a diagram; the cursor appears, moves and fades', { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 }, async (t) => {
+const SKIP = !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run';
+
+test('agent cursor: a fake session edits a diagram; the cursor appears, moves and fades', { skip: SKIP, timeout: 180_000 }, (t) => run(t, 0));
+
+// The second edit remounts the canvas: on a slow page (or while screen-recording a demo) the remount stalls the main
+// thread for longer than the glide. The glide must still be seen, not jump (#254).
+test('agent cursor: the glide is still seen with the page CPU throttled', { skip: SKIP, timeout: 240_000 }, (t) => run(t, 8));
+
+async function run(t, cpuThrottle) {
   const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_CORE, 'index.mjs')).href);
   const repo = mkdtempSync(join(tmpdir(), 'draw-cursor-'));
   const home = mkdtempSync(join(tmpdir(), 'draw-cursor-home-'));
@@ -101,6 +109,10 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
   await page.goto(`${BASE}/#file=demo.dpx.json`);
   await page.locator('.excalidraw').first().waitFor();
+  if (cpuThrottle) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottle });
+  }
 
   // Every cursor node, when it enters the DOM (each outside edit remounts the canvas and its cursor layer), must
   // already be placed or hidden (while the canvas loads): a node without `translate` paints at the overlay's
@@ -159,7 +171,16 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
 
   // The second edit: the cursor goes from r2's centre (460,30) to r3's (460,330).
   await page.locator('[data-agent-cursor][data-phase="editing"]').waitFor({ timeout: 8000 });
-  await page.waitForTimeout(600);
+  // Until it has landed (a throttled page draws fewer frames, so the glide takes longer there).
+  await page.waitForFunction(
+    (y0) => {
+      const el = document.querySelector('[data-agent-cursor]');
+      return el && el.style.visibility !== 'hidden' && Math.abs(parseFloat(el.style.translate.split(' ')[1]) - y0 - 150) < 2;
+    },
+    first[1],
+    { timeout: 10_000, polling: 'raf' },
+  ).catch(() => {});
+  await page.waitForTimeout(100);
   const second = await at();
   const ys = await page.evaluate(() => window.__cursorYs);
   // An edit from outside reopens the canvas centred on its content at zoom 1 (ExcalidrawCanvas initialData,
@@ -179,4 +200,4 @@ test('agent cursor: a fake session edits a diagram; the cursor appears, moves an
   // The session stops editing and its turn ends: the cursor goes.
   await cursor.waitFor({ state: 'detached', timeout: 15_000 });
   assert.deepEqual(errors, []);
-});
+}

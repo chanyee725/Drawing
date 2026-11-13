@@ -71,6 +71,37 @@ export function nextPhaseAt(c: Cursor, now: number): number {
 /** Whether `c` is still gliding at `now` (needs animation frames). */
 export const moving = (c: Cursor, now: number, reduced: boolean) => !reduced && now - c.moveAt < MOVE_MS;
 
+/** At most this much of a glide passes per drawn frame: a stalled main thread slows a glide instead of skipping it. */
+export const MAX_FRAME_MS = 50;
+/** A glide first drawn this long after it started is over (the file was not open): it is not replayed. */
+export const STALE_GLIDE_MS = 2000;
+
+/** How much of a cursor's current glide has been drawn on screen (kept per session by the layer that draws it). */
+export type GlideClock = { moveAt: number; shown: number; last: number };
+
+/**
+ * `c` as it is drawn on a visible frame at `now`. Its glide's clock starts at the first frame the cursor is actually
+ * drawn, not when the event arrived, and advances at most MAX_FRAME_MS per frame. So a canvas remount (no frames for
+ * a while, then hidden while it loads) or a busy main thread cannot use up the glide unseen and make the cursor jump.
+ */
+export function shownCursor(clocks: Map<string, GlideClock>, c: Cursor, now: number): Cursor {
+  let k = clocks.get(c.sid);
+  if (!k || k.moveAt !== c.moveAt) {
+    k = { moveAt: c.moveAt, shown: now - c.moveAt > STALE_GLIDE_MS ? MOVE_MS : 0, last: now };
+    clocks.set(c.sid, k);
+  } else {
+    k.shown += Math.min(Math.max(now - k.last, 0), MAX_FRAME_MS);
+    k.last = now;
+  }
+  return { ...c, moveAt: now - Math.min(k.shown, MOVE_MS) };
+}
+
+/** `c` with its glide where it was last drawn (no clock: its own); for working out where a new glide starts. */
+export function lastDrawn(clocks: ReadonlyMap<string, GlideClock>, c: Cursor, now: number): Cursor {
+  const k = clocks.get(c.sid);
+  return k && k.moveAt === c.moveAt ? { ...c, moveAt: now - Math.min(k.shown, MOVE_MS) } : c;
+}
+
 const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 
 /** A colour from the event goes into an inline style: only plain `#rrggbb` passes. */

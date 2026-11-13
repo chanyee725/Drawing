@@ -11,8 +11,8 @@
 import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import { roleLabel } from '../run/overlayModel';
-import { moving, nextPhaseAt, phaseOf, positionAt, toScreen } from './agentCursor';
-import { cursorsNow, now, pruneCursors, reducedMotion, subscribeCursors, useCursors } from './cursorStore';
+import { moving, nextPhaseAt, phaseOf, positionAt, shownCursor, toScreen } from './agentCursor';
+import { cursorsNow, glideClocks, now, pruneCursors, reducedMotion, subscribeCursors, useCursors } from './cursorStore';
 
 type Props = { api: ExcalidrawImperativeAPI; wrap: HTMLElement; file: string };
 
@@ -35,9 +35,11 @@ export function AgentCursors({ api, wrap, file }: Props) {
       const reduced = reducedMotion();
       const st = api.getAppState();
       // A remounted canvas loads its scene (and scrolls to its content) after it hands out its API: until then a
-      // scene point has no settled place on screen. Stay hidden; Excalidraw's first onChange comes once it is loaded.
+      // scene point has no settled place on screen. Stay hidden; Excalidraw's first onChange comes once it is loaded,
+      // and a short timer looks again in case it does not.
       if (st.isLoading) {
         for (const el of nodes.current.values()) el.style.visibility = 'hidden';
+        timer = setTimeout(draw, 50);
         return;
       }
       const rect = wrap.getBoundingClientRect();
@@ -46,12 +48,14 @@ export function AgentCursors({ api, wrap, file }: Props) {
       for (const c of cursorsNow().values()) {
         const el = nodes.current.get(c.sid);
         if (!el || c.file !== file) continue;
-        const p = toScreen(positionAt(c, t, reduced), st, rect);
+        // The glide runs on the clock of the frames that show it (a remount must not use it up unseen).
+        const shown = shownCursor(glideClocks, c, t);
+        const p = toScreen(positionAt(shown, t, reduced), st, rect);
         el.style.translate = `${Math.round(p.x * 10) / 10}px ${Math.round(p.y * 10) / 10}px`;
         el.style.visibility = '';
         const phase = phaseOf(c, t);
         if (el.dataset.phase !== phase) el.dataset.phase = phase;
-        if (moving(c, t, reduced)) glide = true;
+        if (moving(shown, t, reduced)) glide = true;
         wake = Math.min(wake, nextPhaseAt(c, t));
       }
       // Gone cursors leave the store (and the DOM). Frames only while gliding; otherwise wake at the next phase.
