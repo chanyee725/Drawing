@@ -82,7 +82,7 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
       >
         <DialogPrimitive.Title className="sr-only">명령 팔레트</DialogPrimitive.Title>
         <Command shouldFilter={false} loop value={selected} onValueChange={setSelected} label="명령 찾기" className="rounded-lg bg-transparent">
-          <div className="flex items-center gap-2 pr-3">
+          <div className="flex items-center border-b pr-3 [&>div]:flex-1 [&>div]:border-b-0">
             <CommandInput
               ref={input}
               value={query}
