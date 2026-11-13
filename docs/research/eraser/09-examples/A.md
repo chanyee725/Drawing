@@ -10,7 +10,7 @@
 2. **화면 배율 0.87.** 저작 글자 크기 14 → 실제 12.18px, 30 → 26.1px, 12 → 10.44px. 선 굵기도 같은 계열(노드 테두리 1.2px, 연결선 1.3px). 초기 줌은 90% (`scale(0.9)`).
 3. **노드 = 상자 + 왼쪽 아이콘 + 가운데 2줄 글(이름/종류).** 우리 cloud-architecture 노드(아이콘 위, 글 아래)와 생김새가 달라요. C4 예시를 따라가려면 "상자형 노드" 모양이 필요해요.
 4. **그림자 = 같은 도형을 (+4, +4) 옮긴 #E8E8E8 단색**(흐림 없음). 모서리 반경 = `min(12, 0.15 × 높이)`.
-5. **다크 모드 없음.** `colorScheme: dark` 로 열어도 데이터 `theme: "light"` 그대로, 색이 바뀌지 않아요 (7개 모두 `theme: light`).
+5. **다크 모드 없음.** `colorScheme: dark` 로 열어도 색이 바뀌지 않아요 (캡처한 5개에서 확인, 데이터도 7개 모두 `theme: "light"`).
 
 ## 1. 예시별 요약
 
@@ -85,39 +85,99 @@
 - 제목/설명은 다이어그램 안이 아니라 **화면 왼쪽 위 오버레이**(뷰 이름 16px 700, 설명 13px #666).
 - 범례: C4는 **왼쪽 아래** 가로 한 줄(제목 "Legend" 11.3px #98A2B3, 150×40 견본 상자, 간격 12). four-levels는 **오른쪽 세로 한 줄**(200×34, 간격 10). airport/city는 **오른쪽 위 Key 그룹**(640×62, 견본 150×30). capability-map 성숙도 뷰는 오른쪽 위 가로 5칸(104×32, 간격 8).
 
-## 3. 스타일 측정 (computed style, 화면 배율 0.87 적용 후 값)
+## 3. 스타일 측정 (실측, computed style)
 
-| 요소 | 값 |
+5개(food-delivery, monolith, four-levels, health-plan, capability-map)를 headless로 열어 `getComputedStyle`·SVG 속성·bbox로 쟀어요. 값은 world 좌표 기준(화면 배율 0.87 적용 후, 초기 줌 0.9 적용 전). airport·city는 다른 세션이 캡처 중이라 이 표에 넣지 않았어요(그 칸의 색은 저작 데이터 값).
+
+### 3.1 글자
+
+저작 크기 × 0.87 = 실제 px. 5개 모두 같아요.
+
+| 쓰임 | 저작 | 실측 px | 굵기 | 색 (실측) |
+|---|---|---|---|---|
+| 기본 글꼴 | — | `"Inter var", Inter, system-ui, -apple-system, "Segoe UI", sans-serif` | | |
+| 큰 시스템 상자 제목 (C4) | 30 | 26.1 | 400 | #1849A9 |
+| 큰 상자 부제 | 16 | 13.92 | 400 | #3E63DD |
+| 패널 제목 (health-plan) | 22 | 19.14 | 400 | #344054 |
+| 노드 제목 (C4) | 15 | 13.05 | 400 | #242424 (외부 시스템 #475467) |
+| 노드 제목 (모듈·역량) | 14 | 12.18 | 400 | #242424 / #101828 |
+| 노드 부제 (종류·기술) | 12 | 10.44 | 400 | #6B7280 |
+| 노드 부제 (역량·리뷰) | 11 | 9.57 | 400 | #667085 / 상태색 #067647 |
+| 연결 라벨 | 14 | 12.18 | 400 | #667085, 배경 투명 |
+| 그룹 제목 | 14 / 15 | 12.18 / 13.05 | 400 | #475467, #344054, C4 경계는 #1849A9 |
+| 범례 제목·주석 텍스트 | 13 | 11.31 | 400 | #98A2B3 (주석 #667085), letter-spacing −0.01em |
+| 범례 견본 글 | 12 | 10.44 | 400 | #242424 |
+
+굵게(700)는 다이어그램 안에서 한 번도 안 써요. 위계는 크기·색으로만 나눠요.
+
+### 3.2 노드
+
+| 항목 | 실측 |
 |---|---|
-| 글꼴 | `"Inter var", Inter, system-ui, ...`, 기본 14px(저작) → 12.18px, line-height 1.25 |
-| 노드 제목 | 13.05px (저작 15) 400, 색 #242424 또는 노드 강조색 |
-| 노드 부제(종류/기술) | 10.44px (저작 12), #6B7280 |
-| 큰 시스템 상자 제목 | 26.1px #1849A9 + 부제 13.92px #3E63DD |
-| 노드 테두리 | 1.2px, 실선. 외부 시스템은 `8px 8.75px` 점선 #98A2B3, 채움 #FFFFFF, 그림자 없음 (`styleMode: plain`) |
-| 모서리 반경 | `min(12, 0.15·h)` — 72→10.8, 40→6, 400→12 |
-| 그림자 (`shadow` 모드) | 같은 경로 (+4,+4), #E8E8E8, 흐림 없음 |
-| 색(C4) | 사람 #F2F4F7/#475467, 컨테이너 #E0EAFF/#2866DF (일부 채움 없음), 데이터 저장소 #F5F8FF/#2866DF 원통, 외부 #FFFFFF/#98A2B3 점선 |
-| 원통 | 위아래 타원 반지름 ry = 0.11·h (48→5.28) |
-| 아이콘 | lucide 계열 선 아이콘, 18×18(화면), stroke 1.75, 노드 왼쪽 안쪽 ~12, 색 = 테두리색 계열(#344054, #2866DF, #667085) |
-| 연결선 | 1.3px, 기본 #667085 (airport/city 흐름선 #1570EF, 비활성 #98A2B3), linecap butt |
-| 화살촉 | 열린 V, 12×11 userSpace, 선과 같은 굵기. 다른 종류로 triangle(채움), bar, dot, crowFoot 지원 |
-| 점선 연결 | `lineStyle: dashed` (L4 상속선, health-plan 지적선 #DC6803/#D92D20) |
-| 연결 라벨 | 12.18px 400, #667085, 배경 없음, 선 끊김 |
-| 그룹 | 채움 반투명 (`rgba(242,244,247,0.5)`, 역량 열 `rgba(238,244,255,0.6)`), 테두리 1px #D0D5DD, rx 5.5. 제목은 **왼쪽 위 안쪽**, 14px(저작) + 앞 아이콘, 색 #344054 또는 강조색 #3538CD. 하위 도메인 그룹은 제목 13 #667085, 채움 `rgba(255,255,255,0.55)`, 테두리 #EAECF0 |
-| C4 경계 그룹 | 파란 점선 경계, 제목 가운데 위 ("🍴 Forkway · software system") |
-| 배경 | #FFFFFF, 격자 없음 |
+| 테두리 | 1.2px, 실선, linejoin round (5개 모두) |
+| 점선 테두리 | `8px 8.75px` (외부 시스템, 리뷰 "삭제 예정" 노드) |
+| 모서리 반경 | **`min(12, 0.15·h)`**: h=400→12, 140→12, 80→12, 72→10.8, 64→9.6, 58→8.7, 52→7.8, 44→6.6, 40→6, 34→5.1, 32→4.8 (예외 없음) |
+| 그림자 (`shadow`) | 같은 경로를 (+4,+4) 옮김, 채움 #E8E8E8, 흐림·투명도 없음, 테두리 없음. `plain` 노드는 그림자 없음 |
+| 원통 | 타원 ry = 0.11·h (48→5.28, 80→8.8), rx = w/2 |
+| 안쪽 배치 | 아이콘이 있으면 왼쪽 18×18, 글은 아이콘 오른쪽 남은 폭에서 **가운데 정렬** 2줄. 아이콘 없으면 상자 전체 가운데 |
+| 아이콘 | 선 아이콘, 18×18(world), stroke 1.75, 색 = 노드 색 계열 (#344054, #2866DF, #667085) |
+| C4 색 | 사람 #F2F4F7/#475467 shadow · 컨테이너 #E0EAFF/#2866DF shadow (범례는 채움 없음) · 저장소 #F5F8FF/#2866DF 원통 · 외부 #FFFFFF/#98A2B3 점선 plain |
+| 역량 맵 | 채움 #FFFFFF, shadow, 테두리 연회색 |
+| 리뷰 배지 줄(208×32) | plain, 채움 #ECFDF3(신규), #FFFAEB(변경), #FEF3F2 + 점선(삭제), #FFFFFF(그대로) |
+
+### 3.3 연결선
+
+| 항목 | 실측 |
+|---|---|
+| 굵기 | 1.3px (5개 모두), linecap butt, linejoin miter |
+| 색 | 기본 #667085. 강조: 빨강 #D92D20 (monolith 엉킨 의존), 주황 #DC6803 / 빨강 #D92D20 (리뷰 지적), 초록 #079455 (승인), 보라 #7A5AF8 (L4 상속), 연한 #98A2B3·#84ADFF (역량 맵 자산관리) |
+| 점선 | `8px 8.75px` (노드 점선과 같음) |
+| 화살촉 | 열린 V, 12×11 (userSpace, 선 굵기와 무관), 선과 같은 색·굵기. 그 밖에 triangle(채움, 5.71×5.14 × 선 굵기), bar, dot, crowFoot 정의가 있음 |
+| 라벨 | 12.18px #667085, 배경 없음. 라벨 bbox보다 사방 1px 큰 상자를 마스크로 뚫어 선을 끊음 (예: 112×21 → 114×23, 117×21 → 119×23) |
+
+### 3.4 그룹
+
+| 항목 | 실측 |
+|---|---|
+| 테두리 | 1px, rx 5.5, `vector-effect: non-scaling-stroke`. 점선이면 `8 8.75` |
+| 채움 | 반투명: `rgba(242,244,247,0.6)` 역량 영역, `rgba(249,250,251,0.6~0.7)` 리뷰 패널, `rgba(242,244,247,0.35)` 리뷰 레인(점선), `rgba(224,234,255,0.22)` C4 경계(파란 점선 #2866DF), `rgba(209,224,255,0.4)` 모놀리스 상자 |
+| 제목 위치 | 기본은 **왼쪽 위 안쪽 (7~8, 7~8)**, 높이 20.8~21.8, padding 3px 5px, 앞에 13.5px 아이콘. C4 경계·모놀리스는 **위 가운데**, 역량 맵은 **오른쪽 위** (`data-title-align`) |
+| 제목 글 | 12.18 또는 13.05px, 400, 그룹 강조색 |
+
+### 3.5 화면
+
+| 항목 | 실측 |
+|---|---|
+| 배경 | #FFFFFF, 격자·점 없음 |
+| 초기 줌 | 90% (`scale(0.9)`), 5개 모두 |
+| 다크 모드 | 없음. `prefers-color-scheme: dark` 로 열어도 배경·노드 색이 light와 같음 (5개 모두 확인) |
+| 뷰 제목 | 16px 700 #171717, 설명 13px #666666 (다이어그램 밖 오버레이) |
+| 컨트롤 | 줌 버튼 11px, 필터 버튼 12.5px, 흰 바탕 + 1px #ECECEC 테두리, 반경 6 (줌 4) |
 
 ## 4. 우리 렌더러와 비교 (develop `1f3bb6c`, `shared/render`, ELK)
 
-대표 4개를 우리 DSL로 다시 써서 렌더했어요: food-delivery(Containers), four-levels(L1), capability-map, airport. 결과 `ours.png` / `ours.svg`.
+7개 모두 첫 뷰를 우리 DSL로 다시 써서 렌더했어요. food-delivery·four-levels·capability-map은 손으로 썼고, 나머지 4개(monolith, health-plan, airport, city)는 저작 데이터에서 자동 변환했어요(`_A/todsl.py`: id를 이름으로, 표시 글을 `label`로, 범례 제외). 결과는 각 폴더의 `ours.png` / `ours.svg`이고, 7개 모두 진단 오류가 없어요.
+
+| slug | Eraser 첫 뷰 bounds | 우리 결과 크기 | 한 줄 요약 |
+|---|---|---|---|
+| food-delivery | 1670×876 | 647×1193 | 가로형이 세로형으로 바뀜 |
+| monolith | 1606×868 | 1001×1079 | 위 행위자 8명 한 줄 → 층이 나뉨 |
+| four-levels | 1305×944 | 736×563 | 중앙 상자가 점이 되고 라벨 겹침 |
+| health-plan | 1576×968 | 2357×1039 | 레인 5개(왼→오)는 비슷, 패널이 왼쪽 아래로 |
+| capability-map | 1496×930 | 269×2374 | 행 격자가 한 줄 막대로 |
+| airport | 1954×1038 | 1995×3336 | 계층 행 × 열 매트릭스가 무너짐 |
+| city | 1640×812 | 2012×2031 | 계층 행이 열로, 기둥 3개가 왼쪽 세로 더미로 |
 
 ### 4.1 배치 차이 (먼저)
 
 1. **food-delivery**: Eraser는 3단(사람 → 앱 → 게이트웨이 → 서비스 4개 한 줄 → 저장소 한 줄 → 이벤트 버스) 대칭 격자. 우리는 ELK가 서비스들을 층을 다르게 쌓아(Order → Payments → Event bus → Dispatch) **세로로 길어지고**(647×1193 vs 가로형), 외부 시스템이 그룹 아래로 떨어지면서 긴 연결선이 그룹을 관통해요. 게이트웨이 같은 **넓은 상자(여러 열을 덮는 노드)** 개념이 없어요.
 2. **four-levels L1**: Eraser는 큰 시스템 상자(960×420) 하나를 가운데 두고 위·옆·아래에 위성을 곧은 선 1구간으로 붙여요. 우리는 중앙 노드가 작은 아이콘이라 한 점에서 선 9개가 몰려 나가고, **라벨이 겹쳐요**("Builds on the API" / "Operates", "Sends messages" / "Delivery webhooks").
 3. **capability-map**: Eraser는 그룹 7개가 세로로 쌓이고 그룹 안은 가로 한 줄(간격 16). 우리는 연결선이 없으니 ELK가 **그룹을 한 열로 세우고 그룹 안도 세로**로 놓아 269×2374의 막대가 돼요. 연결 없는 그룹 = "행 격자로 흘려 배치" 규칙이 필요해요.
-4. **airport**: Eraser는 계층 × 열 매트릭스(열 x좌표가 계층 사이 공유). ELK layered 로는 열 공유가 안 되고 1982×2752로 흩어져요. 이름 중복("Baggage" 역량 vs 도메인)도 DSL 오류가 나요 — Eraser 예시는 id와 표시 이름이 따로라 가능.
-5. 끝점: Eraser는 변 정중앙에서 곧게, 우리는 ELK 포트 분산으로 같은 변에서 12px 간격으로 벌어져 작은 꺾임(지그재그)이 많이 생겨요.
+4. **airport**: Eraser는 계층 × 열 매트릭스(열 x좌표가 계층 사이 공유). ELK layered 로는 열 공유가 안 되고 1995×3336으로 흩어져요. 표시 이름이 겹치는 노드("Baggage" 역량 vs 도메인)는 이름으로 쓰면 중복 오류가 나서, id를 이름으로 쓰고 `label`로 표시 글을 줬어요.
+5. **monolith**: Eraser는 외부 행위자 8개를 맨 위 한 줄(y=0, 간격 14)에 두고 그 아래 큰 경계 상자(1606×656) 안에 모놀리스(1494×120)를 가로 띠로 놓아요. 우리는 행위자들이 연결 대상에 따라 층이 갈려 한 줄이 깨져요.
+6. **health-plan**: Eraser는 위에 패널(696×192, 오른쪽 위), 아래에 레인 5개를 같은 높이 760으로 왼→오 나란히(간격 16). 우리는 레인 순서는 비슷하게 나오지만 높이가 제각각이고, 연결 없는 패널이 왼쪽 아래 별도 열로 가요. 패널 안 배지 순서도 원본과 달라져요(모델 순서가 안 지켜짐).
+7. **city**: Eraser는 계층 6개를 가로 띠로 쌓고(폭 1088 고정, 간격 10), 오른쪽에 기둥 2개(166×740), 왼쪽 바깥에 행위자 3명. 우리는 `direction right` 때문에 띠가 열이 되고, 연결 없는 Infrastructure/Operations/Security 그룹이 왼쪽 세로 더미로 몰려요. ELK는 "연결 없는 그룹 = 격자 흘림", "같은 높이·같은 폭 띠", "열 정렬 공유"를 하지 않는다는 점이 airport와 같아요.
+8. 끝점: Eraser는 변 정중앙에서 곧게, 우리는 ELK 포트 분산으로 같은 변에서 12px 간격으로 벌어져 작은 꺾임(지그재그)이 많이 생겨요.
 
 ### 4.2 스타일 차이 (다음)
 
@@ -126,6 +186,7 @@
 | 노드 모양 | 상자 + 왼쪽 아이콘 + 2줄 글 | 아키텍처: 아이콘 위 + 글 아래 (상자 없음) |
 | 부제(2번째 줄) | 있음 (종류·기술, 작고 회색) | 없음 |
 | 테두리 | 1.2px | 1.5px 계열 |
+| 노드 글자 | 13.05 / 12.18px, 400 | 노드 이름이 더 크고, 그룹 제목은 굵게 |
 | 반경 | min(12, 0.15h) | node 8 / group 12 고정 |
 | 그림자 | (+4,+4) #E8E8E8 단색 | (+2,+3) rgba(15,23,42,0.10) |
 | 연결선 | 1.3px #667085 | 1.5px #7b828d |
@@ -239,10 +300,34 @@ styleMode plain
 }
 ```
 
-airport 전체 DSL은 길어서 `/home/bgk/personal/eraser-ref/_A/dsl/enterprise-reference-architecture-airport.eraser` 에 있어요 (계층 그룹 7개 + 기둥 2개 + 띠 1개 + 외부 행위자 4개 + 연결 24개).
+monolith, health-plan, airport, city DSL은 데이터에서 자동 변환해서 길어요(43~136줄). `/home/bgk/personal/eraser-ref/_A/dsl/<slug>.eraser` 에 있어요. 모양 예 (health-plan 앞부분):
+
+```eraser
+direction right
+typeface clean
+"lane-providers" [label: "Providers and payers", icon: hospital, styleMode: plain, color: gray] {
+  "provider-ehrs" [label: "Provider EHRs", icon: hospital, styleMode: plain, color: gray]
+  "provider-portal" [label: "Provider portal", icon: app-window, styleMode: plain]
+}
+"lane-front" [label: "Front door", icon: door-open, styleMode: plain] {
+  "api-gateway" [label: "API gateway", icon: aws-api-gateway, styleMode: plain]
+}
+"provider-ehrs" > "api-gateway"
+"api-gateway" > "provider-ehrs"
+```
 
 ## 7. 남은 일
 
-- 캡처 완료: food-delivery (page, embed, view-1~4, zoom, 다크, UI 메뉴, `styles.json`). monolith 는 캡처 PNG만 있고 필터 메뉴 단계에서 멈춰 `styles.json` 없음. 나머지 5개는 `layout.json`(데이터 측정)만 있고 PNG·computed style 미수집. 스타일 값은 food-delivery 실측 + 나머지 예시의 데이터 값(색, 글자 크기, 선 스타일)으로 채웠어요.
-- `ours.png` 는 4개(food-delivery, four-levels, capability-map, airport). health-plan, city, monolith 는 비교 렌더 없음.
-- 캡처 스크립트: `/home/bgk/personal/eraser-ref/_A/capture.cjs` — 필터 버튼 클릭 단계에 타임아웃을 넣고 다시 돌리면 돼요.
+| slug | layout.json | 캡처·styles.json | ours.png |
+|---|---|---|---|
+| c4-model-food-delivery | 완료 | 완료 | 완료 |
+| c4-model-monolith-to-services | 완료 | 완료 | 완료 |
+| c4-model-four-levels | 완료 | 완료 | 완료 |
+| architecture-review-health-plan | 완료 | 완료 | 완료 |
+| business-capability-map-utility | 완료 | 완료 | 완료 |
+| enterprise-reference-architecture-airport | 완료 | **다른 세션이 캡처 중** | 완료 |
+| enterprise-reference-architecture-city | 완료 | **다른 세션이 캡처 중** | 완료 |
+
+- 캡처 묶음: `page.png`, `embed.png`, `embed-dark.png`, `view-1~4.png`, `zoom-node/node-dashed/label/group.png`, `ui-zoom-menu.png`, `ui-filter.png`.
+- 교차 확인: 저작 좌표(`layout.json`)와 화면(`view-1.png`)을 대조했어요. 역량 맵 그룹 폭이 자식 수에 맞게 줄고 왼쪽 정렬되는 것, C4 행 정렬, 범례 위치가 화면과 일치해요.
+- 스크립트: `_A/capture.cjs` (클릭마다 4초 타임아웃, 전체 240초 제한. 저장 뒤 브라우저 종료가 멈추는 경우가 있어 "hard timeout" 로그가 찍혀도 결과 파일은 정상), `_A/analyze.py`, `_A/todsl.py`, `_A/ours.mts`, `_A/styletab.py`.
