@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Archive, ChevronRight, Clock, File, Files, FolderClosed, FolderInput, Moon, MoreHorizontal, Pencil, Plus, Search, Settings, SquarePen, Sun, Trash2 } from 'lucide-react';
 import { api, type DispatchStatus, type DocNode, type Project, type ProjectsView, type ProviderLimits, type ProviderState } from './api';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from './components/ui/dropdown-menu';
 import { Kbd } from './components/ui/kbd';
 import {
   Sidebar as SidebarRoot,
@@ -431,6 +431,7 @@ export function Sidebar(p: Props) {
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="w-56">
+                <DropdownMenuLabel>설정</DropdownMenuLabel>
                 <DropdownMenuItem onSelect={p.onToggleTheme}>
                   {p.theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
                   {p.theme === 'dark' ? '라이트 모드로 바꾸기' : '다크 모드로 바꾸기'}
