@@ -63,8 +63,8 @@ export function shapeSkeleton(kind: ShapeKind, c: Point): Record<string, unknown
     case 'line':
       return { type: kind, ...at, width, height, points: [[0, 0], [width, 0]] };
     case 'text':
-      // Text measures itself; start it a little left of the point so it reads as centred.
-      return { type: 'text', x: Math.round(c.x - 30), y: Math.round(c.y - 12), text: '텍스트' };
+      // Text measures itself; start it a little left of the point so it reads as centred (13px text, cleanStyle.ts).
+      return { type: 'text', x: Math.round(c.x - 20), y: Math.round(c.y - 7), text: '텍스트' };
     case 'frame':
       return { type: 'frame', ...at, width, height, children: [], name: '프레임' };
     default:
