@@ -112,6 +112,10 @@ export class Hub extends EventEmitter {
     this.shared.on("change", () => { this.emit("limits", this.currentLimits()); this.checkTickets(); });
     this.live = new Map(); // id -> { proc, transcript, perms, seenMsgIds }
     this.isConnected = () => true; // replaced by the server with the Dispatch-level connection check
+    // Pipeline hooks (server/pipeline, E20). createGate(parent) -> refusal text or null: a lead whose plan
+    // waits for approval may not create teammates. taskStepCheck(lead, step) -> refusal text or null.
+    this.createGate = null;
+    this.taskStepCheck = null;
 
     // Transcripts live in memory only (a ring buffer per session); nothing is written to disk, so a
     // restart starts every session with an empty transcript. Resuming uses the CLI's own session id.
@@ -334,6 +338,12 @@ export class Hub extends EventEmitter {
     const STAGES = ["plan", "impl", "review", "test", "merge", "done", "blocked"];
     const all = (this.store.data.tasks ||= {});
     const title = redact(String(input.title || "").trim()).slice(0, 120);
+    // A step id ties the task to a step of the lead's approved plan; checked before anything changes.
+    const step = input.step === undefined ? undefined : input.step ? String(input.step).trim() : null;
+    if (step) {
+      const why = this.taskStepCheck ? this.taskStepCheck(lead, step) : "실행 중인 계획이 없어요";
+      if (why) throw Object.assign(new Error(why), { status: 409 });
+    }
     let t = (input.id && all[input.id]) || Object.values(all).find(x => x.lead === lead && x.title === title && x.stage !== "done");
     if (!t) {
       if (!title) throw new Error("title이 필요해요");
@@ -359,6 +369,7 @@ export class Hub extends EventEmitter {
       }
     }
     if (stage) enterStage(t, stage);
+    if (step !== undefined) t.step = step;
     if (input.owner !== undefined) t.owner = input.owner ? String(input.owner).slice(0, 60) : null;
     if (input.eta_minutes !== undefined) {
       t.etaAt = input.eta_minutes == null ? null : Date.now() + Math.max(0, Number(input.eta_minutes)) * 60_000;
@@ -438,6 +449,8 @@ export class Hub extends EventEmitter {
   async create({ items, commonPrompt, worktree = true, parent = null }) {
     const total = items.reduce((a, x) => a + (x.n || 1), 0);
     if (!total) throw new Error("만들 세션이 없어요");
+    const gate = parent && this.createGate?.(parent);
+    if (gate) throw Object.assign(new Error(gate), { status: 409 });
     for (const it of items) {
       const id = it.model || this.roles.find(r => r.id === it.role)?.model;
       const provider = this.models.find(m => m.id === id)?.provider;
