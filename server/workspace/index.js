@@ -117,7 +117,11 @@ export async function setup(ctx) {
         changed(r.path);
         return r;
       }),
-      route('POST', '/api/file', (_p, b) => store.createFile(need(b?.path, 'path'), b), 201),
+      route('POST', '/api/file', async (_p, b) => {
+        const r = await store.createFile(need(b?.path, 'path'), b);
+        changed(r.path);
+        return r;
+      }, 201),
       // Step-level plan edit (agents): re-read under the store lock, then announced like an outside change so an
       // open, clean tab reloads and a dirty one gets the 409 choice on its next save.
       route('PATCH', '/api/file/plan', async (p, b) => {

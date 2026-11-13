@@ -92,3 +92,79 @@ test('cursor module: the baseline is read when the tool call arrives, so the fir
   assert.equal(r.sent[0].data.x, 250);
   m.close();
 });
+
+test('cursor module: an agent creating a diagram gets a cursor at what it drew (#249)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  r.hub.sessions.s1 = { id: 's1', name: 'Remy', role: 'impl', status: 'running', color: '#0f766e' };
+  // The file does not exist when the tool call arrives: the tool-time read fails.
+  r.hub.emit('message', { id: 's1', entry: { kind: 'tool', name: 'Write', text: '{"file_path":"/abs/repo/new.dpx.json"}' } });
+  await r.tick();
+  await r.change('new.dpx.json', file([rect('r1', 0, 0), rect('r2', 200, 100)]));
+  // Bounds 0..300 x 0..150 against an empty canvas.
+  assert.equal(r.sent.length, 1);
+  assert.equal(r.sent[0].data.x, 150);
+  assert.equal(r.sent[0].data.y, 75);
+  assert.equal(r.sent[0].data.color, '#0f766e');
+  m.close();
+});
+
+test('cursor module: a tool-time read that lands after the edit does not hide the first cursor (#249)', async () => {
+  const r = rig();
+  const read = r.ctx.modules.workspace.store.readFile;
+  let release;
+  const gate = new Promise((ok) => (release = ok));
+  let slow = true;
+  // The first read (the tool-time baseline) is slow: it resolves only after the edit has landed.
+  r.ctx.modules.workspace.store.readFile = async (rel) => {
+    if (slow) {
+      slow = false;
+      await gate;
+    }
+    return read(rel);
+  };
+  const m = await setup(r.ctx);
+  r.files.set('a.dpx.json', file([rect('r1', 0, 0)]));
+  r.hub.sessions.s1 = { id: 's1', name: 'Remy', role: 'impl', status: 'running' };
+  r.hub.emit('message', { id: 's1', entry: { kind: 'tool', name: 'Edit', text: '{"file_path":"/w/a.dpx.json"}' } });
+  r.files.set('a.dpx.json', file([rect('r1', 0, 0), rect('r2', 400, 0)]));
+  const done = r.change('a.dpx.json', r.files.get('a.dpx.json'));
+  release();
+  await done;
+  await r.tick();
+  // The baseline read saw the edited file: no diff, so the cursor is placed against an empty canvas instead of
+  // being dropped (bounds 0..500 x 0..50).
+  assert.equal(r.sent.length, 1);
+  assert.deepEqual([r.sent[0].data.x, r.sent[0].data.y], [250, 25]);
+  // The next edit diffs against the version the change reported, not a tool-time read.
+  r.hub.emit('message', { id: 's1', entry: { kind: 'tool', name: 'Edit', text: '{"file_path":"/w/a.dpx.json"}' } });
+  await r.tick();
+  await r.change('a.dpx.json', file([rect('r1', 0, 0), rect('r2', 400, 0), rect('r3', 0, 300)]));
+  assert.deepEqual([r.sent[1].data.x, r.sent[1].data.y], [50, 325]);
+  m.close();
+});
+
+test('cursor module: quick changes to one file are diffed in order (#249)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  r.hub.sessions.s1 = { id: 's1', name: 'Remy', role: 'impl', status: 'running' };
+  await r.change('a.dpx.json', file([rect('r1', 0, 0)])); // the reported version: r1 only
+  r.hub.emit('message', { id: 's1', entry: { kind: 'tool', name: 'Edit', text: '{"file_path":"/w/a.dpx.json"}' } });
+  await r.tick();
+  // Two changes back to back. The first one's read is slow, the second one's is fast: handled concurrently, the
+  // second would diff first and the first would then diff backwards.
+  const v1 = file([rect('r1', 0, 0), rect('r2', 1000, 0)]);
+  const v2 = file([rect('r1', 0, 0), rect('r2', 1000, 0), rect('r3', 0, 1000)]);
+  const reads = [[v1, 40], [v2, 0]];
+  r.ctx.modules.workspace.store.readFile = async () => {
+    const [v, ms] = reads.shift();
+    await new Promise((ok) => setTimeout(ok, ms));
+    return v;
+  };
+  void r.change('a.dpx.json', v1);
+  await r.change('a.dpx.json', v2);
+  await new Promise((ok) => setTimeout(ok, 80));
+  // r2's centre, then r3's.
+  assert.deepEqual(r.sent.map((s) => [s.data.x, s.data.y]), [[1050, 25], [50, 1025]]);
+  m.close();
+});
