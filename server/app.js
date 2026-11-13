@@ -14,27 +14,39 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
  *   Route = { method: 'GET', path: '/api/x' | RegExp, handler(req, res, ctx, match, url) }
  *   match is the RegExp match (or [pathname] for a string path); url is the parsed URL.
  * Modules are closed in reverse setup order.
- * ctx = { workspaceDir, hub, modules } where modules holds each module's
- * setup() result by name, so later modules can use earlier ones.
+ * A module may also return listening(): run once the server listens (ctx.port is known then).
+ * ctx = { workspaceDir, hub, modules, port } where modules holds each module's
+ * setup() result by name, so later modules can use earlier ones; port is the listening port
+ * (0 before listen).
  */
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
   const hub = createHub();
-  const ctx = { workspaceDir: opts.workspaceDir, hub, modules: {} };
+  let server = null;
+  const ctx = {
+    workspaceDir: opts.workspaceDir,
+    hub,
+    modules: {},
+    get port() {
+      return server?.address()?.port ?? 0;
+    },
+  };
   const routes = [
     { method: 'GET', path: '/api/events', handler: (req, res) => hub.attach(req, res) },
     // Folder name only, never the full path.
     { method: 'GET', path: '/api/info', handler: (req, res) => sendJson(res, 200, { workspace: basename(ctx.workspaceDir ?? '') }) },
   ];
   const closers = [];
+  const listeners = [];
 
   for (const { name, setup } of moduleList) {
     const m = (await setup(ctx)) ?? {};
     ctx.modules[name] = m;
     if (m.routes) routes.push(...m.routes);
     if (m.close) closers.push(m.close);
+    if (m.listening) listeners.push([name, m.listening]);
   }
 
-  const server = createServer(async (req, res) => {
+  server = createServer(async (req, res) => {
     // DNS rebinding guard: only answer requests addressed to this loopback port.
     if (!isAllowedHost(req.headers.host, server.address()?.port)) {
       return sendJson(res, 403, { error: 'forbidden host' });
@@ -56,6 +68,16 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
       console.error('request failed:', err.code ?? err.name);
       if (!res.headersSent) sendJson(res, 500, { error: 'internal error' });
       else res.end();
+    }
+  });
+
+  server.on('listening', async () => {
+    for (const [name, fn] of listeners) {
+      try {
+        await fn();
+      } catch (err) {
+        console.error(`${name} start failed:`, err?.code ?? err?.name);
+      }
     }
   });
 
