@@ -190,7 +190,6 @@ export function badgeColors(color: string | undefined): { fill: string; text: st
   return { fill: hex, text: contrastText(hex) };
 }
 
-/** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 /**
  * Muted text (a subtitle) on `fill`: `muted` itself when it reads at 4.5:1 or better, otherwise moved toward
  * `text` in 10% steps until it does. Pale tinted fills need a slightly darker grey than white does.
@@ -208,6 +207,7 @@ export function readableMuted(muted: string, text: string, fill: string): string
   return text;
 }
 
+/** Dark or white text, whichever reads better on `fill` (luminance midpoint is not enough for mid-tone fills). */
 function contrastText(fill: string): string {
   const l = luminance(fill);
   const dark = luminance('#1f2329');

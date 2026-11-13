@@ -195,7 +195,33 @@ test('compose: sequence and ERD ignore layout', async () => {
   }
 });
 
-test('performance: 100-node compose + SVG under 16 ms', async () => {
+/**
+ * Fixed pure-JS workload (objects, Map, sort), timed right before each compose in the same process.
+ * Other sessions and parallel test files slow both by about the same factor, so the ratio of the two
+ * minimums stays put under load while a real slowdown of compose + SVG still moves it (same method as
+ * the 100-node layout test in render.test.ts).
+ */
+function reference(): number {
+  let sum = 0;
+  for (let r = 0; r < 12; r++) {
+    const m = new Map<string, { id: string; x: number; y: number[] }>();
+    const a: { id: string; x: number; y: number[] }[] = [];
+    for (let i = 0; i < 4000; i++) {
+      const o = { id: `n${(i * 7919) % 4000}`, x: (i * 31) % 997, y: [i, i + 1] };
+      a.push(o);
+      m.set(o.id, o);
+    }
+    a.sort((p, q) => p.x - q.x || p.y[0]! - q.y[0]!);
+    for (const o of a) sum += m.get(o.id)!.y[1]! & 7;
+  }
+  return sum;
+}
+
+// Compose + SVG of the diagram below is about 0.17x the reference alone and up to 0.4x with the CPUs
+// oversubscribed 2x; 0.6 leaves room for noise and catches a ~3.5x slowdown (the old budget was 16 ms, ~6x).
+const MAX_RATIO = 0.6;
+
+test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference workload`, async () => {
   const lines: string[] = [];
   for (let g = 0; g < 5; g++) {
     lines.push(`G${g} [icon: aws] {`);
@@ -210,13 +236,20 @@ test('performance: 100-node compose + SVG under 16 ms', async () => {
     items[`N2_${i}`] = { cx: c.x + 37, cy: c.y - 55, parent: 'G2' };
   }
   const layout = layoutOf(items);
-  sceneToSvg(composeGraph(d, base, layout)); // warm-up (JIT)
-  const times: number[] = [];
-  for (let i = 0; i < 9; i++) {
-    const t0 = performance.now();
-    sceneToSvg(composeGraph(d, base, layout));
-    times.push(performance.now() - t0);
+  for (let i = 0; i < 3; i++) {
+    sceneToSvg(composeGraph(d, base, layout)); // warm-up (JIT)
+    reference();
   }
-  times.sort((a, b) => a - b);
-  assert.ok(times[4]! < (process.env.CI ? 48 : 16), `median ${times[4]!.toFixed(1)} ms`);
+  let comp = Infinity;
+  let ref = Infinity;
+  for (let i = 0; i < 9; i++) {
+    let t0 = performance.now();
+    reference();
+    ref = Math.min(ref, performance.now() - t0);
+    t0 = performance.now();
+    sceneToSvg(composeGraph(d, base, layout));
+    comp = Math.min(comp, performance.now() - t0);
+  }
+  const ratio = comp / ref;
+  assert.ok(ratio < MAX_RATIO, `compose ${comp.toFixed(1)} ms = ${ratio.toFixed(2)}x reference ${ref.toFixed(1)} ms`);
 });

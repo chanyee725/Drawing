@@ -265,7 +265,7 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
   );
 
   return (
-    <section className="mx-auto flex max-w-3xl flex-col gap-2 px-6 py-6" aria-label="문서">
+    <section className="doc-pane mx-auto flex max-w-3xl flex-col gap-2 px-6 py-6" aria-label="문서">
       {!broken && outlineMenu}
       {inTable && (
         <div role="toolbar" aria-label="표" className="doc-table-bar">

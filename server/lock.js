@@ -88,6 +88,7 @@ export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()
   // Only `<pid>-<uuid>` names are owners; any other name is not ours to judge or remove.
   const dead = isDead ?? (async (name) => OWNER_NAME.test(name) && !pidAlive(ownerPid(name)));
   const stage = `${brk}.${owner}.tmp`;
+  await sweepStages(brk);
   for (let i = 0; i < tries; i++) {
     await rm(stage, { recursive: true, force: true });
     await mkdir(stage);
@@ -103,6 +104,23 @@ export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()
     if (!(await clearDeadBreak(brk, dead))) await sleep(10);
   }
   throw new LockBreakTimeoutError('lock break timed out');
+}
+
+/** Removes staging folders `<brk>.<pid>-<uuid>.tmp` left by a process that died between mkdir and rename. */
+async function sweepStages(brk) {
+  const prefix = `${basename(brk)}.`;
+  let names;
+  try {
+    names = await readdir(dirname(brk));
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith('.tmp')) continue;
+    const owner = name.slice(prefix.length, -'.tmp'.length);
+    if (!OWNER_NAME.test(owner) || pidAlive(ownerPid(owner))) continue;
+    await rm(join(dirname(brk), name), { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 /** Clears `brk` when its holder is dead; true when something was cleared (retry at once). */
