@@ -521,11 +521,12 @@ export function App() {
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
   const showBlock = useCallback((blockId: string) => {
-    setView((v) => (v === 'doc' ? (narrow ? 'canvas' : 'both') : v));
+    // Narrow screens show one pane; the stored wide view may still be 'both' while 문서 is shown, so go straight to 캔버스.
+    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
   }, [narrow]);
   const showFrame = useCallback((frameId: string) => {
-    setView((v) => (v === 'doc' ? (narrow ? 'canvas' : 'both') : v));
+    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
     setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
   }, [narrow]);
   const report = useCallback(
