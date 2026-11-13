@@ -7,6 +7,7 @@ import { useDispatch } from '../dispatch/store.ts';
 import { until } from '../dispatch/lib/format.ts';
 import { FOCUS_RING } from '../lib/focus';
 import { cn } from '../lib/utils';
+import { selectRun } from './runData.ts';
 import { fmtClock, fmtCost, historyLines, runListText } from './runModel.ts';
 import { useRunModel } from './useRunModel.ts';
 
@@ -145,12 +146,30 @@ export default function RunView({ code }: { code: string | undefined }) {
         {m.data.runs.length > 1 && (
           <>
             <h2 className="mt-4 mb-2 text-xs font-medium text-muted-foreground">이 파일의 실행</h2>
-            <ul className="space-y-1 text-sm">
-              {m.data.runs.map((r) => (
-                <li key={r.id} aria-current={r.id === m.record?.id ? 'true' : undefined} className="text-muted-foreground aria-[current=true]:text-foreground">
-                  {runListText(r, m.now)}
-                </li>
-              ))}
+            {/* E28: pick a past run to see its steps, sessions and history here and on the canvas. */}
+            <ul className="space-y-0.5 text-sm">
+              {m.data.runs.map((r) => {
+                const current = r.id === m.record?.id;
+                return (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      aria-current={current ? 'true' : undefined}
+                      onClick={() => void selectRun(r.id)}
+                      className={cn(
+                        'flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-muted-foreground hover:bg-accent aria-[current=true]:bg-muted aria-[current=true]:font-medium aria-[current=true]:text-foreground',
+                        FOCUS_RING,
+                      )}
+                    >
+                      <span aria-hidden className="w-3 shrink-0">
+                        {current ? '›' : ''}
+                      </span>
+                      <span className="min-w-0 flex-1 truncate">{runListText(r, m.now)}</span>
+                      {current && <span className="shrink-0 text-xs text-muted-foreground">보는 중</span>}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </>
         )}
