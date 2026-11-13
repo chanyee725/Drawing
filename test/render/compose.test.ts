@@ -52,8 +52,8 @@ test('compose: no layout gives the same SVG as renderDiagram, and reports origin
     const r = base.rects.get(id)!;
     assert.ok(Math.abs(h.x - (r.x + scene.origin.x)) < 0.02 && Math.abs(h.y - (r.y + scene.origin.y)) < 0.02, `${id} handle in scene coordinates`);
   }
-  // Icon-only nodes have no box but do get a handle.
-  assert.ok(!scene.items.some((i) => i.kind === 'box' && i.id === 'U'));
+  // Nodes with an icon draw as box cards by default (E40).
+  assert.ok(scene.items.some((i) => i.kind === 'box' && i.id === 'U'));
   assert.equal(handle(scene, 'API').parent, 'VPC');
   assert.equal(handle(scene, 'U').parent, '');
   // Groups paint before nodes.

@@ -1,7 +1,7 @@
 // Dashboard ("모든 파일") and project home: data loading, tabs, quick-create chips. Layout B of
 // docs/design/dispatch-integration/6-app-shell-projects.md §3.1. Built from shadcn Tabs / Button / DropdownMenu.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, FilePlus2, FileText, FolderClosed, Layers, Menu, PenTool, Plus, Search, Workflow } from 'lucide-react';
+import { ArrowLeft, FilePlus2, FileText, Folder, FolderClosed, Layers, Menu, PenTool, Plus, Search, Workflow } from 'lucide-react';
 import { projectsApi, type ProjectDoc, type ProjectInfo, type ProjectsResponse } from '../api';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -9,7 +9,7 @@ import { SidebarTrigger } from '../components/ui/sidebar';
 import { Kbd } from '../components/ui/kbd';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { ColumnHead, DocList, FileList } from './DocList';
-import { CHORD_MS, RECENT_LIMIT, allDocs, badgeOf, chord, filterDocs, flatFiles, flattenRows, matchesQuery, relativeTime, type DashTab } from './model';
+import { CHORD_MS, RECENT_LIMIT, allDocs, badgeOf, chord, filterDocs, flatFiles, flattenRows, matchesQuery, relativeTime, runningIn, type DashTab } from './model';
 
 export type CreateKind = 'doc' | 'canvas' | 'plan' | 'template';
 export type HomeProps = {
@@ -44,6 +44,27 @@ function useProjects(version: unknown) {
     };
   }, [version]);
   return { data, failed };
+}
+
+/** Files with a run going now. Refetched with the list and every 10s (a run starting does not change the tree). */
+const RUNNING_POLL_MS = 10_000;
+function useRunning(version: unknown) {
+  const [files, setFiles] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      projectsApi
+        .running()
+        .then((f) => live && setFiles((old) => (old.size === f.length && f.every((x) => old.has(x)) ? old : new Set(f))))
+        .catch(() => {});
+    void load();
+    const timer = setInterval(() => document.visibilityState === 'visible' && void load(), RUNNING_POLL_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [version]);
+  return files;
 }
 
 const CHIPS: { kind: CreateKind; label: string; key: string; icon: typeof FileText; soon?: boolean }[] = [
@@ -97,6 +118,7 @@ const Empty = ({ children }: { children: React.ReactNode }) => <p className="px-
 
 export function Home(props: HomeProps) {
   const { data, failed } = useProjects(props.version);
+  const running = useRunning(props.version);
   const search = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const focusSearch = useCallback(() => search.current?.focus(), []);
@@ -116,15 +138,15 @@ export function Home(props: HomeProps) {
   return (
     <main className="min-h-0 flex-1 scroll-pt-[39px] overflow-auto" data-screen={project ? 'project' : 'dashboard'}>
       {project ? (
-        <ProjectHome {...props} data={data} info={project} query={query} onQuery={setQuery} search={search} />
+        <ProjectHome {...props} data={data} info={project} running={running} query={query} onQuery={setQuery} search={search} />
       ) : (
-        <Dashboard {...props} data={data} query={query} onQuery={setQuery} search={search} />
+        <Dashboard {...props} data={data} running={running} query={query} onQuery={setQuery} search={search} />
       )}
     </main>
   );
 }
 
-type Shared = Omit<HomeProps, "project"> & { data: ProjectsResponse; query: string; onQuery: (q: string) => void; search: React.RefObject<HTMLInputElement | null> };
+type Shared = Omit<HomeProps, "project"> & { data: ProjectsResponse; running: ReadonlySet<string>; query: string; onQuery: (q: string) => void; search: React.RefObject<HTMLInputElement | null> };
 
 function SearchBox({ value, onChange, inputRef, placeholder, wide }: { value: string; onChange: (v: string) => void; inputRef: React.RefObject<HTMLInputElement | null>; placeholder: string; wide?: boolean }) {
   return (
@@ -177,7 +199,7 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
   const empty = files.length === 0;
   const found = files.filter((f) => matchesQuery(f.title, query));
   const noMatch = <Empty>맞는 파일이 없어요</Empty>;
-  const tree = (docs: ProjectDoc[], label: string) => <DocList rows={flattenRows(filterDocs(docs, query), collapsed)} label={label} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />;
+  const tree = (docs: ProjectDoc[], label: string) => <DocList rows={flattenRows(filterDocs(docs, query), collapsed)} label={label} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />;
   const unfiled = () => {
     const shown = filterDocs(data.unfiled, query);
     return shown.length > 0 && (
@@ -274,6 +296,44 @@ function Dashboard({ data, query, onQuery, search, ...p }: Shared) {
 
 type PTab = 'docs' | 'pipelines' | 'overview';
 
+/** Project head (layout B): icon badge, title, description, then 문서 수 · 실행 중 · 폴더. */
+function ProjectHeader({ project, running }: { project: ProjectInfo; running: number }) {
+  return (
+    <section aria-labelledby="project-title" className="flex items-start gap-4 border-b px-4 pt-6 pb-4 max-sm:pt-4">
+      <span aria-hidden className="grid size-[39px] shrink-0 place-items-center rounded-xl bg-muted text-[17px] font-bold text-foreground">
+        {project.icon}
+      </span>
+      <div className="min-w-0">
+        <h1 id="project-title" className="m-0 truncate text-[22px] leading-[30px] font-semibold">{project.name}</h1>
+        {project.description && <p className="mt-1 mb-0 text-sm text-muted-foreground">{project.description}</p>}
+        <ul aria-label="프로젝트 정보" className="m-0 mt-2 flex list-none flex-wrap gap-x-4 gap-y-1 p-0 text-[13px] text-muted-foreground">
+          <li className="inline-flex items-center gap-1.5 tabular-nums">
+            <FileText aria-hidden className="size-[15px]" />
+            문서 {project.docCount}개
+          </li>
+          <li className="inline-flex items-center gap-1.5">
+            {running > 0 ? (
+              <>
+                <span aria-hidden className="size-1.5 rounded-full bg-ok" />
+                <span className="text-foreground">파이프라인 {running}개 실행 중</span>
+              </>
+            ) : (
+              <>
+                <Workflow aria-hidden className="size-[15px]" />
+                실행 중인 파이프라인 없음
+              </>
+            )}
+          </li>
+          <li className="inline-flex min-w-0 items-center gap-1.5">
+            <Folder aria-hidden className="size-[15px]" />
+            <span className="truncate font-mono">{project.path}/</span>
+          </li>
+        </ul>
+      </div>
+    </section>
+  );
+}
+
 function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & { info: ProjectInfo }) {
   const [tab, setTab] = useState<PTab>('docs');
   const { collapsed, toggle } = useCollapse();
@@ -289,8 +349,11 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
         <Button variant="ghost" size="icon-sm" aria-label="모든 파일로 돌아가기" onClick={() => p.onProject(null)}>
           <ArrowLeft />
         </Button>
-        <span aria-hidden className="text-base">{project.icon}</span>
-        <h1 className="m-0 text-[15px] font-semibold">{project.name}</h1>
+        <p className="m-0 flex min-w-0 items-center gap-1.5 text-sm">
+          <span className="text-muted-foreground max-sm:hidden">프로젝트</span>
+          <span aria-hidden className="text-muted-foreground max-sm:hidden">/</span>
+          <span className="truncate font-medium">{project.name}</span>
+        </p>
         <TabsList aria-label="프로젝트 보기">
           <TabsTrigger value="docs">문서</TabsTrigger>
           <TabsTrigger value="pipelines">파이프라인</TabsTrigger>
@@ -301,6 +364,7 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
           <Plus /> 새 문서
         </Button>
       </header>
+      <ProjectHeader project={project} running={runningIn(project, p.running)} />
       <div className="pb-3">
         <TabsContent value="docs">
           {project.docs.length === 0 ? (
@@ -313,7 +377,7 @@ function ProjectHome({ info: project, query, onQuery, search, ...p }: Shared & {
           ) : (
             <>
               <ColumnHead />
-              <DocList rows={rows} label={`${project.name} 문서`} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />
+              <DocList rows={rows} label={`${project.name} 문서`} running={p.running} onOpen={p.onOpen} onToggle={toggle} onDelete={p.onDelete} />
             </>
           )}
         </TabsContent>

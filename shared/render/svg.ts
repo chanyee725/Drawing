@@ -8,7 +8,7 @@ import { iconFor } from './icons.ts';
 import type { Point, Scene, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
 import { FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
-import { THEMES, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
+import { THEMES, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
 export interface SvgOptions {
@@ -141,7 +141,11 @@ function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number 
 function textMarkup(tx: SceneText, { theme, t, c }: Ctx): string {
   if (tx.lines.length === 0) return '';
   let fill = tx.tone === 'muted' ? t.muted : t.text;
-  if (tx.on) fill = resolvePaint(tx.on, theme).text;
+  if (tx.on) {
+    const p = resolvePaint(tx.on, theme);
+    // Muted text (a node subtitle) stays grey on a pale fill, darkened just enough to read; bold fills use their contrast colour.
+    fill = tx.tone === 'muted' && tx.on.mode !== 'bold' ? readableMuted(t.muted, t.text, p.fill === 'none' ? t.background : p.fill) : p.text;
+  }
   if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
   // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
   if (tx.plate) fill = t.edge;

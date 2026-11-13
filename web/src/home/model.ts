@@ -78,3 +78,7 @@ export const recentFiles = (projects: ProjectInfo[], unfiled: ProjectDoc[], limi
 
 /** First letter of a project for its badge (the meta icon when it has one). */
 export const badgeOf = (p: { icon: string; name: string }) => p.icon || [...p.name][0] || '?';
+
+/** Files with a run going now that sit in `project` (its folder or any sub-folder). */
+export const runningIn = (project: Pick<ProjectInfo, 'path'>, running: ReadonlySet<string>) =>
+  [...running].filter((f) => f.startsWith(`${project.path}/`)).length;
