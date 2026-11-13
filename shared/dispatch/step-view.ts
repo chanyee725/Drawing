@@ -20,8 +20,11 @@ export type Stage = 'plan' | 'impl' | 'review' | 'test' | 'merge' | 'done' | 'bl
 /** What `stepView` reads about one step (E21 run record step plus its board stage). */
 export interface StepInput {
   stage?: Stage | null;
-  /** Raw Dispatch state of each session working on the step. */
-  sessions: ReadonlyArray<{ state: SessionState }>;
+  /**
+   * Raw Dispatch state of each session working on the step. `state` is optional like `Session.state`
+   * (older servers omit it). Undefined means unknown: never blocked, never done, never waiting; it counts as active.
+   */
+  sessions: ReadonlyArray<{ state?: SessionState }>;
   /** Paused by the usage-limit guard. */
   paused?: boolean;
 }

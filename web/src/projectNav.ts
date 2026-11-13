@@ -33,6 +33,32 @@ export function openPathsFor(view: ProjectsView | null, path: string | null): st
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1);
 
+/** One step of the open document's path (design doc 6 §2.4): its project, then the documents or groups above it. */
+export type Crumb = { kind: 'project' | 'doc' | 'group'; path: string; label: string };
+
+const docLabel = (n: DocNode) => (n.type === 'doc' && n.title) || n.name.replace(/\.dpx\.json$/, '');
+
+/** The open document's node (its sub-documents) and the steps above it; node is null when the view does not have it yet. */
+export function docPlace(view: ProjectsView | null, path: string | null): { trail: Crumb[]; node: DocNode | null } {
+  if (!view || !path) return { trail: [], node: null };
+  // A file opened right after it was made has no suffix in its path; the view's paths always have one.
+  const want = subFolderOf(path);
+  const project = projectOf(view, path);
+  const trail: Crumb[] = project ? [{ kind: 'project', path: project.path, label: project.name }] : [];
+  const walk = (nodes: DocNode[]): DocNode | null => {
+    for (const n of nodes) {
+      if (n.type === 'doc' && subFolderOf(n.path) === want) return n;
+      trail.push({ kind: n.type, path: n.path, label: docLabel(n) });
+      const hit = walk(n.children);
+      if (hit) return hit;
+      trail.pop();
+    }
+    return null;
+  };
+  const node = walk(project ? project.docs : view.loose);
+  return { trail: node ? trail : project ? [trail[0]] : [], node };
+}
+
 /** The tree node the existing move / delete code works with. */
 export function asTreeNode(n: DocNode | Project): TreeNode {
   if ('docs' in n || n.type === 'group') return { type: 'folder', name: baseName(n.path), path: n.path, children: [] };

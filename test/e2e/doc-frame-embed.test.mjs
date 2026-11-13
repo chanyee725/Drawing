@@ -67,7 +67,7 @@ test('frame embed: / menu, preview, jump to the canvas, deleted frame', { skip: 
   await pic.waitFor({ timeout: 30000 });
   assert.match(await pic.getAttribute('src'), /^data:image\/svg\+xml/);
   assert.equal(await page.locator('.doc-frame figcaption').textContent(), '프레임 구조도 · 누르면 캔버스로 가요');
-  await page.getByText('저장했어요').waitFor();
+  await page.locator('[data-save="saved"]').waitFor();
   // The diagram block inside the frame is drawn in the preview (it is not a canvas element).
   await page.waitForFunction(() => decodeURIComponent(document.querySelector('.doc-frame .doc-diagram-pic img')?.getAttribute('src') ?? '').includes('data-block-id'), null, { timeout: 30000 });
   const svgText = decodeURIComponent((await pic.getAttribute('src')).split(',')[1]);

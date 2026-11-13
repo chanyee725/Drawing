@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asTreeNode, newFileDir, openPathsFor, paletteScope, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
+import { asTreeNode, docPlace, newFileDir, openPathsFor, paletteScope, percent, projectOf, shellKey, subFolderOf } from '../../web/src/projectNav.ts';
 import type { DocNode, ProjectsView } from '../../web/src/api.ts';
 
 const doc = (path: string, children: DocNode[] = []): DocNode => ({
@@ -77,4 +77,23 @@ test('paletteScope follows the screen: open file on the document, shown project 
   // A project home wins over the loaded file of another project.
   assert.deepEqual(paletteScope({ kind: 'project', path: 'A' }, view, 'B/y.dpx.json'), { path: 'A', name: 'Alpha' });
   assert.deepEqual(paletteScope({ kind: 'project', path: 'Z' }, null, null), { path: 'Z', name: 'Z' });
+});
+
+test('docPlace: the path above the open document and its sub-documents', () => {
+  const deep = docPlace(view, 'A/login/token/exp.dpx.json');
+  assert.deepEqual(deep.trail.map((c) => [c.kind, c.path]), [['project', 'A'], ['doc', 'A/login.dpx.json'], ['doc', 'A/login/token.dpx.json']]);
+  assert.equal(deep.trail[0].label, 'Alpha');
+  assert.equal(deep.node?.path, 'A/login/token/exp.dpx.json');
+  const parent = docPlace(view, 'A/login.dpx.json');
+  assert.deepEqual(parent.trail.map((c) => c.path), ['A']);
+  assert.deepEqual(parent.node?.children.map((c) => c.path), ['A/login/token.dpx.json']);
+  // A group (folder without its own document) is a step too, labelled by its folder name.
+  assert.deepEqual(docPlace(view, 'A/g/m.dpx.json').trail.map((c) => [c.kind, c.label]), [['project', 'Alpha'], ['group', 'g']]);
+  assert.deepEqual(docPlace(view, 'x.dpx.json'), { trail: [], node: view.loose[0] });
+  // Not in the view yet (just created): the project only, no node.
+  assert.deepEqual(docPlace(view, 'A/new.dpx.json'), { trail: [{ kind: 'project', path: 'A', label: 'Alpha' }], node: null });
+  // Opened right after it was made, without the suffix: still found.
+  assert.equal(docPlace(view, 'A/login/token').node?.path, 'A/login/token.dpx.json');
+  assert.deepEqual(docPlace(view, 'A/login/token').trail.map((c) => c.path), ['A', 'A/login.dpx.json']);
+  assert.deepEqual(docPlace(null, 'A/login.dpx.json'), { trail: [], node: null });
 });
