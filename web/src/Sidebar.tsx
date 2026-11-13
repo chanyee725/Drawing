@@ -368,10 +368,11 @@ export function Sidebar(p: Props) {
           <SidebarMenuItem>
             <DropdownMenu open={p.settingsOpen} onOpenChange={p.onSettingsOpen}>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="group/row">
+                <SidebarMenuButton className="group/row" aria-keyshortcuts=",">
                   <Settings aria-hidden />
                   <span className="truncate">설정</span>
-                  <Kbd className="ml-auto opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 max-md:hidden">,</Kbd>
+                  {/* The key is announced through aria-keyshortcuts, so the button's name stays 설정. */}
+                  <Kbd aria-hidden className="ml-auto opacity-0 group-hover/row:opacity-100 group-focus-visible/row:opacity-100 max-md:hidden">,</Kbd>
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="w-56">

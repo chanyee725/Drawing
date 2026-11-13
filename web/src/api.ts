@@ -52,6 +52,9 @@ export type ProviderLimits = {
   gemini?: { reached: boolean; reset: number | null } | null;
 };
 
+export type ProviderInfo = { installed?: boolean | null; connected?: boolean; busy?: boolean; url?: string | null; error?: string | null };
+export type DispatchSettings = { guard: { enabled: boolean; five: number; seven: number }; team: { ctxHandoff?: number; handoffMTokens?: number } & Record<string, unknown> };
+
 export type HistoryEntry = { id: string; /** ms since epoch */ time: number; bytes: number };
 export type TrashItem = { id: string; path: string; /** ms since epoch */ deletedAt: number; /** Deleted outside the app: restoring brings back the newest saved snapshot. */ fromSnapshot?: boolean };
 export type HistoryVersion = DpxFile & { id: string; time: number };
@@ -91,11 +94,17 @@ export const api = {
   dispatch: () => call<DispatchStatus>('GET', '/api/dispatch'),
   providers: () => call<{ providers: Record<string, ProviderState> }>('GET', '/api/state').then((r) => r.providers ?? {}),
   limits: () => call<ProviderLimits>('GET', '/api/limits'),
-  /** Connect a provider: uses the CLI's existing login, or starts its own browser login (`connected` false). */
-  providerLogin: (id: string) => call<{ ok: boolean; connected: boolean }>('POST', `/api/providers/${id}/login`, {}),
-  providerCancel: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${id}/cancel`, {}),
-  /** Disconnects from Drawing only; the CLI stays logged in. */
-  providerLogout: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${id}/logout`, {}),
+  /** Settings dialog (E57): full provider status, Dispatch settings, connect/disconnect. Login runs the user's own CLI. */
+  dispatchState: () => call<{ providers?: Record<string, ProviderInfo>; settings?: DispatchSettings }>('GET', '/api/state'),
+  providerLogin: (id: string) => call<{ ok: boolean; connected: boolean }>('POST', `/api/providers/${encodeURIComponent(id)}/login`, {}),
+  providerCancel: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${encodeURIComponent(id)}/cancel`, {}),
+  /** Disconnects from Drawing only; the CLI's own login stays. */
+  providerLogout: (id: string) => call<{ ok: boolean }>('POST', `/api/providers/${encodeURIComponent(id)}/logout`, {}),
+  providerRefresh: () => call<Record<string, ProviderInfo>>('POST', '/api/providers/refresh', {}),
+  saveDispatchSettings: (patch: { guard?: Partial<DispatchSettings['guard']>; team?: Partial<DispatchSettings['team']> }) =>
+    call<DispatchSettings>('POST', '/api/settings', patch),
+  prTracking: () => call<{ on: boolean }>('GET', '/api/workspace/pr-tracking'),
+  setPrTracking: (on: boolean) => call<{ on: boolean }>('POST', '/api/workspace/pr-tracking', { on }),
   readFile: (path: string) => call<DpxFile>('GET', `/api/file${q(path)}`),
   /** `content`: starting document, canvas, blocks and plan (a template); defaults to an empty file. */
   createFile: (path: string, title: string, content?: Partial<Pick<DpxFile, 'document' | 'canvas' | 'blocks' | 'plan'>>) =>
