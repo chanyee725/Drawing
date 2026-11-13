@@ -21,6 +21,11 @@ export interface AlignTree {
   pad(groupId: string): { top: number; side: number; bottom: number };
   /** Source order of every node and group. */
   readonly order: ReadonlyMap<string, number>;
+  /**
+   * Boxes placed in a grid (spec §1.4): never snapped, reordered or banded among their siblings, only
+   * obstacles for the boxes that are. Their own insides are still aligned.
+   */
+  readonly fixed?: ReadonlySet<string>;
 }
 
 export interface AlignEdge {
@@ -31,6 +36,7 @@ export interface AlignEdge {
 }
 
 const isGroup = (t: AlignTree, id: string): boolean => t.kids.has(id);
+const movable = (t: AlignTree, id: string): boolean => !t.fixed?.has(id);
 const overlap = (a0: number, a1: number, b0: number, b1: number): number => Math.min(a1, b1) - Math.max(a0, b0);
 const intersects = (a: Rect, b: Rect): boolean =>
   overlap(a.x, a.x + a.w, b.x, b.x + b.w) > 0.5 && overlap(a.y, a.y + a.h, b.y, b.y + b.h) > 0.5;
@@ -155,7 +161,7 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
 
   /** §1.3: siblings whose centres along the flow differ by at most SNAP_TOLERANCE share the mean centre. */
   const snap = (ids: readonly string[]): void => {
-    const items = ids.filter((id) => rects.has(id)).map((id) => {
+    const items = ids.filter((id) => rects.has(id) && movable(tree, id)).map((id) => {
       const r = rects.get(id)!;
       return { id, c: vertical ? r.y + r.h / 2 : r.x + r.w / 2 };
     });
@@ -206,7 +212,7 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
     const start = (id: string): number => (vertical ? at(id).x : at(id).y);
     const size = (id: string): number => (vertical ? at(id).w : at(id).h);
     const layers: string[][] = [];
-    for (const id of ids.filter((x) => rects.has(x))) {
+    for (const id of ids.filter((x) => rects.has(x) && movable(tree, x))) {
       const l = layers.find((ls) => Math.abs(flowC(ls[0]!) - flowC(id)) < 0.5);
       if (l) l.push(id);
       else layers.push([id]);
@@ -328,7 +334,7 @@ export function alignLayout(tree: AlignTree, rects: Map<string, Rect>, edges: Al
    * take the column's left and right.
    */
   const bands = (ids: readonly string[]): void => {
-    const groups = ids.filter((id) => isGroup(tree, id) && rects.has(id));
+    const groups = ids.filter((id) => isGroup(tree, id) && rects.has(id) && movable(tree, id));
     if (groups.length < 2) return;
     for (const rows of [true, false]) {
       // Union-find over pairs that share most of one axis and are apart on the other.

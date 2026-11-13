@@ -3,7 +3,8 @@
 //
 // Writes: <project>/.dispatch/ (state.json, session worktrees) and ~/.dispatch/limits.json (usage
 // limits shared with other servers). Transcripts stay in memory. Off when the workspace is not in a
-// git project: the drawing tool works on its own.
+// git project, or another server already uses the project's .dispatch/ (project.js, E13): the
+// drawing tool works on its own and GET /api/dispatch says why.
 import path from "node:path";
 import { runCli } from "./cli.js";
 import { cancelLogin, login, logout, providerStatus, publicStatus } from "./auth.js";
@@ -11,6 +12,7 @@ import { Burn } from "./burn.js";
 import { Store } from "./dispatch-store.js";
 import { currentBranch } from "./git.js";
 import { Hub } from "./hub.js";
+import { claimProject, findProject, OFF_MESSAGES } from "./project.js";
 import { SharedLimits } from "./limits.js";
 import { codexModels, staticModels } from "./models.js";
 import { PERMS, ROLES } from "./roles.js";
@@ -21,9 +23,13 @@ import { effectiveRoles, teamSettings } from "./settings.js";
 export const HUB_EVENTS = ["session", "message", "limits", "removed", "tasks", "tickets"];
 const THEMES = ["system", "light", "dark", "monitor"];
 
+// The folder decides the project, not GIT_DIR / GIT_WORK_TREE inherited from whoever started us.
+const GIT_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"];
+const ownGitEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !GIT_ENV.includes(k)));
+
 /** The git top level that holds dir, or null when dir is not in a git work tree. */
 export async function gitTop(dir) {
-  try { return (await runCli("git", ["-C", dir, "rev-parse", "--show-toplevel"])).stdout.trim() || null; } catch { return null; }
+  try { return (await runCli("git", ["-C", dir, "rev-parse", "--show-toplevel"], { env: ownGitEnv() })).stdout.trim() || null; } catch { return null; }
 }
 
 /** Every provider "not checked yet": what the UI shows before a provider is connected. */
@@ -85,7 +91,12 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
     return next;
   }
 
-  const tilde = p => (process.env.HOME ? p.replace(process.env.HOME, "~") : p);
+  // Only a whole leading HOME becomes "~" (project.js `home()` undoes exactly that). A trailing slash on
+  // HOME, or HOME as a mere prefix of another folder name, must not change the path.
+  const tilde = p => {
+    const h = (process.env.HOME || "").replace(/\/+$/, "");
+    return h && (p === h || p.startsWith(h + "/")) ? "~" + p.slice(h.length) : p;
+  };
   async function snapshot() {
     return {
       project: { name: path.basename(root), path: tilde(root), branch: await currentBranch(root) },
@@ -145,11 +156,48 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
 
 /** Drawing module entry (server/modules.js). `deps` is for tests; ctx.spawnCli replaces the CLI seam. */
 export async function setup(ctx, deps = {}) {
-  if (!ctx.workspaceDir) return {};
-  const root = await gitTop(ctx.workspaceDir);
-  if (!root) return {};
-  const d = await createDispatch({ root, broadcast: ctx.hub.broadcast, port: () => ctx.port, deps: { ...(ctx.spawnCli && { spawnCli: ctx.spawnCli }), ...deps } });
+  let status = { enabled: false, reason: "no-workspace" };
+  const statusRoute = { method: "GET", path: "/api/dispatch", handler: (req, res) => sendStatus(res, status) };
+  const off = (reason, port = null) => {
+    status = { enabled: false, reason, message: OFF_MESSAGES[reason], ...(port ? { port } : {}) };
+    console.log(`Dispatch off: ${reason}${port ? ` (port ${port})` : ""}`);
+    return { routes: [statusRoute], status: () => status };
+  };
+
+  const found = await findProject(ctx.workspaceDir, { gitTop });
+  if (!found.root) return off(found.reason);
+  const claim = await claimProject(found.root);
+  if (!claim.ok) return off(claim.reason, claim.port);
+  let d;
+  try {
+    d = await createDispatch({ root: found.root, broadcast: ctx.hub.broadcast, port: () => ctx.port, deps: { ...(ctx.spawnCli && { spawnCli: ctx.spawnCli }), ...deps } });
+  } catch (e) {
+    await claim.lock.release();
+    throw e;
+  }
+  status = { enabled: true };
   // Each new SSE client gets the Dispatch snapshot first, as the standalone server sent it.
   ctx.hub.onAttach(async sendTo => sendTo("snapshot", await d.snapshot()));
-  return d;
+  return {
+    ...d,
+    routes: [statusRoute, ...d.routes],
+    status: () => status,
+    async listening() {
+      // d.listening() first: it starts the timers synchronously, so a close() that comes while the
+      // lock is being written still finds and clears them.
+      const started = d.listening();
+      await claim.lock.setPort(ctx.port).catch(e => console.error("dispatch lock:", e.code ?? e.name));
+      await started;
+    },
+    async close() {
+      await d.close();
+      await claim.lock.release();
+    },
+    releaseSync: () => claim.lock.releaseSync(),
+  };
+}
+
+function sendStatus(res, body) {
+  res.writeHead(200, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
+  res.end(JSON.stringify(body));
 }

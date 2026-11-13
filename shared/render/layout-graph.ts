@@ -48,9 +48,10 @@ const SPACING = {
   layer: 56,
 } as const;
 /**
- * Siblings in one layer keep their source order (spec §1.3), even at the cost of a crossing. ELK only
- * honours this at the root (set on a group, elkjs 0.12 throws in its model-order comparator), so
- * `alignLayout` puts siblings inside groups in source order afterwards.
+ * Siblings in one layer keep their source order (spec §1.3), even at the cost of a crossing. Set on the
+ * root of every ELK run (`layoutScope`: the diagram and each free group). ELK only honours it at that
+ * root (set on a group, elkjs 0.12 throws in its model-order comparator), so `alignLayout` puts siblings
+ * inside groups in source order afterwards.
  */
 const MODEL_ORDER = {
   'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
@@ -58,6 +59,8 @@ const MODEL_ORDER = {
 } as const;
 /** Group padding around its children; `top` includes the title line. */
 const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
+
+type Rect = { x: number; y: number; w: number; h: number };
 
 interface NodeGeom {
   node: GraphNode;
@@ -162,20 +165,23 @@ function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind,
 /**
  * Box nodes of the same shape in the same group get one size: the widest bucket among them, labels
  * re-wrapped to that width, then the tallest height. The root is not one group: there only nodes in the
- * same layer (`rootLayer`) share a size, and root-level nodes without edges keep theirs.
+ * same layer (`rootLayer`) share a size. Root nodes in the root grid (`loose`) share one size; other root
+ * nodes without edges keep their own.
  */
 function unifySizes(
   nodes: Iterable<NodeGeom>,
   parent: ReadonlyMap<string, string | undefined>,
   rootLayer: ReadonlyMap<string, number>,
+  loose: ReadonlySet<string>,
 ): void {
   const sets = new Map<string, NodeGeom[]>();
   for (const g of nodes) {
     if (g.iconOnly || !BUCKETED.has(g.shape)) continue;
     const p = parent.get(g.node.id);
-    const at = p === undefined ? rootLayer.get(g.node.id) : undefined;
-    if (p === undefined && at === undefined) continue; // no edge: keeps its own size
-    const key = `${p === undefined ? `layer:${at}` : `group:${p}`}\u0000${g.shape}`;
+    const layer = p === undefined ? rootLayer.get(g.node.id) : undefined;
+    const at = p !== undefined ? `group:${p}` : loose.has(g.node.id) ? 'loose' : layer !== undefined ? `layer:${layer}` : undefined;
+    if (at === undefined) continue; // root node with no edge outside the grid: keeps its own size
+    const key = `${at}\u0000${g.shape}`;
     const list = sets.get(key) ?? [];
     list.push(g);
     sets.set(key, list);
@@ -284,6 +290,134 @@ function rootLayers(
   return layer;
 }
 
+/** Grid cell gaps between free nodes (spec §1.4): across, down. */
+const GRID_GAP = { x: 16, y: 12 } as const;
+/** Gaps between free sibling groups (spec §1.5): side by side in one row, stacked bands. */
+const BAND_GAP = { row: 24, stack: 12 } as const;
+/** Width : height the block of free groups aims for when picking its column count. */
+const BAND_ASPECT = 1.5;
+/** Most cells in one grid row. */
+const GRID_MAX_COLS = 5;
+
+/** Columns of a row-first grid of `n` cells: one row up to GRID_MAX_COLS, then about 3:2 wide. */
+export function gridColumns(n: number): number {
+  return n <= GRID_MAX_COLS ? Math.max(1, n) : Math.min(GRID_MAX_COLS, Math.ceil(Math.sqrt(n * 1.5)));
+}
+
+/**
+ * Columns for free sibling groups: the count (1 to GRID_MAX_COLS) whose block comes closest to
+ * BAND_ASPECT. Wide bands (a capability row) stack in one column; small boxes share rows.
+ */
+export function bandColumns(items: readonly { w: number; h: number }[]): number {
+  let best = 1;
+  let bestScore = Infinity;
+  for (let cols = 1; cols <= Math.min(GRID_MAX_COLS, items.length); cols++) {
+    const p = packGrid(items.map((it) => ({ ...it, rects: new Map(), edges: new Map() })), cols, BAND_GAP.row, BAND_GAP.stack, false);
+    const score = Math.abs(Math.log(p.w / p.h / BAND_ASPECT));
+    if (score < bestScore - 1e-9) {
+      best = cols;
+      bestScore = score;
+    }
+  }
+  return best;
+}
+
+/** Laid-out part of a diagram in its own coordinates: rects of everything in it and its edge routes. */
+interface Piece {
+  w: number;
+  h: number;
+  rects: Map<string, Rect>;
+  edges: Map<string, Point[]>;
+}
+
+/** Copy `from` into `into`, moved by (dx, dy). */
+function placePiece(into: Piece, from: Piece, dx: number, dy: number): void {
+  for (const [id, r] of from.rects) into.rects.set(id, { x: r.x + dx, y: r.y + dy, w: r.w, h: r.h });
+  for (const [id, pts] of from.edges) into.edges.set(id, pts.map((p) => ({ x: round(p.x + dx), y: round(p.y + dy) })));
+}
+
+/**
+ * Row-first grid of `items`: every column as wide as its widest cell, every row as tall as its tallest.
+ * `center` centres an item in its cell; otherwise it sits at the cell's top-left.
+ */
+export function packGrid(items: readonly Piece[], cols: number, gapX: number, gapY: number, center: boolean): Piece {
+  const colW: number[] = [];
+  const rowH: number[] = [];
+  items.forEach((it, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    colW[c] = Math.max(colW[c] ?? 0, it.w);
+    rowH[r] = Math.max(rowH[r] ?? 0, it.h);
+  });
+  const xs: number[] = [];
+  const ys: number[] = [];
+  colW.reduce((x, w, c) => ((xs[c] = x), x + w + gapX), 0);
+  rowH.reduce((y, h, r) => ((ys[r] = y), y + h + gapY), 0);
+  const out: Piece = {
+    w: colW.reduce((a, b) => a + b, 0) + gapX * (colW.length - 1),
+    h: rowH.reduce((a, b) => a + b, 0) + gapY * (rowH.length - 1),
+    rects: new Map(),
+    edges: new Map(),
+  };
+  items.forEach((it, i) => {
+    const c = i % cols;
+    const r = Math.floor(i / cols);
+    const dx = center ? (colW[c]! - it.w) / 2 : 0;
+    const dy = center ? (rowH[r]! - it.h) / 2 : 0;
+    placePiece(out, it, xs[c]! + dx, ys[r]! + dy);
+  });
+  return out;
+}
+
+/**
+ * Put `tail` after the laid-out content of `piece` in the flow direction (right of it, under it, ...), one
+ * big-block gap away and lined up with its start, and grow `piece` to hold it.
+ */
+function attachTail(piece: Piece, tail: Piece, direction: GraphDiagram['direction']): void {
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const r of piece.rects.values()) {
+    x0 = Math.min(x0, r.x);
+    y0 = Math.min(y0, r.y);
+    x1 = Math.max(x1, r.x + r.w);
+    y1 = Math.max(y1, r.y + r.h);
+  }
+  const gap = SPACING.block;
+  const at =
+    direction === 'right' ? { x: x1 + gap, y: y0 }
+    : direction === 'left' ? { x: x0 - gap - tail.w, y: y0 }
+    : direction === 'up' ? { x: x0, y: y0 - gap - tail.h }
+    : { x: x0, y: y1 + gap };
+  placePiece(piece, tail, at.x, at.y);
+  piece.w = Math.max(piece.w, at.x + tail.w);
+  piece.h = Math.max(piece.h, at.y + tail.h);
+}
+
+/**
+ * Which children are free: a node no edge touches, or a group no edge crosses (edges inside it are fine,
+ * it gets laid out on its own). Free siblings go in a grid instead of ELK's first layer (spec §1.4).
+ */
+function freeChildren(edges: readonly GraphEdge[], parent: ReadonlyMap<string, string | undefined>): (c: GraphChild) => boolean {
+  const touched = new Set<string>();
+  const crossed = new Set<string>();
+  const chain = (id: string): string[] => {
+    const out = [id];
+    for (let p = parent.get(id); p !== undefined; p = parent.get(p)) out.push(p);
+    return out;
+  };
+  for (const e of edges) {
+    touched.add(e.from);
+    touched.add(e.to);
+    const a = chain(e.from);
+    const b = chain(e.to);
+    for (const x of a) if (!b.includes(x)) crossed.add(x);
+    for (const x of b) if (!a.includes(x)) crossed.add(x);
+  }
+  return (c) => (c.kind === 'node' ? !touched.has(c.id) : !crossed.has(c.id));
+}
+
 function measureGroup(d: GraphDiagram, group: GraphGroup): GroupGeom {
   const style = styleFor(d, group.attrs, group.span.line);
   const size = fontSize(style);
@@ -303,8 +437,6 @@ function clipToRect(r: { x: number; y: number; w: number; h: number }, p: Point)
   const s = Math.min(dx === 0 ? Infinity : r.w / 2 / Math.abs(dx), dy === 0 ? Infinity : r.h / 2 / Math.abs(dy));
   return { x: cx + dx * s, y: cy + dy * s };
 }
-
-type Rect = { x: number; y: number; w: number; h: number };
 
 /** Whether `p` is inside the drawn outline of a shape whose bounding box is `r` (rect-like shapes: the box). */
 function insideShape(shape: string, r: Rect, p: Point): boolean {
@@ -427,7 +559,12 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   };
   for (const c of d.children) measure(c, undefined);
   const order = definitionOrder(d);
-  unifySizes(nodes.values(), parent, rootLayers(d, parent, order));
+  const edges: GraphEdge[] = d.edges.filter((e) => parent.has(e.from) && parent.has(e.to));
+  const free = freeChildren(edges, parent);
+  // Free root nodes share one size only when they really go in a grid (at least two free root children).
+  const rootFree = d.children.filter((c) => free(c));
+  const loose = new Set(rootFree.length >= 2 ? rootFree.filter((c) => c.kind === 'node').map((c) => c.id) : []);
+  unifySizes(nodes.values(), parent, rootLayers(d, parent, order), loose);
 
   // ELK reads spacing per parent, so every group gets its own values (else ELK's 20 px default).
   const vertical = d.direction === 'down' || d.direction === 'up';
@@ -442,28 +579,6 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     'elk.layered.spacing.edgeEdgeBetweenLayers': '14',
     'elk.spacing.edgeLabel': '4',
   });
-
-  const toElk = (child: GraphChild): ElkNode => {
-    if (child.kind === 'node') {
-      const g = nodes.get(child.id)!;
-      return { id: elkId(child.id), width: g.w, height: g.h };
-    }
-    const g = groups.get(child.id)!;
-    const kids = child.children.map((c) => toElk(c));
-    return {
-      id: elkId(child.id),
-      ...(kids.length === 0 ? { width: g.minW, height: g.header + 40 } : {}),
-      children: kids,
-      layoutOptions: {
-        ...spacingFor(child.children),
-        'elk.padding': `[top=${g.header},left=${GROUP_PAD.side},bottom=${GROUP_PAD.bottom},right=${GROUP_PAD.side}]`,
-        'elk.nodeSize.constraints': 'MINIMUM_SIZE',
-        'elk.nodeSize.minimum': `(${g.minW},${g.header + 40})`,
-      },
-    };
-  };
-  const children = d.children.map((c) => toElk(c));
-
   const isAncestor = (a: string, b: string): boolean => {
     for (let p = parent.get(b); p !== undefined; p = parent.get(p)) if (p === a) return true;
     return false;
@@ -472,12 +587,13 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   const pairKey = (e: GraphEdge): string => [e.from, e.to].sort().join('\u0000');
   for (const e of d.edges) pairCount.set(pairKey(e), (pairCount.get(pairKey(e)) ?? 0) + 1);
 
-  const edges: GraphEdge[] = d.edges.filter((e) => parent.has(e.from) && parent.has(e.to));
   const edgeLabels = new Map<string, Label>();
-  const elkEdges: ElkExtendedEdge[] = edges.map((e) => {
+  for (const e of edges) {
     const style = styleFor(d, e.attrs, e.span.line);
-    const label = e.label ? measureLabel(e.label, EDGE_LABEL_SIZE, style.typeface, style.wrap, 140) : undefined;
-    if (label) edgeLabels.set(e.id, label);
+    if (e.label) edgeLabels.set(e.id, measureLabel(e.label, EDGE_LABEL_SIZE, style.typeface, style.wrap, 140));
+  }
+  const elkEdge = (e: GraphEdge): ElkExtendedEdge => {
+    const label = edgeLabels.get(e.id);
     const flip = flipped(e, order);
     return {
       id: `e:${e.id}`,
@@ -485,52 +601,139 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       targets: [elkId(flip ? e.from : e.to)],
       labels: label ? [{ id: `l:${e.id}`, text: e.label!, width: Math.ceil(label.w + PLATE_PAD * 2), height: label.h + 4 }] : [],
     };
-  });
-
-  const root: ElkNode = {
-    id: 'root',
-    layoutOptions: {
-      'elk.algorithm': 'layered',
-      'elk.direction': ELK_DIRECTION[d.direction],
-      'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
-      'elk.edgeRouting': 'ORTHOGONAL',
-      ...MODEL_ORDER,
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-      ...spacingFor(d.children),
-      'elk.edgeLabels.inline': 'true',
-      'elk.layered.edgeLabels.centerLabelPlacementStrategy': 'MEDIAN_LAYER',
-    },
-    children,
-    edges: elkEdges,
   };
+  /** Free nodes and groups placed in a grid: alignment leaves them where the grid put them (spec §1.4). */
+  const gridded = new Set<string>();
 
-  const out = await runElk(root);
-  const abs = absolutePositions(out);
-  const rects = new Map<string, Rect>();
-  const sizes = new Map<string, { w: number; h: number }>();
-  const collect = (n: ElkNode): void => {
-    for (const c of n.children ?? []) {
-      sizes.set(c.id, { w: c.width ?? 0, h: c.height ?? 0 });
-      collect(c);
+  /** Lay out `top` (the diagram's children, or one free group) with ELK; free siblings go in grids. */
+  const layoutScope = async (top: readonly GraphChild[]): Promise<Piece> => {
+    const present = new Set<string>();
+    const grids = new Map<string, Piece>();
+    /** Free block of the scope's top level when it also has linked children: placed after ELK, not by it. */
+    let tail: Piece | undefined;
+    const build = async (kids: readonly GraphChild[], key: string): Promise<ElkNode[]> => {
+      const loose = kids.filter((c) => free(c));
+      const linked = loose.length >= 2 ? kids.filter((c) => !free(c)) : kids;
+      const out: ElkNode[] = [];
+      for (const c of linked) out.push(await toElk(c));
+      if (loose.length >= 2 && key === '' && linked.length > 0) {
+        // ELK's LAST_SEPARATE would give the block a layer of its own, but crashes on some graphs.
+        tail = await gridOf(loose);
+      } else if (loose.length >= 2) {
+        const block = await gridOf(loose);
+        const id = `grid:${key}`;
+        grids.set(id, block);
+        // Spec §1.4: the unconnected rest of a partly connected parent goes at its end.
+        const last = linked.length > 0 ? { layoutOptions: { 'elk.layered.layering.layerConstraint': 'LAST' } } : {};
+        out.push({ id, width: block.w, height: block.h, ...last });
+      }
+      return out;
+    };
+    const toElk = async (child: GraphChild): Promise<ElkNode> => {
+      present.add(child.id);
+      if (child.kind === 'node') {
+        const g = nodes.get(child.id)!;
+        return { id: elkId(child.id), width: g.w, height: g.h };
+      }
+      const g = groups.get(child.id)!;
+      const kids = await build(child.children, child.id);
+      return {
+        id: elkId(child.id),
+        ...(kids.length === 0 ? { width: g.minW, height: g.header + 40 } : {}),
+        children: kids,
+        layoutOptions: {
+          ...spacingFor(child.children),
+          'elk.padding': `[top=${g.header},left=${GROUP_PAD.side},bottom=${GROUP_PAD.bottom},right=${GROUP_PAD.side}]`,
+          'elk.nodeSize.constraints': 'MINIMUM_SIZE',
+          'elk.nodeSize.minimum': `(${g.minW},${g.header + 40})`,
+        },
+      };
+    };
+    const children = await build(top, '');
+    const scopeEdges = edges.filter((e) => present.has(e.from) && present.has(e.to));
+    const root: ElkNode = {
+      id: 'root',
+      layoutOptions: {
+        'elk.algorithm': 'layered',
+        'elk.direction': ELK_DIRECTION[d.direction],
+        'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
+        'elk.edgeRouting': 'ORTHOGONAL',
+        ...MODEL_ORDER,
+        'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+        ...spacingFor(top),
+        'elk.edgeLabels.inline': 'true',
+        'elk.layered.edgeLabels.centerLabelPlacementStrategy': 'MEDIAN_LAYER',
+      },
+      children,
+      edges: scopeEdges.map(elkEdge),
+    };
+
+    const out = await runElk(root);
+    const abs = absolutePositions(out);
+    const piece: Piece = { w: out.width ?? 0, h: out.height ?? 0, rects: new Map(), edges: new Map() };
+    const sizes = new Map<string, { w: number; h: number }>();
+    const collect = (n: ElkNode): void => {
+      for (const c of n.children ?? []) {
+        sizes.set(c.id, { w: c.width ?? 0, h: c.height ?? 0 });
+        collect(c);
+      }
+    };
+    collect(out);
+    for (const [id, p] of abs) {
+      const s = sizes.get(id);
+      if (s && id.startsWith('n:')) piece.rects.set(id.slice(2), { x: p.x, y: p.y, w: s.w, h: s.h });
+      const grid = grids.get(id);
+      if (grid) placePiece(piece, grid, p.x, p.y);
     }
+    if (tail) attachTail(piece, tail, d.direction);
+    const laid = new Map((out.edges ?? []).map((e) => [e.id, e as ElkExtendedEdge & { container?: string }]));
+    for (const e of scopeEdges) {
+      const le = laid.get(`e:${e.id}`);
+      const section = le?.sections?.[0];
+      if (!le || !section) continue;
+      const o = edgeOffset(le, abs);
+      const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: round(p.x + o.x), y: round(p.y + o.y) }));
+      if (flipped(e, order)) points.reverse();
+      piece.edges.set(e.id, orthogonalize(points));
+    }
+    return piece;
   };
-  collect(out);
-  for (const [id, p] of abs) {
-    const s = sizes.get(id);
-    if (s && id.startsWith('n:')) rects.set(id.slice(2), { x: p.x, y: p.y, w: s.w, h: s.h });
-  }
 
-  const laid = new Map((out.edges ?? []).map((e) => [e.id, e as ElkExtendedEdge & { container?: string }]));
+  /** A free group laid out on its own, in its own coordinates (top-left 0,0). */
+  const groupPiece = async (g: GraphGroup): Promise<Piece> => {
+    const laid = await layoutScope([g]);
+    const r = laid.rects.get(g.id)!;
+    const piece: Piece = { w: r.w, h: r.h, rects: new Map(), edges: new Map() };
+    placePiece(piece, laid, -r.x, -r.y);
+    return piece;
+  };
+
+  /**
+   * Free siblings as one block (spec §1.4): free nodes in a row-first grid, then each free group as a cell
+   * of a second grid whose columns keep the block near BAND_ASPECT (wide bands stack, as Eraser's do in
+   * either direction).
+   */
+  const gridOf = async (loose: readonly GraphChild[]): Promise<Piece> => {
+    const leaves: Piece[] = [];
+    const bands: Piece[] = [];
+    for (const c of loose) {
+      gridded.add(c.id);
+      if (c.kind === 'node') {
+        const g = nodes.get(c.id)!;
+        leaves.push({ w: g.w, h: g.h, rects: new Map([[c.id, { x: 0, y: 0, w: g.w, h: g.h }]]), edges: new Map() });
+      } else bands.push(await groupPiece(c));
+    }
+    if (leaves.length > 0) bands.unshift(packGrid(leaves, gridColumns(leaves.length), GRID_GAP.x, GRID_GAP.y, true));
+    if (bands.length === 1) return bands[0]!;
+    return packGrid(bands, bandColumns(bands), BAND_GAP.row, BAND_GAP.stack, false);
+  };
+
+  const placed = await layoutScope(d.children);
   const pairSeen = new Map<string, number>();
   const baseEdges: BaseEdge[] = [];
   for (const e of edges) {
-    const le = laid.get(`e:${e.id}`);
-    const section = le?.sections?.[0];
-    if (!le || !section) continue;
-    const o = edgeOffset(le, abs);
-    const points = [section.startPoint, ...(section.bendPoints ?? []), section.endPoint].map((p) => ({ x: round(p.x + o.x), y: round(p.y + o.y) }));
-    if (flipped(e, order)) points.reverse();
-    points.splice(0, points.length, ...orthogonalize(points));
+    const points = placed.edges.get(e.id);
+    if (!points) continue;
     const key = pairKey(e);
     const pairIndex = pairSeen.get(key) ?? 0;
     pairSeen.set(key, pairIndex + 1);
@@ -546,7 +749,9 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   }
   for (const be of baseEdges) be.pairSize = pairSeen.get(pairKey(be.edge)) ?? 1;
 
-  // Spec §1.8 steps 4-5: snap layer centres, match sibling group bands, keep edges attached.
+  // Spec §1.8 steps 4-5: snap layer centres, match sibling group bands, keep edges attached. Grid cells
+  // stay as packed: grid groups keep their fitted width and left edge (spec §1.2 exception, §1.4).
+  const rects = placed.rects;
   const kids = new Map<string | undefined, string[]>([[undefined, d.children.map((c) => c.id)]]);
   for (const g of groups.values()) kids.set(g.group.id, g.group.children.map((c) => c.id));
   alignLayout(
@@ -555,6 +760,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       parent,
       pad: (id) => ({ top: groups.get(id)!.header, side: GROUP_PAD.side, bottom: GROUP_PAD.bottom }),
       order,
+      fixed: gridded,
     },
     rects,
     baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points })),
