@@ -19,6 +19,36 @@ const ELK_DIRECTION = { down: 'DOWN', up: 'UP', left: 'LEFT', right: 'RIGHT' } a
 const NODE_TEXT_MAX = 160;
 const EDGE_LABEL_SIZE = 12;
 
+// Eraser-like sizes and spacing, from the survey of its public examples
+// (docs/research/eraser/09-examples-style.md §1.1, §1.5, §1.6).
+/** Box nodes take a fixed width from these buckets instead of hugging their text. */
+const WIDTH_BUCKETS = [160, 200, 260] as const;
+/** Lines a label may wrap to before the node moves up a width bucket. */
+const MAX_LINES = 3;
+/** Box height for one line, and the least for two (title + subtitle). More text grows it by NODE_PAD_Y. */
+const NODE_MIN_H = 52;
+const NODE_TWO_LINE_H = 56;
+/** Space a box node keeps around its content: left + right, top + bottom. */
+const NODE_PAD_X = 32;
+const NODE_PAD_Y = 12;
+/** Shapes that get width buckets and one size per group. The rest keep shape-specific sizing. */
+const BUCKETED: ReadonlySet<ShapeKind> = new Set(['rectangle', 'cylinder', 'document']);
+const SPACING = {
+  /** Same-layer neighbours side by side (vertical flow). */
+  neighbour: 40,
+  /** Same-layer nodes stacked as a list (horizontal flow). */
+  list: 12,
+  /** Siblings in a parent that holds groups (the root included): big blocks. */
+  block: 48,
+  /**
+   * Between layers. Eraser uses 56, or 76 when the edges carry labels; ELK gives each edge label a layer
+   * of its own, so a labelled gap is already 56 + label + 56 and needs no bigger value.
+   */
+  layer: 56,
+} as const;
+/** Group padding around its children; `top` includes the title line. */
+const GROUP_PAD = { top: 40, side: 16, bottom: 14 } as const;
+
 interface NodeGeom {
   node: GraphNode;
   style: ElementStyle;
@@ -51,9 +81,11 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
     const iconSize = Math.round(size * 3);
     return { node, style, label, shape, iconOnly: true, iconSize, w: Math.ceil(Math.max(iconSize, label.w) + 8), h: Math.ceil(iconSize + 6 + label.h) };
   }
-  const label = measureLabel(node.label, size, style.typeface, style.wrap, NODE_TEXT_MAX);
   const iconSize = icon ? Math.round(size * 1.5) : 0;
-  const cw = label.w + (icon ? iconSize + 8 : 0);
+  const iconW = icon ? iconSize + 8 : 0;
+  if (BUCKETED.has(shape)) return measureBucketed(node, style, shape, iconSize);
+  const label = measureLabel(node.label, size, style.typeface, style.wrap, NODE_TEXT_MAX);
+  const cw = label.w + iconW;
   const ch = Math.max(label.h, iconSize);
   let w = Math.max(cw + 32, 96);
   let h = Math.max(ch + 22, 44);
@@ -84,16 +116,115 @@ function measureNode(d: GraphDiagram, node: GraphNode): NodeGeom {
     case 'star':
       w = h = Math.max(cw * 2 + 30, ch * 3 + 30, 100);
       break;
-    case 'cylinder':
-      h += 18;
-      break;
-    case 'document':
-      h += 10;
-      break;
     default:
       break;
   }
   return { node, style, label, shape, iconOnly: false, iconSize, w: Math.ceil(w), h: Math.ceil(h) };
+}
+
+/** Label, width and height of a box node whose text wraps to fit `width`. */
+function sizeBox(g: Pick<NodeGeom, 'node' | 'style' | 'shape' | 'iconSize'>, width: number): Pick<NodeGeom, 'label' | 'w' | 'h'> {
+  const size = fontSize(g.style);
+  const iconW = g.iconSize ? g.iconSize + 8 : 0;
+  const label = measureLabel(g.node.label, size, g.style.typeface, g.style.wrap, width - NODE_PAD_X - iconW);
+  const w = Math.max(width, Math.ceil(label.w + iconW + NODE_PAD_X));
+  const least = label.lines.length >= 2 ? NODE_TWO_LINE_H : NODE_MIN_H;
+  let h = Math.max(least, Math.ceil(Math.max(label.h, g.iconSize) + NODE_PAD_Y));
+  if (g.shape === 'cylinder') h += 18;
+  else if (g.shape === 'document') h += 10;
+  return { label, w, h };
+}
+
+/**
+ * Box nodes (spec §1.1): the smallest width bucket whose wrap stays within MAX_LINES lines; failing that,
+ * the widest (a long word or unwrapped line widens it).
+ */
+function measureBucketed(node: GraphNode, style: ElementStyle, shape: ShapeKind, iconSize: number): NodeGeom {
+  const base = { node, style, shape, iconSize };
+  let pick: Pick<NodeGeom, 'label' | 'w' | 'h'> | undefined;
+  for (const b of WIDTH_BUCKETS) {
+    pick = sizeBox(base, b);
+    if (pick.w === b && pick.label.lines.length <= MAX_LINES) break;
+  }
+  return { ...base, ...pick!, iconOnly: false };
+}
+
+/**
+ * Box nodes of the same shape in the same group get one size: the widest bucket among them, labels
+ * re-wrapped to that width, then the tallest height. The root is not one group: there only nodes in the
+ * same layer (`rootLayer`) share a size.
+ */
+function unifySizes(
+  nodes: Iterable<NodeGeom>,
+  parent: ReadonlyMap<string, string | undefined>,
+  rootLayer: ReadonlyMap<string, number>,
+): void {
+  const sets = new Map<string, NodeGeom[]>();
+  for (const g of nodes) {
+    if (g.iconOnly || !BUCKETED.has(g.shape)) continue;
+    const p = parent.get(g.node.id);
+    const key = `${p === undefined ? `layer:${rootLayer.get(g.node.id) ?? 0}` : `group:${p}`}\u0000${g.shape}`;
+    const list = sets.get(key) ?? [];
+    list.push(g);
+    sets.set(key, list);
+  }
+  for (const list of sets.values()) {
+    const w = Math.max(...list.map((g) => g.w));
+    for (const g of list) Object.assign(g, sizeBox(g, w));
+    const h = Math.max(...list.map((g) => g.h));
+    for (const g of list) g.h = h;
+  }
+}
+
+/**
+ * Layer of every root-level node: longest path from the sources over the edges between root-level items
+ * (an edge into a group counts for the group). Approximates the layers ELK will make, so root-level box
+ * nodes can share a size per layer (spec §1.1). Edges that close a cycle are ignored.
+ */
+function rootLayers(d: GraphDiagram, parent: ReadonlyMap<string, string | undefined>): Map<string, number> {
+  const top = (id: string): string | undefined => {
+    if (!parent.has(id)) return undefined;
+    let cur = id;
+    for (let p = parent.get(cur); p !== undefined; p = parent.get(cur)) cur = p;
+    return cur;
+  };
+  const out = new Map<string, string[]>();
+  const indeg = new Map<string, number>();
+  for (const c of d.children) indeg.set(c.id, 0);
+  const seen = new Set<string>();
+  for (const e of d.edges) {
+    const a = top(e.from);
+    const b = top(e.to);
+    if (a === undefined || b === undefined || a === b || seen.has(`${a}\u0000${b}`)) continue;
+    seen.add(`${a}\u0000${b}`);
+    out.set(a, [...(out.get(a) ?? []), b]);
+  }
+  // Drop back edges (DFS in model order) so the rest is a DAG.
+  const state = new Map<string, 1 | 2>();
+  const dag = new Map<string, string[]>();
+  const visit = (id: string): void => {
+    state.set(id, 1);
+    for (const n of out.get(id) ?? []) {
+      if (state.get(n) === 1) continue;
+      dag.set(id, [...(dag.get(id) ?? []), n]);
+      indeg.set(n, (indeg.get(n) ?? 0) + 1);
+      if (!state.has(n)) visit(n);
+    }
+    state.set(id, 2);
+  };
+  for (const c of d.children) if (!state.has(c.id)) visit(c.id);
+  const layer = new Map<string, number>();
+  const queue = d.children.map((c) => c.id).filter((id) => indeg.get(id) === 0);
+  for (const id of queue) layer.set(id, 0);
+  for (let i = 0; i < queue.length; i++) {
+    const id = queue[i]!;
+    for (const n of dag.get(id) ?? []) {
+      layer.set(n, Math.max(layer.get(n) ?? 0, layer.get(id)! + 1));
+      indeg.set(n, indeg.get(n)! - 1);
+      if (indeg.get(n) === 0) queue.push(n);
+    }
+  }
+  return layer;
 }
 
 function measureGroup(d: GraphDiagram, group: GraphGroup): GroupGeom {
@@ -101,7 +232,7 @@ function measureGroup(d: GraphDiagram, group: GraphGroup): GroupGeom {
   const size = fontSize(style);
   const label = measureLabel(group.label, size, style.typeface, false, Infinity, true);
   const iconSize = group.attrs.icon ? Math.round(size * 1.4) : 0;
-  const header = Math.max(label.h, iconSize) + 22;
+  const header = Math.max(GROUP_PAD.top, Math.max(label.h, iconSize) + 22);
   return { group, style, label, iconSize, header, minW: Math.ceil(label.w + (iconSize ? iconSize + 8 : 0) + 40) };
 }
 
@@ -228,28 +359,52 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   const parent = new Map<string, string | undefined>();
   const elkId = (id: string): string => `n:${id}`;
 
-  const toElk = (child: GraphChild, parentId: string | undefined): ElkNode => {
+  const measure = (child: GraphChild, parentId: string | undefined): void => {
     parent.set(child.id, parentId);
     if (child.kind === 'node') {
-      const g = measureNode(d, child);
-      nodes.set(child.id, g);
+      nodes.set(child.id, measureNode(d, child));
+      return;
+    }
+    groups.set(child.id, measureGroup(d, child));
+    for (const c of child.children) measure(c, child.id);
+  };
+  for (const c of d.children) measure(c, undefined);
+  unifySizes(nodes.values(), parent, rootLayers(d, parent));
+
+  // ELK reads spacing per parent, so every group gets its own values (else ELK's 20 px default).
+  const vertical = d.direction === 'down' || d.direction === 'up';
+  const spacingFor = (kids: readonly GraphChild[]): Record<string, string> => ({
+    'elk.spacing.nodeNode': String(
+      kids.some((c) => c.kind === 'group') ? SPACING.block : vertical ? SPACING.neighbour : SPACING.list,
+    ),
+    'elk.layered.spacing.nodeNodeBetweenLayers': String(SPACING.layer),
+    'elk.spacing.edgeNode': '24',
+    'elk.spacing.edgeEdge': '16',
+    'elk.layered.spacing.edgeNodeBetweenLayers': '24',
+    'elk.layered.spacing.edgeEdgeBetweenLayers': '14',
+    'elk.spacing.edgeLabel': '4',
+  });
+
+  const toElk = (child: GraphChild): ElkNode => {
+    if (child.kind === 'node') {
+      const g = nodes.get(child.id)!;
       return { id: elkId(child.id), width: g.w, height: g.h };
     }
-    const g = measureGroup(d, child);
-    groups.set(child.id, g);
-    const kids = child.children.map((c) => toElk(c, child.id));
+    const g = groups.get(child.id)!;
+    const kids = child.children.map((c) => toElk(c));
     return {
       id: elkId(child.id),
       ...(kids.length === 0 ? { width: g.minW, height: g.header + 40 } : {}),
       children: kids,
       layoutOptions: {
-        'elk.padding': `[top=${g.header},left=${GROUP_PAD},bottom=${GROUP_PAD},right=${GROUP_PAD}]`,
+        ...spacingFor(child.children),
+        'elk.padding': `[top=${g.header},left=${GROUP_PAD.side},bottom=${GROUP_PAD.bottom},right=${GROUP_PAD.side}]`,
         'elk.nodeSize.constraints': 'MINIMUM_SIZE',
         'elk.nodeSize.minimum': `(${g.minW},${g.header + 40})`,
       },
     };
   };
-  const children = d.children.map((c) => toElk(c, undefined));
+  const children = d.children.map((c) => toElk(c));
 
   const isAncestor = (a: string, b: string): boolean => {
     for (let p = parent.get(b); p !== undefined; p = parent.get(p)) if (p === a) return true;
@@ -282,13 +437,7 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
       'elk.edgeRouting': 'ORTHOGONAL',
       'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES',
       'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
-      'elk.spacing.nodeNode': '40',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '64',
-      'elk.spacing.edgeNode': '24',
-      'elk.spacing.edgeEdge': '16',
-      'elk.layered.spacing.edgeNodeBetweenLayers': '24',
-      'elk.layered.spacing.edgeEdgeBetweenLayers': '14',
-      'elk.spacing.edgeLabel': '4',
+      ...spacingFor(d.children),
       'elk.edgeLabels.inline': 'true',
       'elk.layered.edgeLabels.centerLabelPlacementStrategy': 'MEDIAN_LAYER',
     },
@@ -339,8 +488,6 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
   return { nodes, groups, parent, rects, edges: baseEdges };
 }
 
-/** Group padding around its children (top is the header), as given to ELK. */
-const GROUP_PAD = 20;
 /** Spacing between parallel edges' bends and end points when the router redraws them. */
 const PARALLEL_GAP = 12;
 
@@ -415,10 +562,10 @@ function placeRects(d: GraphDiagram, base: GraphBase, layout: BlockLayout | unde
       x1 = Math.max(x1, cr.x + cr.w);
       y1 = Math.max(y1, cr.y + cr.h);
     }
-    r.x = x0 - GROUP_PAD;
+    r.x = x0 - GROUP_PAD.side;
     r.y = y0 - geom.header;
-    r.w = Math.max(x1 - x0 + GROUP_PAD * 2, geom.minW);
-    r.h = Math.max(y1 - y0 + geom.header + GROUP_PAD, geom.header + 40);
+    r.w = Math.max(x1 - x0 + GROUP_PAD.side * 2, geom.minW);
+    r.h = Math.max(y1 - y0 + geom.header + GROUP_PAD.bottom, geom.header + 40);
     return leaves;
   };
   for (const c of d.children) if (c.kind === 'group') fit(c);
