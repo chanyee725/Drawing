@@ -88,7 +88,7 @@ export type ShellKey = 'all' | 'recent' | 'archive' | 'new' | 'settings';
 const KEYS: Record<string, ShellKey> = { KeyA: 'all', KeyR: 'recent', KeyB: 'archive', KeyN: 'new', Comma: 'settings' };
 
 // Where one-letter keys belong to something else: text fields, the editors, the canvas (its tool keys) and dialogs.
-const OWNED = '.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""], .excalidraw, [role="dialog"], [role="menu"], [role="listbox"]';
+const OWNED = '.ProseMirror, input, textarea, select, .cm-editor, [contenteditable="true"], [contenteditable=""], .excalidraw, dialog, [role="dialog"], [role="menu"], [role="listbox"]';
 
 type KeyLike = { code: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean; isComposing: boolean; repeat: boolean; defaultPrevented: boolean; target: EventTarget | null };
 

@@ -28,6 +28,9 @@ import { CanvasPane } from './CanvasPane';
 import { LazyBoundary } from './LazyBoundary';
 import { CHUNK_MESSAGE, isChunkLoadError } from './chunkError';
 import { useTheme } from './theme';
+import { SettingsDialog } from './settings/SettingsDialog';
+import { SettingsContext } from './settings/context';
+import type { SettingsSection } from './settings/model';
 import { fileStem } from './fileName';
 import { moveErrorText, nameProblem, pathAfterMove, renameInitial, renameTarget } from './movePaths';
 import { parseHash } from './doc/outline';
@@ -40,7 +43,7 @@ import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command
 import { displayName } from './Sidebar';
 import {
   ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, Hand, ImageDown, Layers, FolderClosed,
-  Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
+  Maximize, Minus, Moon, Plug, Settings, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
   SquareDashedMousePointer, Sun, Trash, Type, Undo2, Workflow, ZoomIn, ZoomOut,
 } from 'lucide-react';
 import { exportBlock, exportCanvas, exportDocumentPdf, exportMarkdown, type ImageKind } from './export/actions';
@@ -180,7 +183,7 @@ const CanvasSlot = memo(function CanvasSlot({ session, focus, dark, handle, onFa
 });
 
 export function App() {
-  const [theme, toggleTheme] = useTheme();
+  const [theme, toggleTheme, themePref, setThemePref] = useTheme();
   const narrow = useNarrow();
   const [navOpen, setNavOpen] = useState(false);
   const [workspace, setWorkspace] = useState<string | null>(null);
@@ -188,7 +191,9 @@ export function App() {
   const [projects, setProjects] = useState<ProjectsView | null>(null);
   // What the main panel shows; opening a file switches to the document screen.
   const [section, setSection] = useState<Section>({ kind: 'all' });
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // Open settings dialog section, or null when closed (E57).
+  const [settings, setSettings] = useState<SettingsSection | null>(null);
+  const openSettings = useCallback((s: SettingsSection = 'general') => setSettings(s), []);
   const [wideView, setView] = useState<View>('both');
   // Below md only one pane fits: the split view falls back to the document (design doc 6 §6).
   const baseView = shownView(wideView, narrow);
@@ -666,6 +671,8 @@ export function App() {
       { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', icon: FileText, disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'history', title: '버전 기록 열기', icon: Clock, disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
+      { id: 'settings', title: '설정 열기', icon: Settings, keys: ',', keywords: ['settings', 'preferences', '설정', '환경설정'], run: () => openSettings('general') },
+      { id: 'settings-models', title: '모델 연결 열기', icon: Plug, keywords: ['models', 'connect', 'login', 'claude', 'codex', 'gemini', '모델', '연결', '로그인'], run: () => openSettings('models') },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
       { id: 'view-doc', title: '보기: 문서', group: 'view', icon: PanelLeft, run: () => setView('doc'), keywords: ['view', '보기'] },
       { id: 'view-both', title: '보기: 둘 다', group: 'view', icon: Columns2, run: () => setView('both'), keywords: ['view', '보기'] },
@@ -773,11 +780,11 @@ export function App() {
       else if (k === 'recent') showSection({ kind: 'recent' });
       else if (k === 'archive') setTrashOpen(true);
       else if (k === 'new') void newFileRef.current();
-      else setSettingsOpen(true);
+      else openSettings('general');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [showSection]);
+  }, [showSection, openSettings]);
 
   const sidebar = (
     <Sidebar
@@ -799,17 +806,20 @@ export function App() {
       }}
       theme={theme}
       onToggleTheme={toggleTheme}
-      settingsOpen={settingsOpen}
-      onSettingsOpen={setSettingsOpen}
+      // The 설정 row opens the settings dialog instead of its old menu.
+      settingsOpen={false}
+      onSettingsOpen={(o) => o && openSettings('general')}
     />
   );
 
   return (
     <CommandRegistryContext.Provider value={registry}>
+      <SettingsContext.Provider value={openSettings}>
       <SidebarProvider openMobile={navOpen} onOpenMobileChange={setNavOpen}>
         {sidebar}
         <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
+          {settings && <SettingsDialog section={settings} onSection={setSettings} onClose={() => setSettings(null)} themePref={themePref} onThemePref={setThemePref} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
           {paletteOpen && <CommandPalette commands={registry.list()} scope={paletteScope(docScreen ? section : homeSection, projects, path)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
@@ -905,6 +915,7 @@ export function App() {
           )}
         </SidebarInset>
       </SidebarProvider>
+      </SettingsContext.Provider>
     </CommandRegistryContext.Provider>
   );
 }
