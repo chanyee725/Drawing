@@ -213,12 +213,11 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
   });
   const bottom = y + 8;
 
+  // Lifelines are solid and end in a second copy of the participant head (09-examples-style §2.4).
   const lifelines: SceneItem[] = [];
   const heads: SceneItem[] = [];
-  for (const c of cols) {
-    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: true, tone: 'muted' });
-    const top = headerH - c.h;
-    heads.push({ kind: 'box', id: c.id, role: 'column', shape: 'rectangle', x: c.x - c.w / 2, y: top, w: c.w, h: c.h, paint: c.style.paint, shadow: c.style.styleMode !== 'plain' && c.style.paint.mode !== 'outline' });
+  const head = (c: Column, top: number, id: string | undefined): void => {
+    heads.push({ kind: 'box', id, role: 'column', shape: 'rectangle', x: c.x - c.w / 2, y: top, w: c.w, h: c.h, paint: c.style.paint, shadow: c.style.styleMode !== 'plain' && c.style.paint.mode !== 'outline' });
     const contentW = c.label.w + (c.iconSize ? c.iconSize + 8 : 0);
     let x = c.x - contentW / 2;
     const cy = top + c.h / 2;
@@ -227,6 +226,12 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       x += c.iconSize + 8;
     }
     heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', on: c.style.paint, lineHeight: lineHeightOf(c.label.size) }));
+  };
+  for (const c of cols) {
+    lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: false, tone: 'muted' });
+    head(c, headerH - c.h, c.id);
+    // The bottom copy carries no id: the top head stays the one element for this participant.
+    head(c, bottom, undefined);
   }
 
   return finishScene('sequence', d, [...lifelines, ...back, ...heads, ...mid, ...front]);
