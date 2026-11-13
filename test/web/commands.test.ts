@@ -14,14 +14,15 @@ test('filter matches title or keyword, case-insensitive; search-only commands wa
 });
 
 test('groups follow the menu order, keep registration order inside and drop empty sections', () => {
-  const items = [cmd('f', { group: 'file' }), cmd('a1'), cmd('c', { group: 'canvas' }), cmd('a2', { group: 'action' })];
+  const items = [cmd('a1'), cmd('c', { group: 'canvas' }), cmd('p', { group: 'project' }), cmd('a2', { group: 'action' }), cmd('f', { group: 'file' })];
   const groups = groupCommands(items);
   assert.deepEqual(
     groups.map((g) => [g.id, g.label, g.items.map((c) => c.id)]),
     [
+      ['file', '문서', ['f']],
+      ['project', '프로젝트', ['p']],
       ['action', '동작', ['a1', 'a2']],
       ['canvas', '캔버스', ['c']],
-      ['file', '파일', ['f']],
     ],
   );
 });

@@ -34,7 +34,7 @@ import { CommandPalette } from './CommandPalette';
 import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
 import { displayName } from './Sidebar';
 import {
-  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown, Layers, FolderClosed,
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, Hand, ImageDown, Layers, FolderClosed,
   Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
   SquareDashedMousePointer, Sun, Trash, Type, Undo2, Workflow, ZoomIn, ZoomOut,
 } from 'lucide-react';
@@ -367,16 +367,6 @@ export function App() {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 파일이 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
-  const newFolder = async () => {
-    const name = window.prompt('새 폴더 이름을 입력해 주세요');
-    if (!name?.trim()) return;
-    try {
-      await api.createFolder(name.trim());
-      await refreshTree();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '만들지 못했어요');
-    }
-  };
   // A project is a top-level folder (design doc 6 §1).
   const newProject = async () => {
     const name = window.prompt('새 프로젝트 이름을 입력해 주세요')?.trim();
@@ -647,7 +637,6 @@ export function App() {
     return [
       { id: 'new-file', title: '새 파일', icon: FilePlus, keywords: ['new', 'file', 'create', '만들기', '파일'], run: () => void newFile() },
       { id: 'new-pipeline', title: '새 파이프라인', icon: Workflow, keywords: ['new', 'pipeline', 'plan', 'create', '만들기', '파이프라인', '계획'], run: () => void newFile(undefined, 'plan') },
-      { id: 'new-folder', title: '새 폴더', icon: FolderPlus, keywords: ['new', 'folder', 'create', '만들기', '폴더'], run: () => void newFolder() },
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
       { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
