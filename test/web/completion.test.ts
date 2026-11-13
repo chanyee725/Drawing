@@ -84,3 +84,11 @@ test('the text above the cursor is only read at the start of an item line', () =
   assert.ok(labels(attributeCompletions('flowchart', '  [', above)).includes('connection'));
   assert.equal(reads, 1);
 });
+
+test('badge, badgeColor and the divider shape are offered on graph nodes (E41)', () => {
+  const keys = attributeCompletions('flowchart', 'A [')?.options ?? [];
+  assert.equal(keys.find((o) => o.label === 'badge')?.detail, '배지');
+  assert.equal(keys.find((o) => o.label === 'badgeColor')?.detail, '배지 색');
+  assert.ok(labels(attributeCompletions('flowchart', 'A [badgeColor: re')).includes('red'));
+  assert.ok(labels(attributeCompletions('flowchart', 'A [shape: di')).includes('divider'));
+});

@@ -9,7 +9,7 @@ const KEYWORDS = new Set([
 ]);
 const ATTRS = new Set([
   'icon', 'color', 'label', 'subtitle', 'link', 'shape', 'type', 'connection', 'position',
-  'colorMode', 'styleMode', 'typeface', 'textSize', 'wrap', 'connectorStyle',
+  'colorMode', 'styleMode', 'typeface', 'textSize', 'wrap', 'connectorStyle', 'badge', 'badgeColor',
 ]);
 
 // depth counts open `{` so Enter indents a group body and typing `}` dedents it.
