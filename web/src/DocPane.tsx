@@ -16,6 +16,7 @@ import { copyText } from './doc/clipboard';
 import { renderBlock } from './canvas/render';
 import type { ImageKind } from './export/actions';
 import { blockItems, blocksAfterHistory, frameItems, framesOf, frameNode, type CanvasEl, newBlockGeometry, diagramNode, embeddedBlockIds, isEmptyDoc, normalizeLink, withTrailingParagraph, SLASH_ITEMS, type SlashItem } from './doc/model';
+import { List } from 'lucide-react';
 import { Button } from './components/ui/button';
 
 type Props = {
@@ -240,8 +241,8 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
 
   const outlineMenu = (
     <div className="doc-outline-wrap">
-      <Button variant="outline" size="sm" className="doc-outline-btn" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
-        목차
+      <Button variant="ghost" size="icon-sm" className="doc-outline-btn" aria-label="목차" title="목차" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
+        <List aria-hidden />
       </Button>
       {outlineOpen && (
         <nav id="doc-outline" className="doc-outline" aria-label="목차">

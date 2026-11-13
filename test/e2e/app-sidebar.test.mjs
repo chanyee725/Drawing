@@ -85,6 +85,36 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   const projectNames = nav.locator('[data-slot="sidebar-group"] > ul > li > [data-slot="sidebar-menu-button"] > span.truncate');
   assert.deepEqual(await projectNames.allInnerTexts(), ['결제 시스템', '온보딩 개편', '인프라']);
 
+  // Dashboard (layout B, #190): pill tabs with 프로젝트별 first shown, quick-create chips, / finds, 39px group heads, 만든 때.
+  const dash = page.locator('main[data-screen="dashboard"]');
+  const tabs = dash.getByRole('tablist', { name: '보기' });
+  assert.deepEqual(await tabs.getByRole('tab').allInnerTexts(), ['전체', '최근', '프로젝트별', '미분류']);
+  assert.equal(await tabs.getByRole('tab', { name: '프로젝트별' }).getAttribute('aria-selected'), 'true');
+  const chips = dash.getByRole('group', { name: '새로 만들기' }).getByRole('button');
+  // Chips show the kind only; a visually hidden "새 " keeps names like "새 파이프라인 계획" for assistive tech and e2e.
+  const shown = await chips.evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !(n instanceof Element && n.classList.contains('sr-only'))).map((n) => n.textContent).join('').replace(/\s+/g, ' ').trim()));
+  assert.deepEqual(shown, ['문서 D', '캔버스 C', '파이프라인 계획 P', '템플릿 T']);
+  for (const name of ['새 문서', '새 캔버스', '새 파이프라인 계획', '새 템플릿']) assert.equal(await chips.filter({ hasText: name }).count(), 1, name);
+  const heads = dash.locator('[data-slot="group-head"]');
+  assert.deepEqual(
+    (await heads.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim()),
+    ['결 결제 시스템 문서 3 개', '온 온보딩 개편 문서 1 개', '인 인프라 문서 0 개', '미분류 문서 1 개'],
+  );
+  assert.equal(Math.round((await heads.first().boundingBox()).height), 39);
+  assert.match(await dash.locator('[data-slot="column-head"]').first().innerText(), /만든 때/);
+  await page.keyboard.press('/');
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('type')), 'search');
+  await page.keyboard.type('토큰');
+  assert.deepEqual(await dash.locator('[data-doc-row]').evaluateAll((els) => els.map((e) => e.getAttribute('data-doc-row'))), ['결제 시스템/로그인 로직.dpx.json', '결제 시스템/로그인 로직/토큰 갱신.dpx.json']);
+  await page.keyboard.press('Control+a');
+  await page.keyboard.press('Backspace');
+  await tabs.getByRole('tab', { name: '전체' }).click();
+  assert.match(await dash.locator('[data-slot="column-head"]').first().innerText(), /위치/);
+  assert.equal(await dash.locator('[data-doc-row]').count(), 5);
+  await tabs.getByRole('tab', { name: '프로젝트별' }).click();
+  await shot(page, 'light-dash-1440');
+  await page.evaluate(() => document.activeElement?.blur());
+
   await page.keyboard.press('r');
   assert.equal(await nav.getByRole('button', { name: /최근/ }).getAttribute('aria-current'), 'page');
   await page.keyboard.press('a');
@@ -140,6 +170,8 @@ test('app sidebar: views, nested projects, frames A/B, shortcuts, 390px drawer',
   await page.close();
 
   page = await open('dark', 1440);
+  await page.locator('[data-slot="group-head"]').first().waitFor();
+  await shot(page, 'dark-dash-1440');
   await row(page.getByRole('navigation', { name: '사이드바' }), /결제 시스템/).click();
   await page.waitForTimeout(300);
   await shot(page, 'dark-home-1440');

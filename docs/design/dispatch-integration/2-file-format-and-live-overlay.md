@@ -285,6 +285,7 @@ New API (read only for the web; writes stay server-internal):
 |---|---|
 | `GET /api/runs?path=` | `{ runs: [{ id, startedAt, endedAt, state, totals }] }`, newest first |
 | `GET /api/runs/run?path=&id=` | the run record above |
+| `GET /api/runs/active` | `{ files: string[] }`: files with a run going now (project home "실행 중") |
 | `POST /api/runs?path=` | start a run from the file's current plan (run control itself is part 3) |
 
 ## 6. Conflicts: people vs the server

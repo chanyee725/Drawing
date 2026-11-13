@@ -4,6 +4,8 @@ import { Command as CommandPrimitive } from 'cmdk';
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList, CommandShortcut } from './components/ui/command';
 import { DialogContent } from './components/ui/dialog';
 import { Kbd } from './components/ui/kbd';
+import { FolderClosed } from 'lucide-react';
+import { cn } from './lib/utils';
 import { filterCommands, groupCommands, type Command as Cmd } from './commands';
 
 export { filterCommands } from './commands';
@@ -12,20 +14,26 @@ export type { Command } from './commands';
 type Props = {
   commands: Cmd[];
   onClose: () => void;
-  /** Name of the project the user is in; shown as a chip, and its files are listed first. */
-  scope?: string | null;
+  /** Project the user is in: its name is shown as a chip, and its files (under its path) are listed first. */
+  scope?: { path: string; name: string } | null;
   /** Start with only this section (G P opens the menu on projects). */
   onlyGroup?: Cmd['group'];
 };
+
+/** Documents of the current project shown before the user types. */
+const SCOPE_DOCS = 6;
 
 /** The Ctrl/Cmd+K menu: one search box over every registered command, in sections, keyboard first. */
 export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
   const [query, setQuery] = useState('');
   const [group, setGroup] = useState(onlyGroup);
   const list = useMemo(() => {
-    const found = filterCommands(commands, query).filter((c) => !group || c.group === group);
+    const inScope = (c: Cmd) => !!scope && !!c.hint?.startsWith(`${scope.path}/`);
+    // With no search, the 문서 section lists the current project's documents (files are otherwise search-only).
+    const scoped = !query.trim() ? commands.filter((c) => c.searchOnly && inScope(c)).slice(0, SCOPE_DOCS) : [];
+    const found = [...scoped, ...filterCommands(commands, query)].filter((c) => !group || c.group === group);
     // Files of the current project come first inside their section.
-    return scope ? [...found.filter((c) => c.hint?.startsWith(`${scope}/`)), ...found.filter((c) => !c.hint?.startsWith(`${scope}/`))] : found;
+    return scope ? [...found.filter(inScope), ...found.filter((c) => !inScope(c))] : found;
   }, [commands, query, group, scope]);
   const groups = useMemo(() => groupCommands(list), [list]);
   // Sections reorder the list, so the first row on screen is the first enabled one in section order.
@@ -69,7 +77,12 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
     <DialogPrimitive.Root open onOpenChange={(o) => !o && onClose()}>
       <DialogContent
         aria-describedby={undefined}
-        className="top-[15vh] w-[min(560px,calc(100%-2rem))] translate-y-0 rounded-lg bg-popover shadow-pop"
+        // 648px at 14% from the top (design doc 6 §2.5); under 640px it docks to the top edge, full width.
+        overlayClassName="bg-black/50"
+        className={cn(
+          'top-[14%] w-[min(648px,calc(100%-2rem))] translate-y-0 rounded-lg bg-popover shadow-pop',
+          'max-sm:top-0 max-sm:w-full max-sm:rounded-t-none max-sm:border-x-0 max-sm:border-t-0 max-sm:pt-[env(safe-area-inset-top)]',
+        )}
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           input.current?.focus();
@@ -86,20 +99,28 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
             <CommandInput
               ref={input}
               value={query}
-              onValueChange={(v) => {
-                setQuery(v);
-                if (v) setGroup(undefined);
+              // G P keeps the menu on projects while typing; Backspace in an empty box widens it to everything.
+              onValueChange={setQuery}
+              onKeyDown={(e) => {
+                if (e.key === 'Backspace' && !query && group && !e.nativeEvent.isComposing) setGroup(undefined);
               }}
               placeholder={group === 'project' ? '프로젝트 이름을 입력해요' : '명령이나 파일 이름을 입력해요'}
               className="h-11"
             />
+            {group === 'project' && (
+              <span data-slot="group-chip" title="지우기를 누르면 모든 명령을 찾아요" className="mr-1.5 shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                프로젝트만
+              </span>
+            )}
             {scope && (
-              <span data-slot="scope-chip" title="지금 프로젝트" className="max-w-32 shrink-0 truncate rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground">
-                {scope}
+              <span data-slot="scope-chip" title={`범위: ${scope.name} 프로젝트`} className="inline-flex max-w-40 shrink-0 items-center gap-1 rounded-md border bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+                <FolderClosed aria-hidden className="size-3 shrink-0" />
+                <span className="sr-only">범위:</span>
+                <span className="truncate">{scope.name}</span>
               </span>
             )}
           </div>
-          <CommandList className="max-h-[min(400px,60vh)]">
+          <CommandList className="max-h-[min(400px,60vh)] max-sm:max-h-[min(480px,70dvh)]">
             <CommandEmpty>맞는 명령이 없어요</CommandEmpty>
             {groups.map((g) => (
               <CommandPrimitive.Group
@@ -116,7 +137,7 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
                       disabled={c.disabled}
                       onSelect={() => run(c)}
                       data-cmd={c.id}
-                      className="h-8 cursor-pointer rounded-md py-0 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+                      className="h-8 cursor-pointer rounded-md py-0 max-sm:h-11 data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
                     >
                       {Icon && <Icon className="size-4 text-muted-foreground" />}
                       <span className="min-w-0 flex-1 truncate">
@@ -131,13 +152,13 @@ export function CommandPalette({ commands, onClose, scope, onlyGroup }: Props) {
             ))}
           </CommandList>
         </Command>
-        <div className="flex h-8 items-center gap-3 border-t px-3 text-xs text-muted-foreground" aria-hidden>
+        <div className="flex h-8 items-center gap-3 border-t px-3 text-xs text-muted-foreground max-sm:hidden" aria-hidden>
           <span className="flex items-center gap-1">
             <Kbd>↑</Kbd>
             <Kbd>↓</Kbd> 이동
           </span>
           <span className="flex items-center gap-1">
-            <Kbd>↵</Kbd> 실행
+            <Kbd>↵</Kbd> 열기
           </span>
           <span className="flex items-center gap-1">
             <Kbd>esc</Kbd> 닫기

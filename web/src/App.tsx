@@ -8,13 +8,20 @@ import { Sidebar } from './Sidebar';
 import { Home, type CreateKind } from './home/Home';
 import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
-import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
+import { asTreeNode, docPlace, newFileDir, paletteScope, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
+import { SubDocs } from './SubDocs';
 import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
+import { shownView, toCanvas } from './viewMode';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
 import { TopBar, type View } from './TopBar';
 import { Splitter } from './Splitter';
+import { RunStrip } from './run/RunStrip';
+import { onRunEvent, reloadRun, watchRun } from './run/runData';
+import type { RunEvent } from './run/runModel';
+// The run view (E22) loads when it is first shown.
+const RunView = lazy(() => import('./run/RunView'));
 // TipTap and the diagram renderer are big; they load when a file is first opened.
 const DocPane = lazy(() => import('./DocPane').then((m) => ({ default: m.DocPane })));
 import { CanvasPane } from './CanvasPane';
@@ -32,7 +39,7 @@ import { CommandPalette } from './CommandPalette';
 import { CommandRegistry, CommandRegistryContext, useCommandSource, type Command } from './commands';
 import { displayName } from './Sidebar';
 import {
-  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, FolderPlus, Hand, ImageDown, Layers, FolderClosed,
+  ArrowUpRight, Circle, Clock, Columns2, Copy, CopyPlus, Delete, Diamond, Eraser, File, FilePlus, FileText, Hand, ImageDown, Layers, FolderClosed,
   Maximize, Minus, Moon, MousePointer2, Move, PanelLeft, PanelRight, Pencil, Redo2, RotateCcw, Scan, Shapes, Square,
   SquareDashedMousePointer, Sun, Trash, Type, Undo2, Workflow, ZoomIn, ZoomOut,
 } from 'lucide-react';
@@ -183,8 +190,8 @@ export function App() {
   const [section, setSection] = useState<Section>({ kind: 'all' });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wideView, setView] = useState<View>('both');
-  // Below md only one pane fits: the split view falls back to the document.
-  const view: View = narrow && wideView === 'both' ? 'doc' : wideView;
+  // Below md only one pane fits: the split view falls back to the document (design doc 6 §6).
+  const baseView = shownView(wideView, narrow);
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
@@ -223,6 +230,11 @@ export function App() {
   const path = useSession(session, (s) => s.path);
   const hasFile = useSession(session, (s) => !!s.file);
   const title = useSession(session, (s) => s.file?.title ?? '');
+  // A pipeline file (it has a plan): its runs show in the strip, the 실행 view and the canvas overlay.
+  const hasPlan = useSession(session, (s) => !!s.file?.plan);
+  const planCode = useSession(session, (s) => s.file?.blocks.find((b) => b.id === s.file?.plan?.block)?.code);
+  const view: View = !hasPlan && baseView === 'run' ? 'doc' : baseView;
+  useEffect(() => watchRun(hasPlan ? path : null), [hasPlan, path]);
   const status = useSession(session, (s) => s.status);
   const statusAlert = useSession(session, (s) => s.statusAlert);
   const conflict = useSession(session, (s) => s.conflict);
@@ -347,10 +359,11 @@ export function App() {
   }, [session]);
 
   /** `folder` = project path the file goes into; undefined = the project shown (or the open file's), null = workspace root. */
-  const newFile = async (folder?: string | null, kind: CreateKind = 'doc') => {
-    const dir = folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
+  // `sub`: a sub-document of the open document, in the folder named after it (design doc 6 §1).
+  const newFile = async (folder?: string | null, kind: CreateKind = 'doc', sub = false) => {
+    const dir = sub && path ? subFolderOf(path) : folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
     const label = kind === 'plan' ? '새 파이프라인 계획 이름을 입력해 주세요' : '새 파일 이름을 입력해 주세요';
-    const name = window.prompt(dir ? `${label} (${dir} 안에 만들어요)` : label);
+    const name = window.prompt(sub ? '하위 문서 이름을 입력해 주세요' : dir ? `${label} (${dir} 안에 만들어요)` : label);
     const stem = name ? fileStem(name) : '';
     if (!stem) return;
     const p = stem.includes('/') ? stem : folderPrefix(dir || null) + stem;
@@ -362,16 +375,6 @@ export function App() {
       if (await open(p) && kind === 'canvas') setView('canvas');
     } catch (e) {
       setError(e instanceof ApiError && e.status === 409 ? '같은 이름의 파일이 이미 있어요' : e instanceof Error ? e.message : '만들지 못했어요');
-    }
-  };
-  const newFolder = async () => {
-    const name = window.prompt('새 폴더 이름을 입력해 주세요');
-    if (!name?.trim()) return;
-    try {
-      await api.createFolder(name.trim());
-      await refreshTree();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '만들지 못했어요');
     }
   };
   // A project is a top-level folder (design doc 6 §1).
@@ -417,6 +420,19 @@ export function App() {
       }
       void refreshTree();
     });
+    // Runs of the open file; a run starting or ending also changes its tree badge.
+    es.addEventListener('run', (m) => {
+      let e: RunEvent;
+      try {
+        e = JSON.parse((m as MessageEvent<string>).data) as RunEvent;
+      } catch {
+        return;
+      }
+      onRunEvent(e);
+      if (e.run) void refreshTree();
+    });
+    // Events missed while the stream was down: read the run again.
+    es.onopen = () => void reloadRun();
     return () => es.close();
   }, [session, load, refreshTree]);
 
@@ -520,17 +536,18 @@ export function App() {
     }
   };
 
-  const showDoc = view !== 'canvas';
-  const showCanvas = view !== 'doc';
+  const showDoc = view === 'doc' || view === 'both';
+  const showCanvas = view === 'canvas' || view === 'both';
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
   const showBlock = useCallback((blockId: string) => {
-    // Narrow screens show one pane; the stored wide view may still be 'both' while 문서 is shown, so go straight to 캔버스.
-    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
-  }, [narrow]);
+  }, []);
   const showFrame = useCallback((frameId: string) => {
-    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
-  }, [narrow]);
+  }, []);
   const report = useCallback(
     (job: Promise<string> | string) =>
       Promise.resolve(job).then(
@@ -575,6 +592,7 @@ export function App() {
         if (k === 'KeyG') chord.g = Date.now();
         else if (k === 'KeyP' && Date.now() - chord.g < CHORD_MS) {
           e.preventDefault();
+          e.stopPropagation(); // the canvas must not also take P as its own tool key
           setTimeout(() => (chord.g = 0));
           setExportOpen(false);
           setPaletteGroup('project');
@@ -643,10 +661,9 @@ export function App() {
     return [
       { id: 'new-file', title: '새 파일', icon: FilePlus, keywords: ['new', 'file', 'create', '만들기', '파일'], run: () => void newFile() },
       { id: 'new-pipeline', title: '새 파이프라인', icon: Workflow, keywords: ['new', 'pipeline', 'plan', 'create', '만들기', '파이프라인', '계획'], run: () => void newFile(undefined, 'plan') },
-      { id: 'new-folder', title: '새 폴더', icon: FolderPlus, keywords: ['new', 'folder', 'create', '만들기', '폴더'], run: () => void newFolder() },
       { id: 'export-svg', title: '캔버스를 SVG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'svg', '내보내기', '이미지'], run: () => imageExport('svg') },
       { id: 'export-png', title: '캔버스를 PNG로 내보내기', icon: ImageDown, disabled: needCanvas, keywords: ['export', 'png', '내보내기', '이미지'], run: () => imageExport('png') },
-      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
+      { id: 'export-copy', title: '이미지로 복사', icon: Copy, keys: IS_MAC ? '⇧⌥C' : 'Shift+Alt+C', disabled: needCanvas, keywords: ['copy', 'image', '복사', '클립보드'], run: () => imageExport('copy') },
       { id: 'export-md', title: '문서를 Markdown으로 내보내기', icon: FileText, disabled: !hasFile, keywords: ['export', 'markdown', 'md', '내보내기', '문서'], run: markdownExport },
       { id: 'history', title: '버전 기록 열기', icon: Clock, disabled: !hasFile, keywords: ['history', 'version', 'restore', '버전', '기록', '되돌리기'], run: () => setHistoryOpen(true) },
       { id: 'trash', title: '최근에 지운 파일 보기', icon: Trash, keywords: ['trash', 'deleted', 'restore', '휴지통', '지운', '되살리기', '복구'], run: () => setTrashOpen(true) },
@@ -718,8 +735,12 @@ export function App() {
   useCommandSource(registry, 'projects', projectCommands);
 
   const dark = theme === 'dark';
+  const place = useMemo(() => docPlace(projects, path), [projects, path]);
   const doc = hasFile && path && (
-    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+    <>
+      <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+      <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(undefined, 'doc', true)} />
+    </>
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
@@ -737,6 +758,7 @@ export function App() {
     },
     [narrow],
   );
+  const openCrumb = (c: Crumb) => (c.kind === 'project' ? showSection({ kind: 'project', path: c.path }) : void open(c.path));
 
   // Shell shortcuts (doc 6 §5): A 모든 파일, R 최근, B 보관함, N 새 파일, "," 설정. Never inside a text field,
   // an editor, the canvas (its own tool keys) or a dialog: see shellKey.
@@ -789,7 +811,7 @@ export function App() {
         <SidebarInset frame={docScreen ? 'attached' : 'floating'}>
           {historyOpen && path && <HistoryDialog path={path} dark={dark} onClose={() => setHistoryOpen(false)} onRestore={restoreVersion} />}
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
-          {paletteOpen && <CommandPalette commands={registry.list()} scope={homeProject ?? (path?.includes('/') ? path.split('/')[0] : null)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
+          {paletteOpen && <CommandPalette commands={registry.list()} scope={paletteScope(docScreen ? section : homeSection, projects, path)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
             <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
@@ -833,7 +855,12 @@ export function App() {
             status={status}
             statusAlert={statusAlert}
             view={view}
+            canRun={hasPlan}
             onView={setView}
+            narrow={narrow}
+            trail={place.trail}
+            onCrumb={openCrumb}
+            onSubDoc={() => void newFile(undefined, 'doc', true)}
             onTitle={(title) => edit({ title })}
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
@@ -841,12 +868,10 @@ export function App() {
             setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
-            narrow={narrow}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
             exportMenu={
               <ExportMenu
                 narrow={narrow}
-                onHistory={() => setHistoryOpen(true)}
                 open={exportOpen}
                 onOpen={openExport}
                 disabled={!hasFile}
@@ -861,7 +886,14 @@ export function App() {
               />
             }
           />
-              {view === 'both' ? (
+          {hasPlan && <RunStrip code={planCode} inRunView={view === 'run'} onRunView={() => setView('run')} />}
+              {view === 'run' ? (
+            <LazyBoundary onFail={flushForReload}>
+              <Suspense fallback={null}>
+                <RunView code={planCode} />
+              </Suspense>
+            </LazyBoundary>
+          ) : view === 'both' ? (
             <Splitter ratio={ratio} onRatio={setRatio} left={doc} right={canvas} />
           ) : (
             <div className="flex min-h-0 flex-1 flex-col overflow-auto">
