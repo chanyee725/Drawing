@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../../server/app.js';
@@ -275,6 +275,18 @@ test('pr-tracking route: default on, toggles and persists, header and body check
     const broken = await fetch(url, { method: 'POST', headers: W, body: JSON.stringify({ on: false }) });
     assert.equal(broken.status, 409);
     assert.match((await broken.json()).error, /읽을 수 없어요/);
+    assert.equal(readFileSync(join(ws, '.drawing', 'settings.json'), 'utf8'), '{ not json'); // 409 leaves it alone
+    const brokenGet = await fetch(url);
+    assert.equal(brokenGet.status, 409);
+    assert.match((await brokenGet.json()).error, /읽을 수 없어요/);
+    // the plugin header x-dispatch: 1 is accepted too
+    writeFileSync(join(ws, '.drawing', 'settings.json'), '{}');
+    const viaPlugin = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json', 'x-dispatch': '1' }, body: JSON.stringify({ on: false }) });
+    assert.equal(viaPlugin.status, 200);
+    // parallel toggles never collide on a temp file and leave no temp files behind
+    const rs = await Promise.all(Array.from({ length: 8 }, (_, i) => fetch(url, { method: 'POST', headers: W, body: JSON.stringify({ on: i % 2 === 0 }) })));
+    assert.deepEqual(rs.map((r) => r.status), Array(8).fill(200));
+    assert.deepEqual(readdirSync(join(ws, '.drawing')).filter((f) => f.endsWith('.tmp')), []);
   } finally {
     await stop();
     rmSync(root, { recursive: true, force: true });
