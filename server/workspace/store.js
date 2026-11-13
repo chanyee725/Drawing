@@ -743,17 +743,27 @@ export function createStore(
     tombstones.delete(rel);
   }
 
-  async function removeFile(rel) {
+  // withSubdocs: the document's sub-documents folder (`X/` next to `X.dpx.json`) goes to the trash with it.
+  async function removeFile(rel, { withSubdocs = false } = {}) {
     rel = checkedFileRel(rel);
     const abs = await wrapPath(rel);
+    const subRel = rel.slice(0, -FILE_EXT.length);
+    const subAbs = withSubdocs ? await wrapPath(subRel) : null;
     return serial(async () => {
       const st = await statOrNull(abs);
       if (!st?.isFile()) throw new StoreError(404, 'file not found');
       const text = await readFile(abs, 'utf8').catch(() => null);
+      const sub = subAbs && (await statOrNull(subAbs))?.isDirectory() ? await collectFiles(subAbs, subRel) : null;
       await unlink(abs);
       forget(rel, false);
-      await trashQuietly(rel, text);
+      if (sub) {
+        await rm(subAbs, { recursive: true });
+        forget(subRel, true);
+        await trashMany([[rel, text], ...sub.map((f) => [f.rel, f.text])]);
+        await dropHistory(subRel);
+      } else await trashQuietly(rel, text);
       onExternalChange?.({ kind: 'delete', path: rel }); // other tabs learn about it (our own saves stay silent)
+      if (sub) onExternalChange?.({ kind: 'tree', path: subRel, from: subRel });
       return { path: rel };
     });
   }

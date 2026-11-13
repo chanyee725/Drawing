@@ -186,3 +186,25 @@ test('move with subdocs: a document and its sub-documents folder move together',
     assert.equal((await call('POST', '/api/move', { from: 'B', to: 'C', type: 'folder', withSubdocs: true })).status, 400);
   });
 });
+
+test('delete with subdocs: a document and its sub-documents folder go to the trash together', async () => {
+  await withApp(async ({ ws, call }) => {
+    for (const p of ['A/plan', 'A/plan/step', 'A/plan/step/deep', 'A/solo', 'A/keep']) assert.equal((await call('POST', '/api/file', { path: p })).status, 201);
+    await mkdir(join(ws, 'A', 'empty'));
+    assert.equal((await call('POST', '/api/file', { path: 'A/empty' })).status, 201);
+    const docsOf = async () => shape((await call('GET', '/api/workspace/projects')).body.projects.find((p) => p.path === 'A')?.docs ?? []);
+
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fplan.dpx.json&withSubdocs=1')).status, 200);
+    // Without withSubdocs only the file goes (the old behaviour): A/solo has no folder anyway.
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fsolo.dpx.json')).status, 200);
+    // An empty sub-documents folder goes too, so it does not stay behind as a group.
+    assert.equal((await call('DELETE', '/api/file?path=A%2Fempty.dpx.json&withSubdocs=1')).status, 200);
+    assert.deepEqual(await docsOf(), [['doc', 'keep', 0, []]]);
+    const trashed = (await call('GET', '/api/trash')).body.items.map((i) => i.path).sort();
+    assert.deepEqual(trashed, ['A/empty.dpx.json', 'A/plan.dpx.json', 'A/plan/step.dpx.json', 'A/plan/step/deep.dpx.json', 'A/solo.dpx.json']);
+    // Each one restores on its own.
+    const step = (await call('GET', '/api/trash')).body.items.find((i) => i.path === 'A/plan/step.dpx.json');
+    assert.equal((await call('POST', '/api/trash/restore', { id: step.id })).status, 200);
+    assert.equal((await call('GET', '/api/file?path=A%2Fplan%2Fstep.dpx.json')).status, 200);
+  });
+});
