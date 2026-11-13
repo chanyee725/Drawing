@@ -8,8 +8,10 @@ import { Sidebar } from './Sidebar';
 import { Home, type CreateKind } from './home/Home';
 import { CHORD_MS, chord, folderPrefix } from './home/model';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
-import { asTreeNode, newFileDir, shellKey, subFolderOf, type Section } from './projectNav';
+import { asTreeNode, docPlace, newFileDir, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
+import { SubDocs } from './SubDocs';
 import { moveTarget, subdocsMove, type MoveItem } from './sidebarMove';
+import { shownView, toCanvas } from './viewMode';
 import { createFileSession, type FilePatch, type FileSession } from './fileSession';
 import { useSession } from './useSession';
 import { type WorkspaceEvent } from './externalChange';
@@ -183,8 +185,8 @@ export function App() {
   const [section, setSection] = useState<Section>({ kind: 'all' });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [wideView, setView] = useState<View>('both');
-  // Below md only one pane fits: the split view falls back to the document.
-  const view: View = narrow && wideView === 'both' ? 'doc' : wideView;
+  // Below md only one pane fits: the split view falls back to the document (design doc 6 §6).
+  const view = shownView(wideView, narrow);
   const [ratio, setRatio] = useState(0.45);
   const [error, setError] = useState<string | null>(null);
   // A request from the document to show a diagram block on the canvas; `n` makes each click a new request.
@@ -347,10 +349,11 @@ export function App() {
   }, [session]);
 
   /** `folder` = project path the file goes into; undefined = the project shown (or the open file's), null = workspace root. */
-  const newFile = async (folder?: string | null, kind: CreateKind = 'doc') => {
-    const dir = folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
+  // `sub`: a sub-document of the open document, in the folder named after it (design doc 6 §1).
+  const newFile = async (folder?: string | null, kind: CreateKind = 'doc', sub = false) => {
+    const dir = sub && path ? subFolderOf(path) : folder === undefined ? newFileDir(section, projects, path) : (folder ?? '');
     const label = kind === 'plan' ? '새 파이프라인 계획 이름을 입력해 주세요' : '새 파일 이름을 입력해 주세요';
-    const name = window.prompt(dir ? `${label} (${dir} 안에 만들어요)` : label);
+    const name = window.prompt(sub ? '하위 문서 이름을 입력해 주세요' : dir ? `${label} (${dir} 안에 만들어요)` : label);
     const stem = name ? fileStem(name) : '';
     if (!stem) return;
     const p = stem.includes('/') ? stem : folderPrefix(dir || null) + stem;
@@ -522,15 +525,16 @@ export function App() {
 
   const showDoc = view !== 'canvas';
   const showCanvas = view !== 'doc';
+  const narrowRef = useRef(narrow);
+  narrowRef.current = narrow;
   const showBlock = useCallback((blockId: string) => {
-    // Narrow screens show one pane; the stored wide view may still be 'both' while 문서 is shown, so go straight to 캔버스.
-    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ blockId, n: (f?.n ?? 0) + 1 }));
-  }, [narrow]);
+  }, []);
   const showFrame = useCallback((frameId: string) => {
-    setView(narrow ? 'canvas' : (v) => (v === 'doc' ? 'both' : v));
+    setView((v) => toCanvas(v, narrowRef.current));
     setFocus((f) => ({ frameId, n: (f?.n ?? 0) + 1 }));
-  }, [narrow]);
+  }, []);
   const report = useCallback(
     (job: Promise<string> | string) =>
       Promise.resolve(job).then(
@@ -718,8 +722,12 @@ export function App() {
   useCommandSource(registry, 'projects', projectCommands);
 
   const dark = theme === 'dark';
+  const place = useMemo(() => docPlace(projects, path), [projects, path]);
   const doc = hasFile && path && (
-    <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+    <>
+      <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
+      <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(undefined, 'doc', true)} />
+    </>
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
@@ -737,6 +745,7 @@ export function App() {
     },
     [narrow],
   );
+  const openCrumb = (c: Crumb) => (c.kind === 'project' ? showSection({ kind: 'project', path: c.path }) : void open(c.path));
 
   // Shell shortcuts (doc 6 §5): A 모든 파일, R 최근, B 보관함, N 새 파일, "," 설정. Never inside a text field,
   // an editor, the canvas (its own tool keys) or a dialog: see shellKey.
@@ -834,6 +843,10 @@ export function App() {
             statusAlert={statusAlert}
             view={view}
             onView={setView}
+            narrow={narrow}
+            trail={place.trail}
+            onCrumb={openCrumb}
+            onSubDoc={() => void newFile(undefined, 'doc', true)}
             onTitle={(title) => edit({ title })}
             onHistory={() => setHistoryOpen(true)}
           onCommands={() => {
@@ -841,12 +854,10 @@ export function App() {
             setPaletteGroup(undefined);
             setPaletteOpen(true);
           }}
-            narrow={narrow}
             onToggleNav={narrow ? () => setNavOpen((o) => !o) : undefined}
             exportMenu={
               <ExportMenu
                 narrow={narrow}
-                onHistory={() => setHistoryOpen(true)}
                 open={exportOpen}
                 onOpen={openExport}
                 disabled={!hasFile}
