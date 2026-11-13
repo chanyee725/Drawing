@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import path from "node:path";
@@ -77,16 +76,16 @@ export class Hub extends EventEmitter {
     this.store = store;
     this.models = models;
     this.roles = roles;
-    this.port = port;
+    // The port is known only once the server listens: a number or a getter.
+    this.portOf = typeof port === "function" ? port : () => port;
     // Claude limits and the Gemini quota are account-wide: shared by every server via ~/.dispatch/limits.json.
     this.shared = limits || new SharedLimits();
     this.shared.on("change", () => { this.emit("limits", this.currentLimits()); this.checkTickets(); });
     this.live = new Map(); // id -> { proc, transcript, perms, seenMsgIds }
     this.isConnected = () => true; // replaced by the server with the Dispatch-level connection check
 
-    // Transcripts are appended per session under .dispatch/transcripts so a restart keeps them.
-    this.tdir = path.join(root, ".dispatch", "transcripts");
-    mkdirSync(this.tdir, { recursive: true });
+    // Transcripts live in memory only (a ring buffer per session); nothing is written to disk, so a
+    // restart starts every session with an empty transcript. Resuming uses the CLI's own session id.
 
     // Sessions from a previous run have no process. Ones cut off mid-turn are resumed by resumeInterrupted().
     for (const s of Object.values(store.data.sessions)) {
@@ -94,30 +93,20 @@ export class Hub extends EventEmitter {
     }
   }
 
+  get port() { return this.portOf(); }
   get limits() { return this.shared.claude; }
   get sessions() { return Object.values(this.store.data.sessions); }
   get(id) { return this.store.data.sessions[id]; }
   rt(id) {
     let r = this.live.get(id);
     if (!r) {
-      const transcript = this.readTranscript(id);
-      this.live.set(id, r = { proc: null, transcript, written: transcript.length, perms: new Map(), seenMsgIds: new Set(), pendingReport: null,
+      this.live.set(id, r = { proc: null, transcript: [], perms: new Map(), seenMsgIds: new Set(), pendingReport: null,
         fails: new Map(), checks: new Map(), lastEventAt: Date.now() });
       // A repeat-fail flag survives a restart: seed its counter so the next failure continues the count.
       const st = this.get(id)?.stuck;
       if (st?.reason === "repeat-fail" && st.key) r.fails.set(st.key, { count: st.count, firstAt: st.sinceMs, lastAt: st.sinceMs, kind: st.kind ?? null });
     }
     return r;
-  }
-
-  tfile(id) { return path.join(this.tdir, `${id}.jsonl`); }
-
-  readTranscript(id) {
-    let lines = [];
-    try { lines = readFileSync(this.tfile(id), "utf8").split("\n"); } catch { return []; }
-    const out = [];
-    for (const l of lines.slice(-MAX_TRANSCRIPT - 1)) { if (l) try { out.push(JSON.parse(l)); } catch { /* torn last line */ } }
-    return out.slice(-MAX_TRANSCRIPT);
   }
 
   /** Current team settings (설정 page), defaults seeded from the environment. */
@@ -194,13 +183,6 @@ export class Hub extends EventEmitter {
     }
     r.transcript.push(entry);
     if (r.transcript.length > MAX_TRANSCRIPT) r.transcript.splice(0, r.transcript.length - MAX_TRANSCRIPT);
-    try {
-      // Append; compact the file to the in-memory window once it doubles.
-      if (++r.written > MAX_TRANSCRIPT * 2) {
-        writeFileSync(this.tfile(s.id), r.transcript.map(e => JSON.stringify(e)).join("\n") + "\n");
-        r.written = r.transcript.length;
-      } else appendFileSync(this.tfile(s.id), JSON.stringify(entry) + "\n");
-    } catch { /* disk trouble must not stop the session */ }
     this.emit("message", { id: s.id, entry });
   }
 
@@ -632,7 +614,6 @@ export class Hub extends EventEmitter {
     for (const bag of [this.store.data.tasks, this.store.data.tickets])
       for (const [k, v] of Object.entries(bag || {})) if (v.lead === id) delete bag[k];
     this.live.delete(id);
-    rmSync(this.tfile(id), { force: true });
     this.store.save();
     this.emit("removed", { id });
     // Its worktree goes too when nothing uncommitted is left in it; the branch stays.

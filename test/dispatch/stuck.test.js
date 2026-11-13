@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { Hub } from "../../server/dispatch/hub.js";
@@ -124,7 +124,7 @@ function fakeHub(sessions) {
   const dir = mkdtempSync(path.join(tmpdir(), "dispatch-stuck-"));
   const events = [];
   const hub = Object.assign(Object.create(Hub.prototype), {
-    live: new Map(), tdir: dir,
+    live: new Map(),
     store: { data: { sessions: Object.fromEntries(sessions.map(s => [s.id, s])), settings: {}, tasks: {} }, save() {}, addDaily() {} },
   });
   hub.emit = (ev, d) => { events.push([ev, d]); return true; };
@@ -239,7 +239,8 @@ test("nothing about the command text reaches the transcript-free state", () => {
   const s = session();
   const { hub, dir } = fakeHub([s]);
   for (let i = 0; i < 3; i++) claudeRun(hub, s, i, false);
-  assert.ok(readdirSync(dir).length >= 1); // transcripts are the only place the command lives
-  assert.match(readFileSync(path.join(dir, "a.jsonl"), "utf8"), /playwright/);
+  // Drawing keeps transcripts in memory only: the command lives there and nowhere on disk.
+  assert.equal(readdirSync(dir).length, 0);
+  assert.match(JSON.stringify(hub.transcript("a")), /playwright/);
   assert.doesNotMatch(JSON.stringify(hub.store.data), /playwright|secret output/);
 });

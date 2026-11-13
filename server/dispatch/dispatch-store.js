@@ -1,8 +1,21 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-// Persists session metadata and usage totals. Transcripts are appended separately by the Hub to
-// .dispatch/transcripts/<id>.jsonl (local, gitignored, deleted with the session).
+// Persists session metadata and usage totals to <project>/.dispatch/state.json. Transcripts are
+// never written: the Hub keeps them in memory only. `last` (a clip of the latest reply) is
+// transcript text too, so it is kept in memory and left out of the file.
+const MEMORY_ONLY = ["last"];
+
+export function diskView(data) {
+  const sessions = {};
+  for (const [id, s] of Object.entries(data.sessions || {})) {
+    const out = { ...s };
+    for (const k of MEMORY_ONLY) delete out[k];
+    sessions[id] = out;
+  }
+  return { ...data, sessions };
+}
+
 export class Store {
   constructor(root) {
     this.file = path.join(root, ".dispatch", "state.json");
@@ -13,6 +26,7 @@ export class Store {
   async load() {
     try {
       const saved = JSON.parse(await readFile(this.file, "utf8"));
+      for (const x of Object.values(saved.sessions || {})) x.last ??= "";
       this.data = { ...this.data, ...saved, settings: { ...this.data.settings, ...saved.settings } };
     } catch { /* first run */ }
     return this.data;
@@ -27,7 +41,7 @@ export class Store {
     clearTimeout(this.timer);
     await mkdir(path.dirname(this.file), { recursive: true });
     const tmp = this.file + ".tmp";
-    await writeFile(tmp, JSON.stringify(this.data, null, 2));
+    await writeFile(tmp, JSON.stringify(diskView(this.data), null, 2));
     await rename(tmp, this.file);
   }
 
