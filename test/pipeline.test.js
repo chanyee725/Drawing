@@ -535,6 +535,9 @@ test('a paused run with a carried step, then a server restart: its reopened old 
     d.hub.emit('session', sess());
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(d.store.data.pipelines[path].links?.[mate.id], undefined);
+    // New work on a step this run did not carry still links that session.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', owner: mate.name, stage: 'impl' });
+    await until(() => d.store.data.pipelines[path].links?.[mate.id] === 'ui', 10_000);
     const after = await runOf();
     assert.deepEqual(after.steps.api.sessions, before.steps.api.sessions);
     assert.equal(after.steps.api.state, 'done');
