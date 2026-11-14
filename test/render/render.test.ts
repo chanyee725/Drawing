@@ -474,7 +474,7 @@ test('sequence: a message label cuts the lifelines it crosses; self labels stay 
   const loop = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'elbow');
   assert.ok(self?.kind === 'text' && !self.plate && self.anchor === 'start' && loop);
   const loopRight = Math.max(...loop.points.map((p) => p.x));
-  assert.equal(self.x - loopRight, 8);
+  assert.ok(Math.abs(self.x - loopRight - 8) < 1e-6, `self label starts ${self.x - loopRight}px right of the loop`);
   const cx = lifelines[2]!.kind === 'line' ? lifelines[2]!.points[0]!.x : NaN;
   assert.ok(self.x + textWidth(self.lines[0]!, self.size, self.font) + PLATE_PAD < cx, 'the self label ends before C');
 });
