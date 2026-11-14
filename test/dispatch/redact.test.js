@@ -92,6 +92,7 @@ test("state.json drops prompt, error, task notes and ticket item notes", async (
   // After a restart the role prompt is read from the role, and the missing fields have defaults.
   const again = new Store(root);
   await again.load();
+  again.save = () => {}; // Hub's constructor saves new cursor colours; a delayed write would hit the removed folder
   assert.equal(again.data.sessions.s1.error, null);
   assert.equal(Object.values(again.data.tasks)[0].note, "");
   const hub2 = new Hub({ root, store: again, models: MODELS, roles: ROLES, port: 0, limits: new SharedLimits(path.join(root, "limits.json")) });
