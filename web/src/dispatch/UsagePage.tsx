@@ -156,7 +156,7 @@ export function UsagePage() {
               {roles.map(r => (
                 <li key={r.id} className="grid grid-cols-[64px_1fr_64px] items-center gap-3 text-sm">
                   <span className="flex items-center gap-1.5"><span aria-hidden className="size-2 rounded-full" style={{ background: roleColor(r.id) }} />{r.name}</span>
-                  <Meter value={(agg.byRole[r.id] ?? 0) / roleTotal} label={`${r.name} 비용 비율`} />
+                  <Meter neutral value={(agg.byRole[r.id] ?? 0) / roleTotal} label={`${r.name} 비용 비율`} />
                   <span className="text-right text-muted-foreground tabular-nums">{fmtUsd(agg.byRole[r.id] ?? 0)}</span>
                 </li>
               ))}
@@ -219,7 +219,7 @@ export function UsagePage() {
                             <span>{[...warn.reasons, warn.advice].filter(Boolean).join('. ')}</span>
                           </span>
                         )}
-                        <Meter className="mt-1.5 h-1" value={(s.cost ?? 0) / sessionTotal} label={`${s.name} 비용 비율`} />
+                        <Meter neutral className="mt-1.5 h-1" value={(s.cost ?? 0) / sessionTotal} label={`${s.name} 비용 비율`} />
                       </th>
                       <td className="truncate py-2 pr-2 text-muted-foreground max-sm:hidden" title={s.modelLabel}>{s.modelLabel}</td>
                       <td className="py-2 text-right">{fmtUsd(s.cost)}</td>
