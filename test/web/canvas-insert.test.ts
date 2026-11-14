@@ -47,6 +47,7 @@ test('menu text starts so that one 13px line of it is centred on the point', () 
   const h = CLEAN_FONT_SIZE * CLEAN_LINE_HEIGHT;
   assert.ok(Math.abs((sk.y as number) + h / 2 - 300) <= 0.5, `y ${sk.y}, line ${h}`);
   const w = INSERT_TEXT.length * CLEAN_FONT_SIZE; // Hangul is about 1em per syllable
+  // w / 2 is 19.5 and TEXT_OFFSET.x rounds it to 20, so x lands exactly 0.5 off: the boundary must stay inclusive.
   assert.ok(Math.abs((sk.x as number) + w / 2 - 500) <= 0.5, `x ${sk.x}, width ${w}`);
   assert.deepEqual(TEXT_OFFSET, { x: 20, y: 7 });
 });

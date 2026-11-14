@@ -474,8 +474,14 @@ export async function setup(ctx) {
     const d = dispatch();
     const runId = e.runId;
     // Steps this run carried over from an earlier stopped run stay done, with how they closed then.
-    const record = runId ? await recorder.read(path, runId).catch(() => null) : null;
-    const carried = Object.keys(record?.steps ?? {}).filter((id) => record.steps[id].carried);
+    const record = runId
+      ? await recorder.read(path, runId).catch((err) => {
+          // Metadata only: without the record the steps it carried over count as open again.
+          console.error('pipeline reopen record:', err?.code ?? err?.name);
+          return null;
+        })
+      : null;
+    const carried = Object.keys(record?.steps ?? {}).filter((id) => record.steps[id].carried && e.steps?.includes(id));
     const open = openSteps(e);
     const done = (e.steps ?? []).filter((id) => !open.includes(id) || carried.includes(id));
     // How the board closed them, kept now: the next run only counts tasks closed after its own 시작하기.
