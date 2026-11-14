@@ -449,7 +449,8 @@ test('every diagram type asks for true glyph advances, so text drawn small has n
   for (const name of FIXTURES) {
     const { svg, scene } = await renderDiagram(fixture(name));
     assert.match(svg.slice(0, svg.indexOf('>')), /\stext-rendering="geometricPrecision"/, name);
-    assert.match(sceneToSvg(scene, { theme: 'dark' }).slice(0, 400), /\stext-rendering="geometricPrecision"/, `${name} dark`);
+    const dark = sceneToSvg(scene, { theme: 'dark' });
+    assert.match(dark.slice(0, dark.indexOf('>')), /\stext-rendering="geometricPrecision"/, `${name} dark`);
   }
 });
 
