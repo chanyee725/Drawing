@@ -162,6 +162,7 @@ export async function setup(ctx) {
   // Changes of one file are handled in order: each diffs against the version the one before it left in `seen`.
   // A watcher catch-up (it restarted after a failure, backoff up to 30s) reports edits made while it was down, so
   // the call finishing before it is no longer a sign of a read-only call: any call within ATTRIBUTE_MS can be it.
+  // So read-only calls (jq, curl GET) that finished within that window also become candidates during a catch-up.
   const onChange = (rel, { catchUp = false } = {}) => {
     const cands = whoEdited(rel, Date.now(), catchUp ? ATTRIBUTE_MS : SETTLE_MS);
     const run = (queue.get(rel) ?? Promise.resolve()).then(() => place(rel, cands, pending.get(rel)));

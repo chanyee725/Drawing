@@ -312,7 +312,7 @@ test('cursor module: Codex shell calls are final, so a silent sed is not closed 
   await m.close();
 });
 
-test('cursor module: Claude results are paired by call id, so parallel and subagent calls cannot swap (#401)', async (t) => {
+test('cursor module: Claude results are paired by call id, so an older still-running call cannot take the result of a newer call (#401)', async (t) => {
   let now = 1_000_000;
   t.mock.method(Date, 'now', () => now);
   const r = rig();
@@ -321,7 +321,7 @@ test('cursor module: Claude results are paired by call id, so parallel and subag
   r.files.set(rel, file([], [block('top', 0, 0)]));
   r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
   const say = (entry) => r.hub.emit('message', { id: 'c', entry });
-  // A subagent's slow call (older, still running) and the parent's Edit run side by side; the Edit's result comes first.
+  // A slow call (older, still running; a subagent's work looks the same from here) and an Edit run side by side; the Edit's result comes first.
   say({ kind: 'tool', name: 'Bash', text: 'sleep 60', callId: 'toolu_1' });
   say({ kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}"}`, callId: 'toolu_2' });
   now += 100;
@@ -355,17 +355,22 @@ test('cursor module: a watcher catch-up attributes to calls older than the settl
   await m.close();
 });
 
-test('cursor module: ids that are common path words still tell two calls apart (#401)', async () => {
+test('cursor module: ids that are common path words still tell two calls apart (#401)', async (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
   const r = rig();
   const m = await setup(r.ctx);
   const rel = 'flow.dpx.json';
-  r.files.set(rel, file([], [block('flow', 0, 0), block('api', 0, 500)]));
+  r.files.set(rel, file([], [block('top', 0, 0), block('api', 0, 500)]));
   r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
   r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
-  r.hub.emit('message', { id: 'a', entry: { kind: 'tool', name: 'Bash', text: `curl -X PUT 'http://127.0.0.1:1/api/file?path=${rel}' -d '{"id":"api"}'` } });
-  r.hub.emit('message', { id: 'c', entry: { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}","new_string":"\\"id\\": \\"flow\\""}` } });
+  // Cora edits block "api" by name. Ash's newer call only has "api" and "flow" as path words (/api/file, flow.dpx.json):
+  // a plain substring match would credit Ash (newest of two "named" calls); whole-token matching leaves only Cora.
+  r.hub.emit('message', { id: 'c', entry: { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}","new_string":"\\"id\\": \\"api\\""}` } });
+  now += 50;
+  r.hub.emit('message', { id: 'a', entry: { kind: 'tool', name: 'Bash', text: `curl -s 'http://127.0.0.1:1/api/file?path=${rel}'` } });
   await r.tick();
-  await r.change(rel, file([], [block('flow', 0, 0, 'x > y'), block('api', 0, 500)]));
+  await r.change(rel, file([], [block('top', 0, 0), block('api', 0, 500, 'x > y')]));
   assert.deepEqual(r.sent.filter((e) => e.event === 'cursor').map((e) => e.data.sid), ['c']);
   await m.close();
 });
