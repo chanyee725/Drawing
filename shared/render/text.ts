@@ -46,15 +46,34 @@ export function isWideChar(code: number): boolean {
   );
 }
 
-/** ZWJ, variation selectors, combining keycap and tag characters: they join the glyph before them and add no width. */
+/** ZWJ, variation selectors and tag characters: they join the glyph before them and add no width on their own. */
 function isJoiner(code: number): boolean {
   return code === 0x200d || code === 0xfe0e || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/** User-perceived characters: a ZWJ emoji, a keycap or a flag is one cluster. */
+export function graphemes(text: string): string[] {
+  return Array.from(graphemeSegmenter.segment(text), (s) => s.segment);
+}
+
+/**
+ * A grapheme cluster drawn as one ~1em glyph: it has a wide code point (Hangul, CJK, emoji), an emoji-presentation
+ * selector (U+FE0F: ❤️, ♂️), a combining keycap (U+20E3: 1️⃣) or a regional indicator (flags). Shared by measuring
+ * and by the mono wide runs in svg.ts, so both agree on what is wide.
+ */
+export function isWideCluster(cluster: string): boolean {
+  for (const ch of cluster) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (isWideChar(code) || code === 0xfe0f || code === 0x20e3 || (code >= 0x1f1e6 && code <= 0x1f1ff)) return true;
+  }
+  return false;
 }
 
 function charEm(ch: string, font: Typeface): number {
   const code = ch.codePointAt(0) ?? 0;
   if (isJoiner(code)) return 0;
-  if (isWideChar(code)) return 1;
   if (font === 'mono') return 0.6;
   let w: number;
   if (ch === ' ') w = 0.28;
@@ -68,10 +87,17 @@ function charEm(ch: string, font: Typeface): number {
   return font === 'rough' ? w * 1.08 : w;
 }
 
-/** Width of one line of text in px. Bold text is about 5% wider. */
+function clusterEm(cluster: string, font: Typeface): number {
+  if (isWideCluster(cluster)) return 1;
+  let em = 0;
+  for (const ch of cluster) em += charEm(ch, font);
+  return em;
+}
+
+/** Width of one line of text in px, measured per grapheme cluster. Bold text is about 5% wider. */
 export function textWidth(text: string, size: number, font: Typeface, bold = false): number {
   let em = 0;
-  for (const ch of text) em += charEm(ch, font);
+  for (const g of graphemes(text)) em += clusterEm(g, font);
   return em * size * (bold ? 1.05 : 1);
 }
 
@@ -93,9 +119,9 @@ export function wrapText(text: string, maxWidth: number, size: number, font: Typ
       } else {
         line = next;
       }
-      // A single word longer than the limit is broken by characters.
-      while (textWidth(line, size, font, bold) > maxWidth && [...line].length > 1) {
-        const chars = [...line];
+      // A single word longer than the limit is broken between grapheme clusters, never inside one.
+      while (textWidth(line, size, font, bold) > maxWidth && graphemes(line).length > 1) {
+        const chars = graphemes(line);
         let cut = chars.length - 1;
         while (cut > 1 && textWidth(chars.slice(0, cut).join(''), size, font, bold) > maxWidth) cut--;
         out.push(chars.slice(0, cut).join(''));

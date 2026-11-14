@@ -9,7 +9,7 @@ import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
 import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, isWideChar, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, graphemes, isWideCluster, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -184,7 +184,8 @@ function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
  * plain size and draws at its own width, at most about 1em.
  *
  * Runs are cut between grapheme clusters, never inside one: a ZWJ emoji whose parts include a BMP symbol (🏃‍♂️,
- * 🧑‍⚕️, ❤️‍🔥) stays in one span, or it would draw as two glyphs. A cluster is wide when any code point in it is.
+ * 🧑‍⚕️, ❤️‍🔥) stays in one span, or it would draw as two glyphs. Wide clusters are the ones text.ts measures at 1em
+ * (isWideCluster), so keycaps, VS16 emoji and flags are unscaled too.
  */
 function monoRuns(line: string): string {
   let out = '';
@@ -194,9 +195,8 @@ function monoRuns(line: string): string {
     if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
     run = '';
   };
-  for (const { segment } of graphemes.segment(line)) {
-    let w = false;
-    for (const ch of segment) if (isWideChar(ch.codePointAt(0) ?? 0)) w = true;
+  for (const segment of graphemes(line)) {
+    const w = isWideCluster(segment);
     if (w !== wide) {
       flush();
       wide = w;
@@ -206,8 +206,6 @@ function monoRuns(line: string): string {
   flush();
   return out;
 }
-
-const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /** WCAG contrast ratio between two #rrggbb colours. */
 function contrast(a: string, b: string): number {

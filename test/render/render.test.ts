@@ -500,11 +500,34 @@ test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E6
   // A joiner after narrow text is not pulled into a wide run: the wide span starts at the Hangul.
   const narrow = await renderDiagram('t {\n  note a\u200d한\n}', { type: 'erd' });
   assert.match(narrow.svg, />a\u200d<tspan style="font-size-adjust:none">한<\/tspan><\/tspan>/);
-  // Joiners add no width: the ZWJ, VS16 and keycap mark are drawn inside the glyph before them.
+  // A ZWJ after narrow text adds no width.
   assert.equal(textWidth('a\u200d한', 12, 'mono'), (0.6 + 1) * 12);
-  assert.equal(textWidth('1\ufe0f\u20e3', 12, 'mono'), 0.6 * 12);
-  assert.equal(textWidth('👨\u200d💻', 12, 'clean'), 2 * 12);
   // Clean text has no nested span: the ch-width scaling is only on mono text.
   const clean = await renderDiagram('A\n한글 > A: 메시지', { type: 'sequence' });
   assert.doesNotMatch(clean.svg, /font-size-adjust:none/);
+});
+
+test('emoji are measured per grapheme cluster at 1em and drawn as one wide run (E60 follow-up, #300)', async () => {
+  const { textWidth, wrapText, isWideCluster } = await import('../../shared/render/text.ts');
+  // Keycap, emoji-presentation (VS16), ZWJ sequences and flags all draw as one ~1em glyph.
+  for (const emoji of ['1\ufe0f\u20e3', '❤\ufe0f', '♂\ufe0f', '👨\u200d💻', '🏃\u200d♂\ufe0f', '🇰🇷']) {
+    const label = [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join(' ');
+    assert.ok(isWideCluster(emoji), label);
+    for (const font of ['clean', 'mono', 'rough'] as const) assert.equal(textWidth(emoji, 12, font), 12, `${label} ${font}`);
+  }
+  // Text presentation (VS15) and plain digits stay narrow.
+  assert.equal(isWideCluster('♂\ufe0e'), false);
+  assert.equal(textWidth('12', 12, 'mono'), 2 * 0.6 * 12);
+  assert.equal(textWidth('a🇰🇷b', 10, 'mono'), (0.6 + 1 + 0.6) * 10);
+  // Lone emoji-presentation clusters get their own unscaled run in mono text.
+  for (const emoji of ['1\ufe0f\u20e3', '❤\ufe0f', '♂\ufe0f', '🇰🇷']) {
+    const { svg } = await renderDiagram(`t {\n  note x${emoji}y\n}`, { type: 'erd' });
+    assert.match(svg, new RegExp(`>x<tspan style="font-size-adjust:none">${emoji}</tspan>y</tspan>`), emoji);
+  }
+  // Wrapping a long word never splits a cluster.
+  const lines = wrapText('👨\u200d💻'.repeat(6), 30, 12, 'mono', true);
+  assert.ok(lines.length > 1);
+  for (const l of lines) assert.match(l, /^(👨\u200d💻)+$/u);
+  const flags = wrapText('🇰🇷🇯🇵🇺🇸🇫🇷', 25, 12, 'clean', true);
+  assert.deepEqual(flags, ['🇰🇷🇯🇵', '🇺🇸🇫🇷']);
 });
