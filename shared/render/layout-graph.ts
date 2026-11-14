@@ -13,6 +13,7 @@ import type { BlockLayout } from './block-layout.ts';
 import { alignLayout, orthogonalize } from './layout-align.ts';
 import { routeEdges, straightPorts } from './layout-routes.ts';
 import { ROUTE_GAP, routeAround } from './route-around.ts';
+import { wrapTopLevel } from './layout-wrap.ts';
 import type { Point, Scene, SceneBadge, SceneEdge, SceneHandle, SceneItem, ShapeKind } from './scene.ts';
 
 const SHAPES: readonly ShapeKind[] = [
@@ -678,8 +679,17 @@ export interface GraphBase {
   readonly edges: readonly BaseEdge[];
 }
 
-/** Measure the diagram and run ELK. Async and slow; cache the result per AST. */
-export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
+/** Layout switches that are not part of the diagram's code. */
+export interface GraphLayoutOptions {
+  /**
+   * Experimental (E65, #276): wrap the top-level groups into rows towards a 3:2 picture instead of one
+   * line. Off by default; `right` and `down` flows only.
+   */
+  wrapGroups?: boolean;
+}
+
+/** Measure the diagram and run ELK. Async and slow; cache the result per AST (and per `options`). */
+export async function graphBase(d: GraphDiagram, options: GraphLayoutOptions = {}): Promise<GraphBase> {
   const nodes = new Map<string, NodeGeom>();
   const groups = new Map<string, GroupGeom>();
   const parent = new Map<string, string | undefined>();
@@ -1003,6 +1013,26 @@ export async function graphBase(d: GraphDiagram): Promise<GraphBase> {
     vertical,
   );
   for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+  if (options.wrapGroups && (d.direction === 'right' || d.direction === 'down') && rowCross.size === 0 && !splitsIntoRows(d.children)) {
+    const wrapped = wrapTopLevel({
+      rects,
+      top: d.children.map((c) => c.id),
+      parent,
+      isGroup: (id) => groups.has(id),
+      titleOf: (id, r) => {
+        const g = groups.get(id)!;
+        // Same place composeGraph draws the title; `vertical` works mirrored, so the rect is mirrored too.
+        const w = g.label.w + (g.iconSize ? g.iconSize + 8 : 0);
+        const h = Math.max(g.label.h, g.iconSize);
+        return vertical ? { x: r.x + 11, y: r.y + 14, w: h, h: w } : { x: r.x + 14, y: r.y + 11, w, h };
+      },
+      edges: baseEdges,
+      vertical,
+    });
+    // A route between two rows is drawn as found, whatever the connector style: a straight line would cut through the rows.
+    if (wrapped) baseEdges.forEach((be, i) => { if (wrapped.rerouted.has(i)) be.forcedElbow = true; });
+    for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+  }
   routeAcross(d, nodes, parent, rects, baseEdges.filter((be) => rowCross.has(be.edge.id)), baseEdges, rowCross, (g) => groups.get(g)!.header);
   // Spec §1.8 step 6: even ports, straight lines first, at most two bends, shared buses.
   routeEdges(rects, parent, baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points, keep: be.forcedElbow })));
@@ -1440,6 +1470,6 @@ function dividerSpans(
 }
 
 /** ELK layout with optional overrides: `composeGraph(d, await graphBase(d), layout)`. */
-export async function layoutGraph(d: GraphDiagram, layout?: BlockLayout): Promise<Scene> {
-  return composeGraph(d, await graphBase(d), layout);
+export async function layoutGraph(d: GraphDiagram, layout?: BlockLayout, options: GraphLayoutOptions = {}): Promise<Scene> {
+  return composeGraph(d, await graphBase(d, options), layout);
 }

@@ -82,6 +82,7 @@ function axis(values: number[]): number[] {
  * nodes, groups, divider labels; kept ROUTE_GAP away), never along a `band` (a divider's line: crossing it
  * is fine, running on it is not), and inside `bounds`. Fewest bends first, then shortest. Undefined when no
  * route exists. It never runs along one of `lines` (the other edges' routes); crossing them is fine.
+ * `channels` adds grid lines to route on, where the boxes' sides offer none (an empty gap between rows).
  */
 export function routeAround(
   a: Rect,
@@ -90,14 +91,15 @@ export function routeAround(
   bands: readonly Rect[],
   bounds: Rect,
   lines: readonly Point[][] = [],
+  channels: { xs?: readonly number[]; ys?: readonly number[] } = {},
 ): Point[] | undefined {
   const walls = [...blocks, a, b].map((r) => grow(r, ROUTE_GAP));
   const from = ports(a);
   const to = ports(b);
-  const xs = axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)])
+  const xs = axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x), ...(channels.xs ?? [])])
     .filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
   const inBand = (x: number, y: number): boolean => bands.some((r) => x >= r.x && x <= r.x + r.w && y > r.y && y < r.y + r.h);
-  const ys = axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)])
+  const ys = axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y), ...(channels.ys ?? [])])
     .filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
   const xi = new Map(xs.map((x, i) => [x, i]));
   const yi = new Map(ys.map((y, i) => [y, i]));
