@@ -492,8 +492,18 @@ test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E6
   // A ZWJ emoji stays one run, so it draws as one glyph.
   const zwj = await renderDiagram('t {\n  note 👨\u200d💻 x\n}', { type: 'erd' });
   assert.match(zwj.svg, /<tspan style="font-size-adjust:none">👨\u200d💻<\/tspan>/);
-  // A joiner after narrow text is not pulled into a wide run.
-  assert.doesNotMatch(zwj.svg, /font-size-adjust:none">\u200d/);
+  // ZWJ sequences whose parts include a BMP symbol stay one run too: 🏃‍♂️, 🧑‍⚕️, ❤️‍🔥.
+  for (const emoji of ['🏃\u200d♂\ufe0f', '🧑\u200d⚕\ufe0f', '❤\ufe0f\u200d🔥']) {
+    const { svg: one } = await renderDiagram(`t {\n  note x${emoji}y\n}`, { type: 'erd' });
+    assert.match(one, new RegExp(`>x<tspan style="font-size-adjust:none">${emoji}</tspan>y</tspan>`), [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join(' '));
+  }
+  // A joiner after narrow text is not pulled into a wide run: the wide span starts at the Hangul.
+  const narrow = await renderDiagram('t {\n  note a\u200d한\n}', { type: 'erd' });
+  assert.match(narrow.svg, />a\u200d<tspan style="font-size-adjust:none">한<\/tspan><\/tspan>/);
+  // Joiners add no width: the ZWJ, VS16 and keycap mark are drawn inside the glyph before them.
+  assert.equal(textWidth('a\u200d한', 12, 'mono'), (0.6 + 1) * 12);
+  assert.equal(textWidth('1\ufe0f\u20e3', 12, 'mono'), 0.6 * 12);
+  assert.equal(textWidth('👨\u200d💻', 12, 'clean'), 2 * 12);
   // Clean text has no nested span: the ch-width scaling is only on mono text.
   const clean = await renderDiagram('A\n한글 > A: 메시지', { type: 'sequence' });
   assert.doesNotMatch(clean.svg, /font-size-adjust:none/);

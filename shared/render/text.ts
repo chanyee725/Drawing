@@ -46,8 +46,14 @@ export function isWideChar(code: number): boolean {
   );
 }
 
+/** ZWJ, variation selectors, combining keycap and tag characters: they join the glyph before them and add no width. */
+function isJoiner(code: number): boolean {
+  return code === 0x200d || code === 0xfe0e || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
+}
+
 function charEm(ch: string, font: Typeface): number {
   const code = ch.codePointAt(0) ?? 0;
+  if (isJoiner(code)) return 0;
   if (isWideChar(code)) return 1;
   if (font === 'mono') return 0.6;
   let w: number;

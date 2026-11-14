@@ -182,6 +182,9 @@ function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
  * The adjust on the <text> scales the whole font size by the primary mono face's ratio, so a narrow mono (0.5em,
  * x1.2) would also blow the Hangul fallback up past the 1em the layout measured (text.ts). The wide run keeps the
  * plain size and draws at its own width, at most about 1em.
+ *
+ * Runs are cut between grapheme clusters, never inside one: a ZWJ emoji whose parts include a BMP symbol (🏃‍♂️,
+ * 🧑‍⚕️, ❤️‍🔥) stays in one span, or it would draw as two glyphs. A cluster is wide when any code point in it is.
  */
 function monoRuns(line: string): string {
   let out = '';
@@ -191,24 +194,20 @@ function monoRuns(line: string): string {
     if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
     run = '';
   };
-  for (const ch of line) {
-    const code = ch.codePointAt(0) ?? 0;
-    // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
-    const w: boolean = wide && isJoiner(code) ? true : isWideChar(code);
+  for (const { segment } of graphemes.segment(line)) {
+    let w = false;
+    for (const ch of segment) if (isWideChar(ch.codePointAt(0) ?? 0)) w = true;
     if (w !== wide) {
       flush();
       wide = w;
     }
-    run += ch;
+    run += segment;
   }
   flush();
   return out;
 }
 
-/** ZWJ, variation selector 16, keycap and tag characters: they belong to the emoji before them. */
-function isJoiner(code: number): boolean {
-  return code === 0x200d || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
-}
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /** WCAG contrast ratio between two #rrggbb colours. */
 function contrast(a: string, b: string): number {
