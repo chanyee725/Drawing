@@ -138,6 +138,7 @@ export function SessionsPage({ onOpen, onUsage, actions }: { onOpen: (id: string
         <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-16 text-center">
           <p className="font-medium">아직 세션이 없어요</p>
           <p className="max-w-md text-sm text-muted-foreground">파이프라인을 시작하거나 관리자 세션이 팀을 만들면 여기에 보여요.</p>
+          {actions && <div className="mt-2 flex items-center gap-2">{actions}</div>}
         </div>
       ) : (
         <>
