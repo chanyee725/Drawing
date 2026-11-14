@@ -44,7 +44,7 @@ test('start.sh starts project mode on <project>/pipelines, remembers the port an
   writeFileSync(join(project, 'README.md'), 'scratch\n');
   git('add', '.');
   git('commit', '-qm', 'init');
-  const env = { ...process.env, HOME: home, DISPATCH_PORT: '' };
+  const env = { ...process.env, HOME: home, DISPATCH_PORT: '', DRAW_PORT: '' };
   const run = () => spawnSync('bash', [START, project], { env, encoding: 'utf8' });
   let port = null;
   try {
@@ -89,10 +89,41 @@ test('start.sh honors DISPATCH_PORT when it is free and stop.sh-style kill by se
   await new Promise((r) => probe.listen(0, '127.0.0.1', r));
   const want = probe.address().port;
   await new Promise((r) => probe.close(r));
-  const r = spawnSync('bash', [START, project], { env: { ...process.env, HOME: join(dir, 'home'), DISPATCH_PORT: String(want) }, encoding: 'utf8' });
+  const r = spawnSync('bash', [START, project], { env: { ...process.env, HOME: join(dir, 'home'), DRAW_PORT: '', DISPATCH_PORT: String(want) }, encoding: 'utf8' });
   try {
     assert.equal(r.status, 0, r.stderr);
     assert.equal(r.stdout.trim(), `http://127.0.0.1:${want}/dispatch`);
+  } finally {
+    try { process.kill(Number(readFileSync(join(project, '.dispatch', 'server.pid'), 'utf8')), 'SIGTERM'); } catch {}
+    await new Promise((res) => setTimeout(res, 300));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('start.sh: DRAW_PORT wins over DISPATCH_PORT', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e30a-'));
+  const project = join(dir, 'proj');
+  execFileSync('mkdir', ['-p', project, join(dir, 'home')]);
+  const git = (...a) => execFileSync('git', ['-C', project, ...a], { encoding: 'utf8' });
+  git('init', '-q', '-b', 'develop');
+  git('config', 'user.name', 'test');
+  git('config', 'user.email', 'test@example.invalid');
+  writeFileSync(join(project, 'README.md'), 'scratch\n');
+  git('add', '.');
+  git('commit', '-qm', 'init');
+  const free = async () => {
+    const s = createServer();
+    await new Promise((r) => s.listen(0, '127.0.0.1', r));
+    const p = s.address().port;
+    await new Promise((r) => s.close(r));
+    return p;
+  };
+  const [a, b] = [await free(), await free()];
+  const r = spawnSync('bash', [START, project], { env: { ...process.env, HOME: join(dir, 'home'), DRAW_PORT: String(a), DISPATCH_PORT: String(b) }, encoding: 'utf8' });
+  try {
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(r.stdout.trim(), `http://127.0.0.1:${a}/dispatch`);
+    assert.equal(existsSync(join(dir, 'home', '.dispatch', 'servers')), false, 'no registry written');
   } finally {
     try { process.kill(Number(readFileSync(join(project, '.dispatch', 'server.pid'), 'utf8')), 'SIGTERM'); } catch {}
     await new Promise((res) => setTimeout(res, 300));

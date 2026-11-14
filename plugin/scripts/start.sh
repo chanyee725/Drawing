@@ -3,8 +3,8 @@
 #   start.sh <project>
 # Workspace = <project>/pipelines (created when missing). The port is kept in
 # <project>/.dispatch/server.port (its pid in server.pid, which stop.sh reads); a server that already
-# answers there is reused. Port order: remembered live server, else $DISPATCH_PORT (team.sh and
-# restart.sh pass it), else a free port. Prints nothing but the URL on success.
+# answers there is reused. Port order: remembered live server, else $DRAW_PORT, else $DISPATCH_PORT (team.sh and
+# restart.sh pass it; handed to the server as DRAW_PORT). No ~/.dispatch/servers registry is written, else a free port. Prints nothing but the URL on success.
 # The server binds 127.0.0.1 only. Prints the URL on stdout; nothing else is written outside the project.
 set -euo pipefail
 
@@ -52,7 +52,7 @@ port=$(node -e '
     s.listen(p, "127.0.0.1", () => { const got = s.address().port; s.close(() => console.log(got)); });
   };
   tryPort(want, () => tryPort(0, () => process.exit(1)));
-' "${DISPATCH_PORT:-}")
+' "${DRAW_PORT:-${DISPATCH_PORT:-}}")
 log=$state/server.log
 DRAW_PORT=$port nohup node "$home/server/index.js" --project-mode "$workspace" >"$log" 2>&1 &
 pid=$!
