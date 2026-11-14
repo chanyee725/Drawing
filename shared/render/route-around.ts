@@ -14,7 +14,6 @@ type Dir = 0 | 1 | 2 | 3; // right, down, left, up
 const DX = [1, 0, -1, 0] as const;
 const DY = [0, 1, 0, -1] as const;
 
-const inside = (r: Rect, x: number, y: number): boolean => x > r.x && x < r.x + r.w && y > r.y && y < r.y + r.h;
 const grow = (r: Rect, m: number): Rect => ({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
 
 /** Off-centre port tracks, for when another line already leaves the middle of a side. */
@@ -49,7 +48,7 @@ function ports(r: Rect): Port[] {
 }
 
 /** Whether the axis-aligned move p-q runs along (not across) one of `lines` for more than a pixel. */
-function alongLine(lines: readonly Point[][], p: Point, q: Point): boolean {
+export function alongLine(lines: readonly Point[][], p: Point, q: Point): boolean {
   const flat = p.y === q.y;
   const lo = flat ? Math.min(p.x, q.x) : Math.min(p.y, q.y);
   const hi = flat ? Math.max(p.x, q.x) : Math.max(p.y, q.y);
@@ -78,10 +77,23 @@ function axis(values: number[]): number[] {
 }
 
 /**
+ * Extra tracks ROUTE_GAP apart in the margin between `lo` (the bounds' side) and `hi` (the nearest wall):
+ * wider bounds give the router more outside tracks, so many loop-back edges each find their own.
+ */
+function lanes(lo: number, hi: number): number[] {
+  const out: number[] = [];
+  for (let v = lo + ROUTE_GAP; v < hi - ROUTE_GAP / 2; v += ROUTE_GAP) out.push(v);
+  return out;
+}
+
+const merge = (a: number[], b: number[]): number[] => [...new Set([...a, ...b])].sort((p, q) => p - q);
+
+/**
  * Route from box `a` to box `b`, leaving and entering at a side's middle, never through `blocks` (other
  * nodes, groups, divider labels; kept ROUTE_GAP away), never along a `band` (a divider's line: crossing it
  * is fine, running on it is not), and inside `bounds`. Fewest bends first, then shortest. Undefined when no
  * route exists. It never runs along one of `lines` (the other edges' routes); crossing them is fine.
+ * The margin between `bounds` and the outermost walls holds a track every ROUTE_GAP.
  */
 export function routeAround(
   a: Rect,
@@ -94,18 +106,55 @@ export function routeAround(
   const walls = [...blocks, a, b].map((r) => grow(r, ROUTE_GAP));
   const from = ports(a);
   const to = ports(b);
-  const xs = axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)])
-    .filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
+  const x0 = Math.min(...walls.map((r) => r.x));
+  const x1 = Math.max(...walls.map((r) => r.x + r.w));
+  const y0 = Math.min(...walls.map((r) => r.y));
+  const y1 = Math.max(...walls.map((r) => r.y + r.h));
+  const xs = merge(
+    axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)]),
+    [...lanes(bounds.x, x0), ...lanes(-(bounds.x + bounds.w), -x1).map((v) => -v)],
+  ).filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
   const inBand = (x: number, y: number): boolean => bands.some((r) => x >= r.x && x <= r.x + r.w && y > r.y && y < r.y + r.h);
-  const ys = axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)])
-    .filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
+  const ys = merge(
+    axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)]),
+    [...lanes(bounds.y, y0), ...lanes(-(bounds.y + bounds.h), -y1).map((v) => -v)],
+  ).filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
   const xi = new Map(xs.map((x, i) => [x, i]));
   const yi = new Map(ys.map((y, i) => [y, i]));
   const W = xs.length;
-  const free = (x: number, y: number): boolean => !walls.some((r) => inside(r, x, y));
+  const wx0 = Float64Array.from(walls, (r) => r.x);
+  const wx1 = Float64Array.from(walls, (r) => r.x + r.w);
+  const wy0 = Float64Array.from(walls, (r) => r.y);
+  const wy1 = Float64Array.from(walls, (r) => r.y + r.h);
+  const free = (x: number, y: number): boolean => {
+    for (let k = 0; k < wx0.length; k++) if (x > wx0[k]! && x < wx1[k]! && y > wy0[k]! && y < wy1[k]!) return false;
+    return true;
+  };
   const key = (i: number, j: number, d: Dir): number => ((j * W + i) << 2) | d;
-  const cost = new Map<number, number>();
-  const prev = new Map<number, number>();
+  // Per grid point and per move (right or down from a point), worked out once: the search reaches each
+  // up to four times (once per heading). 0 unknown, 1 open, 2 shut.
+  const openAt = new Uint8Array(W * ys.length);
+  const openRight = new Uint8Array(W * ys.length);
+  const openDown = new Uint8Array(W * ys.length);
+  const pointOpen = (i: number, j: number): boolean => {
+    const c = j * W + i;
+    if (!openAt[c]) openAt[c] = free(xs[i]!, ys[j]!) ? 1 : 2;
+    return openAt[c] === 1;
+  };
+  const moveOpen = (i: number, j: number, flat: boolean): boolean => {
+    const c = j * W + i;
+    const memo = flat ? openRight : openDown;
+    if (!memo[c]) {
+      const p = { x: xs[i]!, y: ys[j]! };
+      const q = flat ? { x: xs[i + 1]!, y: p.y } : { x: p.x, y: ys[j + 1]! };
+      const mx = (p.x + q.x) / 2;
+      const my = (p.y + q.y) / 2;
+      memo[c] = free(mx, my) && !(flat && inBand(mx, p.y)) && !(lines.length && alongLine(lines, p, q)) ? 1 : 2;
+    }
+    return memo[c] === 1;
+  };
+  const cost = new Float64Array(W * ys.length * 4).fill(Infinity);
+  const prev = new Int32Array(W * ys.length * 4);
   // A small binary heap of [cost, state].
   const heap: [number, number][] = [];
   const push = (c: number, s: number): void => {
@@ -135,13 +184,38 @@ export function routeAround(
     }
     return top;
   };
+  // A*: the heap orders by cost so far plus a lower bound on the rest, per state and goal: Manhattan
+  // distance, the port's cost, and one bend unless already heading the way the edge must arrive. The search
+  // heads for b instead of filling the grid, and the bend term stops it fanning out over equal detours.
+  const toLeft = new Float64Array(W * ys.length * 4).fill(-1);
+  let goalList: Port[] = [];
+  const rest = (s: number): number => {
+    if (toLeft[s]! < 0) {
+      const cell = s >> 2;
+      const d = s & 3;
+      const x = xs[cell % W]!;
+      const y = ys[Math.floor(cell / W)]!;
+      let m = Infinity;
+      for (const g of goalList) m = Math.min(m, Math.abs(x - g.out.x) + Math.abs(y - g.out.y) + g.cost + (d === (g.dir + 2) % 4 ? 0 : BEND));
+      toLeft[s] = m;
+    }
+    return toLeft[s]!;
+  };
   const relax = (s: number, c: number, p: number): void => {
-    if (c < (cost.get(s) ?? Infinity)) {
-      cost.set(s, c);
-      prev.set(s, p);
-      push(c, s);
+    if (c < cost[s]!) {
+      cost[s] = c;
+      prev[s] = p;
+      push(c + rest(s), s);
     }
   };
+  const goals = new Map<number, (typeof to)[number]>();
+  for (const p of to) {
+    const i = xi.get(Math.round(p.out.x * 2) / 2);
+    const j = yi.get(Math.round(p.out.y * 2) / 2);
+    if (i !== undefined && j !== undefined && free(p.out.x, p.out.y) && !alongLine(lines, p.at, p.out)) goals.set(j * W + i, p);
+  }
+  if (!goals.size) return undefined;
+  goalList = [...goals.values()];
   // A start state's predecessor is -1 - (index of its port in `from`).
   from.forEach((p, k) => {
     const i = xi.get(Math.round(p.out.x * 2) / 2);
@@ -149,17 +223,12 @@ export function routeAround(
     if (i === undefined || j === undefined || !free(p.out.x, p.out.y) || alongLine(lines, p.at, p.out)) return;
     relax(key(i, j, p.dir), p.cost, -1 - k);
   });
-  const goals = new Map<number, (typeof to)[number]>();
-  for (const p of to) {
-    const i = xi.get(Math.round(p.out.x * 2) / 2);
-    const j = yi.get(Math.round(p.out.y * 2) / 2);
-    if (i !== undefined && j !== undefined && free(p.out.x, p.out.y) && !alongLine(lines, p.at, p.out)) goals.set(j * W + i, p);
-  }
   let best: { state: number; cost: number; port: (typeof to)[number] } | undefined;
   while (heap.length) {
-    const [c, s] = pop();
-    if (c > (cost.get(s) ?? Infinity)) continue;
-    if (best && c >= best.cost) break;
+    const [f, s] = pop();
+    const c = cost[s]!;
+    if (f > c + rest(s)) continue;
+    if (best && f >= best.cost) break;
     const cell = s >> 2;
     const d = (s & 3) as Dir;
     const i = cell % W;
@@ -175,13 +244,13 @@ export function routeAround(
       const ni = i + DX[nd];
       const nj = j + DY[nd];
       if (ni < 0 || nj < 0 || ni >= W || nj >= ys.length) continue;
+      if (!pointOpen(ni, nj)) continue;
+      // A move left or up is the move right or down from the point it reaches.
+      if (!(nd < 2 ? moveOpen(i, j, nd === 0) : moveOpen(ni, nj, nd === 2))) continue;
       const x0 = xs[i]!;
       const y0 = ys[j]!;
       const x1 = xs[ni]!;
       const y1 = ys[nj]!;
-      if (!free(x1, y1) || !free((x0 + x1) / 2, (y0 + y1) / 2)) continue;
-      if (DY[nd] === 0 && inBand((x0 + x1) / 2, y0)) continue;
-      if (alongLine(lines, { x: x0, y: y0 }, { x: x1, y: y1 })) continue;
       relax(key(ni, nj, nd), c + Math.abs(x1 - x0) + Math.abs(y1 - y0) + (nd === d ? 0 : BEND), s);
     }
   }
@@ -191,7 +260,7 @@ export function routeAround(
   for (;;) {
     const cell = s >> 2;
     path.push({ x: xs[cell % W]!, y: ys[Math.floor(cell / W)]! });
-    const p = prev.get(s)!;
+    const p = prev[s]!;
     if (p < 0) {
       path.push(from[-1 - p]!.at);
       break;
