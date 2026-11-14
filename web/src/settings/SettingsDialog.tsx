@@ -3,7 +3,7 @@
 // Model connect/disconnect goes through the server's provider routes, which run the user's own CLI login;
 // nothing here reads, shows or keeps a token, key or account name: status and percentages only.
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, type DispatchSettings, type ProviderInfo } from '../api';
+import { api, ApiError, type DispatchSettings, type ProviderInfo } from '../api';
 import { Switch } from '../components/ui/switch';
 import { cn } from '../lib/utils';
 import type { ThemePref } from '../theme';
@@ -274,7 +274,7 @@ const actionLabel = (r: ProviderRow) => (r.action === 'connect' ? '연결' : r.a
 
 function RunPanel() {
   const [settings, setSettings] = useState<Load<DispatchSettings>>({ kind: 'loading' });
-  const [pr, setPr] = useState<boolean | null | 'unsupported'>(null);
+  const [pr, setPr] = useState<boolean | null | 'unsupported' | { broken: string }>(null);
   const [note, setNote] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
@@ -290,7 +290,7 @@ function RunPanel() {
     })();
     api.prTracking().then(
       (r) => alive && setPr(r.on),
-      () => alive && setPr('unsupported'),
+      (e) => alive && setPr(e instanceof ApiError && e.status === 409 ? { broken: e.message } : 'unsupported'),
     );
     return () => {
       alive = false;
@@ -311,6 +311,7 @@ function RunPanel() {
       setPr((await api.setPrTracking(on)).on);
       setNote('저장했어요.');
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) setPr({ broken: e.message });
       setNote(e instanceof Error ? e.message : '저장하지 못했어요.');
     }
   };
@@ -345,9 +346,10 @@ function RunPanel() {
       )}
       <Group title="PR·CI 추적" hint="이 워크스페이스에서 gh로 PR과 CI 상태를 확인해요.">
         <label className="flex min-h-8 items-center gap-3 text-sm max-md:min-h-11">
-          <Switch checked={pr === true} disabled={pr === null || pr === 'unsupported'} onCheckedChange={(on) => void togglePr(on)} />
-          {pr === 'unsupported' ? '이 서버에선 바꿀 수 없어요' : pr ? '켜짐' : '꺼짐'}
+          <Switch checked={pr === true} disabled={pr === null || pr === 'unsupported' || typeof pr === 'object'} onCheckedChange={(on) => void togglePr(on)} />
+          {pr === 'unsupported' ? '이 서버에선 바꿀 수 없어요' : typeof pr === 'object' && pr ? '바꿀 수 없어요' : pr ? '켜짐' : '꺼짐'}
         </label>
+        {typeof pr === 'object' && pr && <p className="text-xs text-destructive">{pr.broken}</p>}
       </Group>
       <p role="status" className="text-xs text-muted-foreground">
         {note}
