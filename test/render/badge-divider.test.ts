@@ -168,19 +168,39 @@ type R = { x: number; y: number; w: number; h: number };
 /** Whether the axis-aligned segment p-q runs through the inside of `r` (touching its border is fine). */
 const cuts = (r: R, p: { x: number; y: number }, q: { x: number; y: number }): boolean =>
   Math.max(p.x, q.x) > r.x + 0.5 && Math.min(p.x, q.x) < r.x + r.w - 0.5 && Math.max(p.y, q.y) > r.y + 0.5 && Math.min(p.y, q.y) < r.y + r.h - 0.5;
-/** Every drawn edge misses every node it does not join, the divider labels, and runs orthogonally. */
-function assertClear(s: Scene, label: string, what: string): void {
-  const h = new Map(s.handles!.map((x) => [x.id, x]));
+/**
+ * The divider label's plate as drawn: the gap the two halves of its line leave around the text, so it
+ * follows the label's measured width (#255).
+ */
+function labelPlate(s: Scene, label: string): R {
   const t = text(s, label)!;
-  const plate: R = { x: t.x - 30, y: t.y, w: 60, h: t.lineHeight };
+  const h = t.lineHeight * t.lines.length;
+  const halves = lines(s).filter((l) => {
+    const y = l.points[0]!.y;
+    return l.points.length === 2 && l.points[1]!.y === y && y >= t.y && y <= t.y + h;
+  });
+  const left = Math.max(...halves.map((l) => l.points[1]!.x).filter((x) => x <= t.x));
+  const right = Math.min(...halves.map((l) => l.points[0]!.x).filter((x) => x >= t.x));
+  assert.ok(Number.isFinite(left) && Number.isFinite(right), `the line of ${label} is broken around it`);
+  return { x: left, y: t.y, w: right - left, h };
+}
+
+/** Every drawn edge misses every node it does not join, the divider label, the divider line, and runs orthogonally. */
+function assertClear(s: Scene, label: string, what: string, id = label): void {
+  const h = new Map(s.handles!.map((x) => [x.id, x]));
+  const plate = labelPlate(s, label);
+  const div = h.get(id)!;
+  const lineY = div.y + div.h / 2;
   for (const e of s.items.filter((i): i is SceneEdge => i.kind === 'edge')) {
     for (let k = 1; k < e.points.length; k++) {
       const p = e.points[k - 1]!;
       const q = e.points[k]!;
       assert.ok(p.x === q.x || p.y === q.y, `${what}: ${e.from}>${e.to} orthogonal`);
-      for (const [id, r] of h) {
-        if (id === e.from || id === e.to || r.kind !== 'node' || id === label) continue;
-        assert.ok(!cuts(r, p, q), `${what}: ${e.from}>${e.to} runs through ${id}: ${JSON.stringify(e.points)}`);
+      const along = p.y === q.y && Math.abs(p.y - lineY) <= 1 && Math.min(Math.max(p.x, q.x), div.x + div.w) - Math.max(Math.min(p.x, q.x), div.x) > 1;
+      assert.ok(!along, `${what}: ${e.from}>${e.to} runs along the divider line: ${JSON.stringify(e.points)}`);
+      for (const [n, r] of h) {
+        if (n === e.from || n === e.to || r.kind !== 'node' || r === div) continue;
+        assert.ok(!cuts(r, p, q), `${what}: ${e.from}>${e.to} runs through ${n}: ${JSON.stringify(e.points)}`);
       }
       assert.ok(!cuts(plate, p, q), `${what}: ${e.from}>${e.to} strikes through the label ${label}: ${JSON.stringify(e.points)}`);
     }
@@ -252,4 +272,24 @@ test('divider rows: two edges across between the same pair each go around, apart
     assert.equal(pair.length, 2, `${what}: both edges drawn`);
     assert.ok(overlap(pair[0]!, pair[1]!, 8) <= 1, `${what}: the two routes run apart: ${JSON.stringify(pair.map((e) => e.points))}`);
   }
+});
+
+test('divider rows: a long label is measured, not a fixed 60px plate (#255)', async () => {
+  const long = 'Phase 2: rollout to every region';
+  const s = await scene(['A > B', `P [shape: divider, label: "${long}"]`, 'C > D', 'B > C', 'D > A'].join('\n'), 'flowchart');
+  const plate = labelPlate(s, long);
+  assert.ok(plate.w > 120, `plate ${plate.w}px wide`);
+  assertClear(s, long, 'long label', 'P');
+});
+
+test('divider rows: when the outside tracks run out, edges still go around, never through nodes (#255)', async () => {
+  // Twelve loop-back edges from the second phase into the first: the old bounds held too few tracks.
+  const code = ['direction right'];
+  for (let i = 0; i < 12; i++) code.push(`N${i} > M${i}`);
+  code.push('Phase 2 [shape: divider]');
+  for (let i = 0; i < 12; i++) code.push(`P${i} > Q${i}`);
+  for (let i = 0; i < 12; i++) code.push(`Q${i} > N${(i + 5) % 12}`);
+  const s = await scene(code.join('\n'), 'flowchart');
+  assert.equal(s.items.filter((i) => i.kind === 'edge').length, 36);
+  assertClear(s, 'Phase 2', 'twelve loops');
 });
