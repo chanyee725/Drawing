@@ -475,7 +475,7 @@ test('sequence: a message label cuts the lifelines it crosses; self labels stay 
   const loop = scene.items.find((it): it is SceneEdge => it.kind === 'edge' && it.route === 'elbow');
   assert.ok(self?.kind === 'text' && !self.plate && self.anchor === 'start' && loop);
   const loopRight = Math.max(...loop.points.map((p) => p.x));
-  assert.equal(self.x - loopRight, 8);
+  assert.ok(Math.abs(self.x - loopRight - 8) < 1e-6, `self label starts ${self.x - loopRight}px right of the loop`);
   const cx = lifelines[2]!.kind === 'line' ? lifelines[2]!.points[0]!.x : NaN;
   assert.ok(self.x + textWidth(self.lines[0]!, self.size, self.font) + PLATE_PAD < cx, 'the self label ends before C');
 });
@@ -493,9 +493,42 @@ test('mono: Hangul is measured at 1em and drawn without the ch-width scaling (E6
   // A ZWJ emoji stays one run, so it draws as one glyph.
   const zwj = await renderDiagram('t {\n  note 👨\u200d💻 x\n}', { type: 'erd' });
   assert.match(zwj.svg, /<tspan style="font-size-adjust:none">👨\u200d💻<\/tspan>/);
-  // A joiner after narrow text is not pulled into a wide run.
-  assert.doesNotMatch(zwj.svg, /font-size-adjust:none">\u200d/);
+  // ZWJ sequences whose parts include a BMP symbol stay one run too: 🏃‍♂️, 🧑‍⚕️, ❤️‍🔥.
+  for (const emoji of ['🏃\u200d♂\ufe0f', '🧑\u200d⚕\ufe0f', '❤\ufe0f\u200d🔥']) {
+    const { svg: one } = await renderDiagram(`t {\n  note x${emoji}y\n}`, { type: 'erd' });
+    assert.match(one, new RegExp(`>x<tspan style="font-size-adjust:none">${emoji}</tspan>y</tspan>`), [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join(' '));
+  }
+  // A joiner after narrow text is not pulled into a wide run: the wide span starts at the Hangul.
+  const narrow = await renderDiagram('t {\n  note a\u200d한\n}', { type: 'erd' });
+  assert.match(narrow.svg, />a\u200d<tspan style="font-size-adjust:none">한<\/tspan><\/tspan>/);
+  // A ZWJ after narrow text adds no width.
+  assert.equal(textWidth('a\u200d한', 12, 'mono'), (0.6 + 1) * 12);
   // Clean text has no nested span: the ch-width scaling is only on mono text.
   const clean = await renderDiagram('A\n한글 > A: 메시지', { type: 'sequence' });
   assert.doesNotMatch(clean.svg, /font-size-adjust:none/);
+});
+
+test('emoji are measured per grapheme cluster at 1em and drawn as one wide run (E60 follow-up, #300)', async () => {
+  const { textWidth, wrapText, isWideCluster } = await import('../../shared/render/text.ts');
+  // Keycap, emoji-presentation (VS16), ZWJ sequences and flags all draw as one ~1em glyph.
+  for (const emoji of ['1\ufe0f\u20e3', '❤\ufe0f', '♂\ufe0f', '👨\u200d💻', '🏃\u200d♂\ufe0f', '🇰🇷']) {
+    const label = [...emoji].map((c) => c.codePointAt(0)!.toString(16)).join(' ');
+    assert.ok(isWideCluster(emoji), label);
+    for (const font of ['clean', 'mono', 'rough'] as const) assert.equal(textWidth(emoji, 12, font), 12, `${label} ${font}`);
+  }
+  // Text presentation (VS15) and plain digits stay narrow.
+  assert.equal(isWideCluster('♂\ufe0e'), false);
+  assert.equal(textWidth('12', 12, 'mono'), 2 * 0.6 * 12);
+  assert.equal(textWidth('a🇰🇷b', 10, 'mono'), (0.6 + 1 + 0.6) * 10);
+  // Lone emoji-presentation clusters get their own unscaled run in mono text.
+  for (const emoji of ['1\ufe0f\u20e3', '❤\ufe0f', '♂\ufe0f', '🇰🇷']) {
+    const { svg } = await renderDiagram(`t {\n  note x${emoji}y\n}`, { type: 'erd' });
+    assert.match(svg, new RegExp(`>x<tspan style="font-size-adjust:none">${emoji}</tspan>y</tspan>`), emoji);
+  }
+  // Wrapping a long word never splits a cluster.
+  const lines = wrapText('👨\u200d💻'.repeat(6), 30, 12, 'mono', true);
+  assert.ok(lines.length > 1);
+  for (const l of lines) assert.match(l, /^(👨\u200d💻)+$/u);
+  const flags = wrapText('🇰🇷🇯🇵🇺🇸🇫🇷', 25, 12, 'clean', true);
+  assert.deepEqual(flags, ['🇰🇷🇯🇵', '🇺🇸🇫🇷']);
 });

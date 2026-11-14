@@ -9,7 +9,7 @@ import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
 import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, isWideChar, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, graphemes, isWideCluster, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -182,6 +182,10 @@ function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
  * The adjust on the <text> scales the whole font size by the primary mono face's ratio, so a narrow mono (0.5em,
  * x1.2) would also blow the Hangul fallback up past the 1em the layout measured (text.ts). The wide run keeps the
  * plain size and draws at its own width, at most about 1em.
+ *
+ * Runs are cut between grapheme clusters, never inside one: a ZWJ emoji whose parts include a BMP symbol (🏃‍♂️,
+ * 🧑‍⚕️, ❤️‍🔥) stays in one span, or it would draw as two glyphs. Wide clusters are the ones text.ts measures at 1em
+ * (isWideCluster), so keycaps, VS16 emoji and flags are unscaled too.
  */
 function monoRuns(line: string): string {
   let out = '';
@@ -191,23 +195,16 @@ function monoRuns(line: string): string {
     if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
     run = '';
   };
-  for (const ch of line) {
-    const code = ch.codePointAt(0) ?? 0;
-    // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
-    const w: boolean = wide && isJoiner(code) ? true : isWideChar(code);
+  for (const segment of graphemes(line)) {
+    const w = isWideCluster(segment);
     if (w !== wide) {
       flush();
       wide = w;
     }
-    run += ch;
+    run += segment;
   }
   flush();
   return out;
-}
-
-/** ZWJ, variation selector 16, keycap and tag characters: they belong to the emoji before them. */
-function isJoiner(code: number): boolean {
-  return code === 0x200d || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */
