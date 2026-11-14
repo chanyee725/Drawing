@@ -122,7 +122,6 @@ export async function setup(ctx) {
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
-          if (unreadable.has(`${path}\0${e.runId}`)) continue;
           // A paused run a server restart dropped from memory: which steps it carried over is on disk. Read that
           // first and look again, so a link is never saved to a carried step meanwhile. Stop here rather than try
           // the next plan, or the session could end up linked to both. Look again with the session as it is then,
@@ -130,6 +129,7 @@ export async function setup(ctx) {
           // the read fails, its carried steps stay unknown: look again without that plan, so the session can still
           // be linked to the lead's other plans.
           if (e.runId && recorder.isCarried(e.runId, '') === null) {
+            if (unreadable.has(`${path}\0${e.runId}`)) continue;
             const runId = e.runId;
             void recorder.readCarried(path, runId).then((ok) => {
               if (!ok) unreadable.add(`${path}\0${runId}`);

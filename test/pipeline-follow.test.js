@@ -39,7 +39,7 @@ async function rig(plans, tasks, { readOk = true } = {}) {
   };
   const mod = await pipeline.setup(ctx);
   const settle = () => new Promise((r) => setTimeout(r, 20));
-  return { mod, hub, sessions, plans, updates, reads, release, settle };
+  return { mod, hub, sessions, plans, updates, reads, known, release, settle };
 }
 
 const mate = { id: 'm1', name: 'impl-1', parent: 'lead', provider: 'claude', model: 'm', state: 'working', cost: 1 };
@@ -122,6 +122,27 @@ test('a run record that failed to read is read once, not again on every later se
       assert.deepEqual(t.reads, ['r-old'], `event ${i + 2} read the failed record again`);
     }
     assert.equal(plans['b.drawing'].links?.[mate.id], 'api');
+  } finally {
+    t.mod.close();
+  }
+});
+
+test('a plan whose read failed gets its sessions linked again once a resume loads its record (E206g)', async () => {
+  const plans = { 'a.drawing': { lead: 'lead', state: 'paused', approvedAt: 1, runId: 'r-old', steps: ['api'] } };
+  const t = await rig(plans, [{ lead: 'lead', step: 'api', owner: mate.name, stage: 'impl' }], { readOk: false });
+  try {
+    t.sessions[mate.id] = { ...mate };
+    t.release();
+    t.hub.emit('session', { ...mate });
+    await t.settle();
+    assert.equal(plans['a.drawing'].links?.[mate.id], undefined);
+    // 이어서 하기: resumeRun loads the record, so isCarried answers now.
+    plans['a.drawing'].state = 'running';
+    t.known.add('r-old');
+    t.hub.emit('session', { ...mate, cost: 2 });
+    await t.settle();
+    assert.equal(plans['a.drawing'].links?.[mate.id], 'api');
+    assert.deepEqual(t.reads, ['r-old']);
   } finally {
     t.mod.close();
   }
