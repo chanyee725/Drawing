@@ -310,7 +310,9 @@ function RunPanel() {
   const prBroken = typeof pr === 'object' && pr !== null;
   // A 409 (unreadable settings file) shows its cause once, in the red line the switch points at, and leaves the
   // switch enabled so focus stays put; pressing it again re-reads the file, so fixing it recovers without reopening.
+  // A retry that still fails says so in the status line; clearing it first lets the same words be announced again.
   const togglePr = async (on: boolean) => {
+    setNote(null);
     try {
       if (prBroken) {
         setPr((await api.prTracking()).on);
@@ -322,7 +324,7 @@ function RunPanel() {
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
         setPr({ broken: e.message });
-        setNote(null);
+        if (prBroken) setNote('아직 읽을 수 없어요.');
       } else setNote(e instanceof Error ? e.message : '저장하지 못했어요.');
     }
   };
@@ -365,7 +367,8 @@ function RunPanel() {
           />
           {pr === 'unsupported' ? '이 서버에선 바꿀 수 없어요' : prBroken ? '고친 뒤 눌러서 다시 확인해요' : pr ? '켜짐' : '꺼짐'}
         </label>
-        <p id={prErrId} aria-live="polite" className="text-xs text-destructive empty:hidden">
+        {/* Always rendered (never display:none) so the live region stays in the accessibility tree and its text change is announced. */}
+        <p id={prErrId} aria-live="polite" className="text-xs text-destructive">
           {prBroken ? pr.broken : null}
         </p>
       </Group>
