@@ -44,13 +44,13 @@ export async function setup(ctx) {
   // In-process listeners for content changes of a file (API saves, plan patches, outside edits); the live agent
   // cursor (server/cursor/) diffs them. SSE clients still get only what they got before.
   const changeListeners = new Set();
-  const changed = (path) => {
-    for (const fn of changeListeners) fn(path);
+  const changed = (path, opts) => {
+    for (const fn of changeListeners) fn(path, opts);
   };
   const store = createStore(ctx.workspaceDir, {
-    onExternalChange: (e) => {
+    onExternalChange: ({ catchUp, ...e }) => {
       ctx.hub.broadcast('workspace', e);
-      if (e.kind === 'change' || e.kind === 'create') changed(e.path);
+      if (e.kind === 'change' || e.kind === 'create') changed(e.path, { catchUp: catchUp === true });
     },
   });
   await store.startWatching();
@@ -82,7 +82,7 @@ export async function setup(ctx) {
 
   return {
     store,
-    /** fn(path) on each content change of a file; returns an unsubscribe function. */
+    /** fn(path, { catchUp }) on each content change of a file (catchUp: found after the watcher restarted); returns an unsubscribe function. */
     onChange(fn) {
       changeListeners.add(fn);
       return () => changeListeners.delete(fn);

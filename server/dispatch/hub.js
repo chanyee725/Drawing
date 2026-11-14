@@ -1012,7 +1012,7 @@ export class Hub extends EventEmitter {
         for (const c of msg.content || []) {
           if (c.type === "text" && c.text.trim()) { this.push(s, { kind: "assistant", text: c.text }); s.last = redact(clip(c.text, 400)); r.lastText = c.text; }
           else if (c.type === "tool_use") {
-            this.push(s, { kind: "tool", name: c.name, text: clip(JSON.stringify(c.input), 600) });
+            this.push(s, { kind: "tool", name: c.name, text: clip(JSON.stringify(c.input), 600), ...(c.id ? { callId: c.id } : {}) });
             const key = c.name === "Bash" && checkKey(c.input?.command);
             if (key && c.id) r.checks.set(c.id, { key, kind: activityOf("Bash", c.input.command) });
           }
@@ -1024,7 +1024,7 @@ export class Hub extends EventEmitter {
         for (const c of (Array.isArray(m.message?.content) ? m.message.content : [])) {
           if (c.type === "tool_result") {
             const text = Array.isArray(c.content) ? c.content.map(x => x.text || "").join("") : c.content;
-            this.push(s, { kind: "tool_result", text: clip(text, 1500), error: !!c.is_error });
+            this.push(s, { kind: "tool_result", text: clip(text, 1500), error: !!c.is_error, ...(c.tool_use_id ? { callId: c.tool_use_id } : {}) });
             const check = r.checks.get(c.tool_use_id);
             if (check) { r.checks.delete(c.tool_use_id); this.noteCheck(s, check, !c.is_error); }
           }
@@ -1101,12 +1101,14 @@ export class Hub extends EventEmitter {
         const it = m.item || {};
         if (it.type === "agent_message") { this.push(s, { kind: "assistant", text: it.text }); s.last = redact(clip(it.text, 400)); this.rt(s.id).lastText = it.text; }
         else if (it.type === "command_execution") {
-          this.push(s, { kind: "tool", name: "shell", text: clip(it.command, 600) });
-          if (it.aggregated_output) this.push(s, { kind: "tool_result", text: clip(it.aggregated_output, 1500), error: it.exit_code !== 0 });
+          // Codex reports a command only once it has finished: the tool entry is final (no result follows it, so
+          // nothing may pair a later result with it) and carries the outcome itself.
+          this.push(s, { kind: "tool", name: "shell", text: clip(it.command, 600), final: true, error: typeof it.exit_code === "number" && it.exit_code !== 0 });
+          if (it.aggregated_output) this.push(s, { kind: "tool_result", text: clip(it.aggregated_output, 1500), error: it.exit_code !== 0, final: true });
           const key = typeof it.exit_code === "number" && checkKey(it.command);
           if (key) this.noteCheck(s, { key, kind: activityOf("shell", it.command) }, it.exit_code === 0);
-        } else if (it.type === "file_change") this.push(s, { kind: "tool", name: "edit", text: clip((it.changes || []).map(c => `${c.kind} ${c.path}`).join("\n"), 600) });
-        else if (it.type === "mcp_tool_call") this.push(s, { kind: "tool", name: `${it.server}.${it.tool}`, text: clip(JSON.stringify(it.arguments), 600) });
+        } else if (it.type === "file_change") this.push(s, { kind: "tool", name: "edit", text: clip((it.changes || []).map(c => `${c.kind} ${c.path}`).join("\n"), 600), final: true });
+        else if (it.type === "mcp_tool_call") this.push(s, { kind: "tool", name: `${it.server}.${it.tool}`, text: clip(JSON.stringify(it.arguments), 600), final: true, error: it.status === "failed" });
         else if (it.type === "error") this.push(s, { kind: "system", text: clip(it.message, 400) });
         this.touch(s);
         break;

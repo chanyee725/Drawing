@@ -810,3 +810,39 @@ test('a watcher that keeps failing right after it starts backs off and warns onc
     await rm(ws, { recursive: true, force: true });
   }
 });
+
+test('an outside edit found by the restarted watcher\'s catch-up is flagged catchUp, one seen live is not (#401)', async (t) => {
+  const ws = await mkdtemp(join(tmpdir(), 'draw-ws-'));
+  const watchers = [];
+  const watchFn = (_root, _opts, cb) => {
+    const w = Object.assign(new EventEmitter(), { cb, closed: false, close() { this.closed = true; } });
+    watchers.push(w);
+    return w;
+  };
+  const changes = [];
+  const store = createStore(ws, { watchFn, watchRestartMs: 10, watchDebounceMs: 0, onExternalChange: (c) => changes.push(c) });
+  const warn = t.mock.method(console, 'warn', () => {});
+  try {
+    await store.createFile('x');
+    await store.startWatching();
+    const edit = async (n) => {
+      const cur = JSON.parse(await readFile(join(ws, 'x.dpx.json'), 'utf8'));
+      await writeFile(join(ws, 'x.dpx.json'), JSON.stringify({ ...cur, title: `edit ${n}`, revision: cur.revision + 1 }));
+    };
+    await edit(1);
+    watchers[0].cb('change', 'x.dpx.json');
+    for (let i = 0; i < 100 && !changes.length; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(changes.at(-1).catchUp, undefined);
+    // The watcher dies; an edit lands while nothing watches; the restart's catch-up finds it.
+    watchers[0].emit('error', Object.assign(new Error('x'), { code: 'ENOSPC' }));
+    await edit(2);
+    const n = changes.length;
+    for (let i = 0; i < 100 && changes.length === n; i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(changes.at(-1).path, 'x.dpx.json');
+    assert.equal(changes.at(-1).catchUp, true);
+  } finally {
+    warn.mock.restore();
+    await store.close();
+    await rm(ws, { recursive: true, force: true });
+  }
+});

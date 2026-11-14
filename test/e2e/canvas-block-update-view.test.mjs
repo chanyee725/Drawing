@@ -1,9 +1,9 @@
-// Headless check of the canvas's opening view (E494, #357; E494b, #359), through ExcalidrawCanvas itself:
-// an empty file that an agent fills from outside fits the new blocks, and a view the user moved to is kept when
-// the file changes again. Runs on request only:
+// Headless check of the canvas view across block updates (E497, #392): a view the user zoomed to survives a block
+// update on a file that already has blocks and on one that agents fill from empty. Runs on request only:
 //   DRAW_E2E=1 CHROME=/path/to/chrome-headless-shell PLAYWRIGHT_CORE=/path/to/node_modules/playwright-core npm test
 // Needs `npm run build` first. It starts its own server on a free port against a scratch workspace inside a scratch
-// git repo (one commit) in a temp dir, and refuses to go on unless the server log names that port and folder.
+// git repo (one commit) in a temp dir. Other sessions' servers may share ports, so it refuses to go on (and writes
+// nothing) unless the server log names this run's port and folder.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
