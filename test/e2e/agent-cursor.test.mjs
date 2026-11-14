@@ -111,10 +111,15 @@ async function run(t, cpuThrottle) {
 
   browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME });
   const errors = [];
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  // Wide enough that the canvas half of the split screen fits the final content (520×360) at 100%: the first open
+  // fits all shapes, capped at zoom 1 (E494), and the screen distances below are scene distances only at zoom 1.
+  const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
   await page.goto(`${BASE}/#file=demo.dpx.json`);
   await page.locator('.excalidraw').first().waitFor();
+  // The fit leaves a 10% margin (FIT_MARGIN in web/src/canvas/initialView.ts) and rounds down to 0.1 steps.
+  const box = await page.locator('.excalidraw').first().boundingBox();
+  assert.ok(box.width * 0.9 >= 520 && box.height * 0.9 >= 360, `canvas too small to fit the content at zoom 1: ${JSON.stringify(box)}`);
   if (cpuThrottle) {
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpuThrottle });
@@ -201,8 +206,8 @@ async function run(t, cpuThrottle) {
   const landedAt = await page.evaluate(() => window.__cursorYs.length);
   const second = await at();
   const ys = await page.evaluate(() => window.__cursorYs);
-  // An edit from outside reopens the canvas centred on its content at zoom 1 (ExcalidrawCanvas initialData,
-  // scrollToContent). Content bounds: y 0..60 before (centre 30), y 0..360 after (centre 180); x 0..520 both times.
+  // An edit from outside reopens the canvas fitted to its content (ExcalidrawCanvas initialData, openingView): centred,
+  // at zoom 1 here because the canvas is wide enough (checked above). Content bounds: y 0..60 before (centre 30), y 0..360 after (centre 180); x 0..520 both times.
   // So on screen the cursor keeps its x and lands (330 - 180) - (30 - 30) = 150 px lower: still on r3's centre.
   assert.ok(Math.abs(second[0] - first[0]) < 2, `same x: ${first} → ${second}`);
   assert.ok(Math.abs(second[1] - first[1] - 150) < 2, `on r3's centre: ${first} → ${second}`);
