@@ -62,6 +62,14 @@ test('start.sh starts project mode on <project>/pipelines, remembers the port an
     assert.equal(second.status, 0, second.stderr);
     assert.equal(second.stdout.trim(), first.stdout.trim());
     assert.equal(readFileSync(join(project, '.dispatch', 'server.port'), 'utf8').trim(), port);
+    assert.equal(Number(readFileSync(join(project, '.dispatch', 'server.pid'), 'utf8')), pid);
+    // Reuse rewrites a dropped or stale server.pid (#378), so stop.sh/update.sh still find the server.
+    rmSync(join(project, '.dispatch', 'server.pid'));
+    assert.equal(run().status, 0);
+    assert.equal(Number(readFileSync(join(project, '.dispatch', 'server.pid'), 'utf8')), pid);
+    writeFileSync(join(project, '.dispatch', 'server.pid'), '1\n');
+    assert.equal(run().status, 0);
+    assert.equal(Number(readFileSync(join(project, '.dispatch', 'server.pid'), 'utf8')), pid);
   } finally {
     if (port) {
       try {
