@@ -94,10 +94,17 @@ function clusterEm(cluster: string, font: Typeface): number {
   return em;
 }
 
+// Code points that never join a neighbour into a wide multi-code-point cluster: Latin-1, general punctuation,
+// currency signs, arrows, the minus sign, CJK punctuation (before the tone marks at U+302A), CJK ideographs and
+// Hangul syllables. A non-wide cluster measures the sum of its code points anyway, so text made only of these
+// measures the same code point by code point, without Intl.Segmenter (about 10x slower on short labels, #311).
+const NO_WIDE_CLUSTERS = /^[\0-\xff‐-‧‰-⁞₠-₿←-⇿−　-〩一-鿿가-힣]*$/;
+
 /** Width of one line of text in px, measured per grapheme cluster. Bold text is about 5% wider. */
 export function textWidth(text: string, size: number, font: Typeface, bold = false): number {
   let em = 0;
-  for (const g of graphemes(text)) em += clusterEm(g, font);
+  if (NO_WIDE_CLUSTERS.test(text)) for (const ch of text) em += clusterEm(ch, font);
+  else for (const g of graphemes(text)) em += clusterEm(g, font);
   return em * size * (bold ? 1.05 : 1);
 }
 
