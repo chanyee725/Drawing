@@ -23,6 +23,7 @@ function fakeRoot({ version = '1.2.3', withPublic = true, withStart = true } = {
   for (const f of ['restart.sh', 'stop.sh']) {
     put(`plugin/skills/dispatch/scripts/${f}`, readFileSync(new URL(`../plugin/skills/dispatch/scripts/${f}`, import.meta.url), 'utf8'));
   }
+  put('plugin/scripts/server-check.sh', readFileSync(new URL('../plugin/scripts/server-check.sh', import.meta.url), 'utf8'));
   if (withStart) put('plugin/scripts/start.sh', '#!/bin/sh\necho "$DRAW_PORT $DISPATCH_PORT $1" > "$HOME/started"; echo "$DRAWING_HOME" > "$HOME/started-home"\n');
   put('plugin/.env', 'SECRET=1');
   put('test/a.test.js');

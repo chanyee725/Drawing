@@ -11,6 +11,15 @@ if [ -n "$port" ]; then
   [[ "$port" =~ ^[0-9]+$ ]] || { echo "bad port: $port" >&2; exit 1; }
   export DRAW_PORT="$port" DISPATCH_PORT="$port"
 fi
+proj="$(git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || (cd "${1:-$PWD}" && pwd -P))"
+old=""
+[ ! -f "$proj/.dispatch/server.pid" ] || old="$(tr -dc '0-9' < "$proj/.dispatch/server.pid" 2>/dev/null || true)"
 "$here/stop.sh" "${1:-$PWD}"
-sleep 1
+# Wait (up to 10s) for the old server to exit so start.sh never finds it still answering.
+if [ -n "$old" ]; then
+  # A zombie (exited, not yet reaped by its parent) counts as gone.
+  running() { kill -0 "$old" 2>/dev/null && [[ "$(ps -o stat= -p "$old" 2>/dev/null || true)" != Z* ]]; }
+  for _ in $(seq 1 100); do running || break; sleep 0.1; done
+  if running; then echo "old server (pid $old) did not exit within 10s; not starting a new one" >&2; exit 1; fi
+fi
 "$start" "${1:-$PWD}"

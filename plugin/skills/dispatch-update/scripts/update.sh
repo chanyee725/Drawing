@@ -33,23 +33,8 @@ done
 command -v gh >/dev/null || { echo "gh is not installed (https://cli.github.com)" >&2; exit 1; }
 command -v node >/dev/null || { echo "node is not installed" >&2; exit 1; }
 
-# Succeeds only when pid $1 is node running a Drawing server/index.js in project mode on workspace $2
-# (what start.sh launches). Reads /proc/<pid>/cmdline, falls back to `ps -o command=`; nothing is eval'd.
-is_our_server() {
-  local pid=$1 workspace=$2 cmd first
-  [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 0 ] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  if [ -r "/proc/$pid/cmdline" ]; then
-    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  else
-    cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
-  fi
-  cmd=${cmd%"${cmd##*[![:space:]]}"}
-  [ -n "$cmd" ] || return 1
-  first=${cmd%% *}
-  case "${first##*/}" in node|nodejs) ;; *) return 1 ;; esac
-  [[ "$cmd" == *"/server/index.js --project-mode $workspace" ]]
-}
+# shellcheck source=../../../scripts/server-check.sh
+source "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")")")/scripts/server-check.sh"
 
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 ok() { printf '  ✓ %s\n' "$1"; }

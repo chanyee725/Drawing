@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -244,6 +244,65 @@ test('stop.sh signals only node running a Drawing server for this project; anyth
     assert.ok(!alive(ours.pid));
   } finally {
     for (const p of [ours, elsewhere, unrelated]) p.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('stop.sh recognizes a server whose node path and workspace path contain spaces', async () => {
+  const { dir, project } = scratchProject();
+  const pidFile = join(project, '.dispatch', 'server.pid');
+  mkdirSync(join(dir, 'fake/server'), { recursive: true });
+  mkdirSync(join(dir, 'bin with space'), { recursive: true });
+  symlinkSync(process.execPath, join(dir, 'bin with space', 'node'));
+  writeFileSync(join(dir, 'fake/server/index.js'), 'setInterval(() => {}, 1000);\n');
+  const ours = spawn(join(dir, 'bin with space', 'node'), [join(dir, 'fake/server/index.js'), '--project-mode', join(project, 'pipelines')], { stdio: 'ignore' });
+  try {
+    await new Promise((r) => setTimeout(r, 200));
+    writeFileSync(pidFile, String(ours.pid));
+    const r = spawnSync('bash', [STOP, project], { encoding: 'utf8' });
+    assert.match(r.stdout, /Dispatch stopped/);
+    await waitDead(ours.pid);
+    assert.ok(!alive(ours.pid));
+  } finally {
+    ours.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('update.sh and stop.sh share one is_our_server (no duplicate definition) that uses ps -ww', () => {
+  const root = new URL('../plugin/', import.meta.url).pathname;
+  const lib = readFileSync(join(root, 'scripts/server-check.sh'), 'utf8');
+  assert.match(lib, /ps -ww -o command=/);
+  for (const f of ['skills/dispatch/scripts/stop.sh', 'skills/dispatch-update/scripts/update.sh']) {
+    const t = readFileSync(join(root, f), 'utf8');
+    assert.ok(!/^is_our_server\(\)/m.test(t), f + ' must not define its own');
+    assert.match(t, /server-check\.sh/);
+  }
+});
+
+test('restart.sh waits for the old server to exit before starting', async () => {
+  const { dir, project } = scratchProject();
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'plugin/scripts'), { recursive: true });
+  mkdirSync(join(home, 'plugin/skills/dispatch/scripts'), { recursive: true });
+  mkdirSync(join(dir, 'fake/server'), { recursive: true });
+  for (const f of ['skills/dispatch/scripts/restart.sh', 'skills/dispatch/scripts/stop.sh', 'scripts/server-check.sh']) {
+    copyFileSync(new URL('../plugin/' + f, import.meta.url), join(home, 'plugin', f));
+  }
+  // Old server ignores SIGTERM for ~2s, then exits. The fake start.sh records whether it was still alive.
+  writeFileSync(join(dir, 'fake/server/index.js'), "process.on('SIGTERM', () => setTimeout(() => process.exit(0), 2000)); setInterval(() => {}, 1000);\n");
+  writeFileSync(join(home, 'plugin/scripts/start.sh'), '#!/bin/sh\ns=$(ps -o stat= -p "$OLDPID" 2>/dev/null)\ncase "$s" in ""|Z*) echo dead > "$OUT" ;; *) echo alive > "$OUT" ;; esac\n');
+  execFileSync('chmod', ['+x', join(home, 'plugin/scripts/start.sh')]);
+  const ours = spawn(process.execPath, [join(dir, 'fake/server/index.js'), '--project-mode', join(project, 'pipelines')], { stdio: 'ignore' });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    writeFileSync(join(project, '.dispatch', 'server.pid'), String(ours.pid));
+    const out = join(dir, 'out');
+    const r = spawnSync('bash', [join(home, 'plugin/skills/dispatch/scripts/restart.sh'), project], { env: { ...process.env, OLDPID: String(ours.pid), OUT: out }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(readFileSync(out, 'utf8').trim(), 'dead');
+  } finally {
+    ours.kill('SIGKILL');
     rmSync(dir, { recursive: true, force: true });
   }
 });
