@@ -179,15 +179,14 @@ export function RunStrip({ code, inRunView, onRunView, onOpenFile }: Props) {
           <button type="submit" value="cancel" className={cn('h-7 rounded-md border px-3', FOCUS_RING)}>
             취소
           </button>
-          <button
-            type="button"
+          <Button
+            size="sm"
             aria-disabled={busy !== null || undefined}
-            className={cn('h-7 rounded-md px-3 font-medium text-primary-foreground aria-disabled:opacity-50', FOCUS_RING)}
-            style={{ background: 'var(--primary)' }}
+            className={cn('px-3 text-sm hover:bg-primary', FOCUS_RING)}
             onClick={() => void act('reopen')}
           >
             계획 다시 열기
-          </button>
+          </Button>
         </form>
       </dialog>
       {sheet && (
