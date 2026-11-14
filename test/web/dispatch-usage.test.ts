@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  REFETCH_DELAY_MS, REFETCH_MAX_WAIT_MS, aggregate, alwaysOnOrder, burnNow, cacheRate, createUsageRefetcher, hashOf, outliers, rowHistory,
+  REFETCH_DELAY_MS, REFETCH_MAX_WAIT_MS, REFETCH_TIMEOUT_MESSAGE, REFETCH_TIMEOUT_MS, aggregate, alwaysOnOrder, burnNow, cacheRate, createUsageRefetcher, hashOf, outliers, rowHistory,
   topSessions, totals, usageKey, viewOf, weekHint,
 } from '../../web/src/dispatch/lib/usage.ts';
 import type { SessionState, UsageDay } from '../../shared/dispatch/types.ts';
@@ -79,25 +79,34 @@ test('a timeline row adds the live state after the server history', () => {
 });
 
 // Drives the page's own refetcher (createUsageRefetcher) on a fake clock. `answer(now)` decides each request:
-// a number = ms until it settles, with `fail` saying whether it fails. Returns the times requests went out.
+// `after` = ms until it settles (Infinity: never), with `fail` saying whether it fails. Records the times requests
+// went out, their abort signals, and what the page callbacks saw; `on` can swap a page callback (e.g. one that throws).
 type Answer = { after: number; fail?: boolean };
-function harness(answer: (now: number) => Answer = () => ({ after: 0 })) {
+type Callbacks = { result: (v: number) => void; error: (m: string) => void; loading: (on: boolean) => void };
+function harness(answer: (now: number) => Answer = () => ({ after: 0 }), on: Partial<Callbacks> = {}) {
   let now = 0;
   const timers = new Map<number, { at: number; fn: () => void }>();
   let nextId = 1;
   const sent: number[] = [];
-  const applied: { at: number; ok: boolean }[] = [];
+  const signals: AbortSignal[] = [];
+  const applied: { at: number; ok: boolean; message?: string }[] = [];
   const loading: boolean[] = [];
   const r = createUsageRefetcher(
-    () => {
+    signal => {
       sent.push(now);
+      signals.push(signal);
       const { after, fail } = answer(now);
       return new Promise<number>((ok, ko) => {
+        if (after === Infinity) return;
         const id = nextId++;
         timers.set(id, { at: now + after, fn: () => (fail ? ko(new Error('HTTP 500')) : ok(now)) });
       });
     },
-    { result: () => applied.push({ at: now, ok: true }), error: () => applied.push({ at: now, ok: false }), loading: on => loading.push(on) },
+    {
+      result: on.result ?? (() => applied.push({ at: now, ok: true })),
+      error: on.error ?? (message => applied.push({ at: now, ok: false, message })),
+      loading: on.loading ?? (v => loading.push(v)),
+    },
     {
       now: () => now,
       setTimeout: (fn, ms) => { const id = nextId++; timers.set(id, { at: now + ms, fn }); return id; },
@@ -113,7 +122,7 @@ function harness(answer: (now: number) => Answer = () => ({ after: 0 })) {
     }
     now = until;
   };
-  return { r, sent, applied, loading, run };
+  return { r, sent, signals, applied, loading, run };
 }
 const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
 
@@ -189,6 +198,116 @@ test('after a load, a change while a request is out is picked up once it settles
   h.r.stop();
   await h.run(20_000);
   assert.equal(h.sent.length, 3);
+});
+
+test('a request that never answers times out, so later refetches and the reload button are not blocked', async () => {
+  // The first load hangs forever: after REFETCH_TIMEOUT_MS it is aborted and shown as a failure.
+  const h = harness(now => (now === 0 ? { after: Infinity } : { after: 10 }));
+  h.r.change();
+  await h.run(REFETCH_TIMEOUT_MS - 1);
+  assert.deepEqual(h.applied, []);
+  assert.equal(h.r.reload(), false, 'the reload button waits while the request is out');
+  assert.equal(h.signals[0].aborted, false);
+  await h.run(REFETCH_TIMEOUT_MS);
+  assert.equal(h.signals[0].aborted, true, 'the hung request is aborted');
+  assert.equal((h.signals[0].reason as Error).name, 'TimeoutError');
+  assert.deepEqual(h.applied, [{ at: REFETCH_TIMEOUT_MS, ok: false, message: REFETCH_TIMEOUT_MESSAGE }]);
+  assert.equal(h.loading.at(-1), false);
+  // The reload button works again and its answer is applied.
+  assert.equal(h.r.reload(), true);
+  await h.run(REFETCH_TIMEOUT_MS + 20);
+  assert.deepEqual(h.sent, [0, REFETCH_TIMEOUT_MS]);
+  assert.deepEqual(h.applied.map(a => a.ok), [false, true]);
+  assert.equal(h.r.clock.loaded, true);
+
+  // A request that ignores its signal and answers after the deadline: only the timeout is applied, not the late answer.
+  const late = harness(now => ({ after: now === 0 ? REFETCH_TIMEOUT_MS + 5000 : 10 }));
+  late.r.change();
+  await late.run(REFETCH_TIMEOUT_MS + 6000);
+  assert.deepEqual(late.applied.map(a => a.message), [REFETCH_TIMEOUT_MESSAGE]);
+  assert.equal(late.r.clock.loaded, false, 'the late answer does not count as a load');
+  // After a load, a change that came in while the hung request was out is picked up once it times out.
+  const after = harness(now => (now === 0 ? { after: 0 } : now === 100 + REFETCH_DELAY_MS ? { after: Infinity } : { after: 10 }));
+  after.r.change();
+  await after.run(40_000, [100, 3000]);
+  // The change at 3000 is past its max wait by then, so the next request goes at once (the fake clock's next ms).
+  assert.deepEqual(after.sent.slice(0, 2), [0, 2100]);
+  assert.ok(after.sent[2] - (2100 + REFETCH_TIMEOUT_MS) <= 1, `requests: ${after.sent}`);
+  assert.deepEqual(after.applied.map(a => a.ok), [true, false, true]);
+});
+
+test('stop() while a request is out drops its answer and keeps the refetcher usable after start()', async () => {
+  const h = harness(() => ({ after: 1000 }));
+  h.r.change();
+  await h.run(10);
+  assert.deepEqual(h.loading, [true]);
+  h.r.stop();
+  await h.run(2000);
+  assert.deepEqual(h.applied, [], 'an answer after unmount is not applied');
+  assert.deepEqual(h.loading, [true], 'loading is not touched after unmount');
+  // Mounted again (e.g. a strict-mode remount): the next change sends a request and its answer is applied.
+  h.r.start();
+  h.r.change();
+  await h.run(5100);
+  assert.deepEqual(h.sent, [0, 2000 + REFETCH_DELAY_MS]);
+  assert.deepEqual(h.applied.map(a => a.at), [3000 + REFETCH_DELAY_MS]);
+  // A failure after unmount is dropped too.
+  const failing = harness(() => ({ after: 500, fail: true }));
+  failing.r.change();
+  await failing.run(10);
+  failing.r.stop();
+  await failing.run(1000);
+  assert.deepEqual(failing.applied, []);
+  // A hung request still times out after unmount, so a remount is not stuck behind it.
+  const hung = harness(now => (now === 0 ? { after: Infinity } : { after: 10 }));
+  hung.r.change();
+  await hung.run(10);
+  hung.r.stop();
+  await hung.run(REFETCH_TIMEOUT_MS + 1);
+  assert.deepEqual(hung.applied, []);
+  hung.r.start();
+  assert.equal(hung.r.reload(), true);
+});
+
+test('a change while a slow request is out is capped from the change, not from the answer', async () => {
+  // Loaded at 0; a change at 100 sends at 2100, which takes 9 s; a change at 2500 comes in while it is out.
+  const h = harness(now => ({ after: now === 0 ? 0 : now === 100 + REFETCH_DELAY_MS ? 9000 : 10 }));
+  h.r.change();
+  await h.run(0);
+  await h.run(20_000, [100, 2500]);
+  // The answer comes at 11100; the next request goes REFETCH_MAX_WAIT_MS after the change at 2500, not 2 s after 11100.
+  assert.deepEqual(h.sent, [0, 2100, 2500 + REFETCH_MAX_WAIT_MS]);
+});
+
+test('a throwing page callback does not leave the refetcher stuck or reject unhandled', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (e: unknown) => unhandled.push(e);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const loading: boolean[] = [];
+    const h = harness(() => ({ after: 10 }), {
+      result: () => { throw new Error('render failed'); },
+      loading: on => { loading.push(on); if (!on) throw new Error('loading failed'); },
+    });
+    h.r.change();
+    await h.run(100);
+    assert.deepEqual(loading, [true, false]);
+    assert.equal(h.r.clock.loaded, true);
+    assert.equal(h.r.reload(), true, 'not stuck in flight');
+    await h.run(100 + REFETCH_DELAY_MS);
+    assert.deepEqual(h.sent, [0, 100 + REFETCH_DELAY_MS]);
+    // A fetch that throws instead of returning a promise is a failure, not a crash.
+    const errors: string[] = [];
+    const t = createUsageRefetcher(() => { throw new Error('boom'); }, { result: () => {}, error: m => errors.push(m), loading: () => {} });
+    t.change();
+    await new Promise(ok => setTimeout(ok, 20));
+    t.stop();
+    assert.deepEqual(errors, ['boom']);
+    await new Promise(ok => setImmediate(ok));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+  }
 });
 
 test('usageKey moves with cost or tokens, so a cost-less session still triggers a refetch', () => {

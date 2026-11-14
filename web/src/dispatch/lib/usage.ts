@@ -91,12 +91,17 @@ export function rowHistory(s: Pick<Session, 'status' | 'state' | 'stateSince'>, 
 
 export const REFETCH_DELAY_MS = 2000;
 export const REFETCH_MAX_WAIT_MS = 10_000;
+/** A /api/usage request that has not answered by then is aborted and counts as a failure, so it cannot block the
+ *  next refetches or the reload button. */
+export const REFETCH_TIMEOUT_MS = 15_000;
+export const REFETCH_TIMEOUT_MESSAGE = '응답이 너무 늦어요';
 
 /** What the usage page knows when it schedules the next GET /api/usage. */
 export type RefetchClock = {
   /** A load has succeeded at least once. */
   loaded: boolean;
-  /** When the first change since the last request came in (only after a load). */
+  /** When the first change since the last request went out came in (only after a load). A change that comes in while
+   *  a request is out counts from its own time, so the cap is never pushed back by a slow request. */
   pendingSince: number | null;
   /** When the last request went out, or null to go at once (first load, or the reload button). */
   lastTry: number | null;
@@ -135,10 +140,11 @@ export type UsageRefetcher = {
 /**
  * Schedules GET /api/usage for the usage page. One request at a time: a change while a request is out does not
  * cancel or drop it (its answer, success or failure, is always applied and clears `loading`); the change re-arms
- * the timer once the request settles, so requests stay spaced out by refetchDelay.
+ * the timer once the request settles, still capped at REFETCH_MAX_WAIT_MS from that change. A request that has not
+ * settled after REFETCH_TIMEOUT_MS is aborted through its signal and settles as a failure.
  */
 export function createUsageRefetcher<T>(
-  fetch: () => Promise<T>,
+  fetch: (signal: AbortSignal) => Promise<T>,
   on: { result: (value: T) => void; error: (message: string) => void; loading: (on: boolean) => void },
   timers: RefetchTimers = { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: h => clearTimeout(h as ReturnType<typeof setTimeout>) },
 ): UsageRefetcher {
@@ -147,6 +153,8 @@ export function createUsageRefetcher<T>(
   let inFlight = false;
   let changedInFlight = false;
   let live = true;
+  // A throwing page callback must not leave the refetcher stuck in flight or surface as an unhandled rejection.
+  const call = (fn: () => void) => { try { fn(); } catch { /* the page's own problem; scheduling goes on */ } };
   const disarm = () => { if (timer != null) timers.clearTimeout(timer); timer = null; };
   const arm = () => {
     disarm();
@@ -158,20 +166,36 @@ export function createUsageRefetcher<T>(
     c.pendingSince = null;
     c.lastTry = timers.now();
     inFlight = true;
-    on.loading(true);
-    fetch().then(
-      v => { c.loaded = true; if (live) on.result(v); },
-      (e: Error) => { if (live) on.error(e?.message ?? String(e)); },
-    ).finally(() => {
+    call(() => on.loading(true));
+    const abort = new AbortController();
+    let settled = false;
+    const settle = (ok: boolean, v: T | undefined, message: string) => {
+      if (settled) return;
+      settled = true;
+      timers.clearTimeout(deadline);
+      if (ok) c.loaded = true;
+      if (live) call(() => (ok ? on.result(v as T) : on.error(message)));
       inFlight = false;
-      if (live) on.loading(false);
+      if (live) call(() => on.loading(false));
       if (changedInFlight) { changedInFlight = false; r.change(); }
-    });
+    };
+    // The deadline runs on the refetcher's timers (not AbortSignal.timeout) so tests can drive it on a fake clock,
+    // and it settles the request even if the fetch ignores the signal.
+    const deadline = timers.setTimeout(() => {
+      abort.abort(new DOMException(REFETCH_TIMEOUT_MESSAGE, 'TimeoutError'));
+      settle(false, undefined, REFETCH_TIMEOUT_MESSAGE);
+    }, REFETCH_TIMEOUT_MS);
+    let request: Promise<T>;
+    try { request = fetch(abort.signal); } catch (e) { request = Promise.reject(e); }
+    request.then(
+      v => settle(true, v, ''),
+      (e: unknown) => settle(false, undefined, (e as Error)?.message ?? String(e)),
+    );
   };
   const r: UsageRefetcher = {
     change() {
-      if (inFlight) { changedInFlight = true; return; }
       if (c.loaded) c.pendingSince ??= timers.now();
+      if (inFlight) { changedInFlight = true; return; }
       arm();
     },
     reload() {
@@ -181,6 +205,7 @@ export function createUsageRefetcher<T>(
       return true;
     },
     start() { live = true; },
+    // The request that is out keeps its deadline, so a remount (start again) is never stuck behind it.
     stop() { live = false; disarm(); },
     get clock() { return c; },
   };
