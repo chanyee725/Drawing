@@ -32,4 +32,6 @@ test("store: close() writes the pending save once and later saves write nothing"
   store.data.seq = 6;
   store.save();
   assert.equal(store.timer, null);
+  await store.writing;
+  assert.equal(JSON.parse(readFileSync(store.file, "utf8")).seq, 5);
 });
