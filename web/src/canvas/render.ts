@@ -35,13 +35,14 @@ const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 function placeholder(message: string, theme: PicTheme) {
   // Under the dark filter the light placeholder comes out dark.
+  // geometricPrecision like diagram pictures (E63): the placeholder is also drawn at small picture variants.
   const fg = theme === 'dark' ? '#a1a1aa' : '#71717a';
   const border = theme === 'dark' ? '#3f3f46' : '#d4d4d8';
   const w = 320;
   const h = 120;
   return {
     svg:
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" text-rendering="geometricPrecision">` +
       `<rect x="1" y="1" width="${w - 2}" height="${h - 2}" rx="8" fill="none" stroke="${border}" stroke-dasharray="6 4"/>` +
       `<text x="${w / 2}" y="${h / 2}" text-anchor="middle" dominant-baseline="middle" font-family="system-ui, sans-serif" font-size="14" fill="${fg}">${esc(message)}</text></svg>`,
     width: w,
