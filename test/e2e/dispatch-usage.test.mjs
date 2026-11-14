@@ -58,6 +58,10 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
   server.stderr.on('data', (d) => (log += d));
   const BASE = `http://127.0.0.1:${port}`;
   let browser;
+  let page;
+  // Each check names its step, so a failure says where it stopped (with the server log tail and a screenshot).
+  let step = 'server start';
+  const at = (s) => { step = s; };
   t.after(async () => {
     await browser?.close();
     server.kill();
@@ -65,85 +69,111 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
     rmSync(repo, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   });
-  for (let i = 0; i < 100 && !log.includes('workspace'); i++) await new Promise((r) => setTimeout(r, 100));
-  assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
+  try {
+    for (let i = 0; i < 100 && !log.includes('workspace'); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.ok(log.includes(`http://127.0.0.1:${port}/`) && log.includes(`workspace ${ws}`), `unexpected server log: ${log}`);
 
-  const call = async (m, u, b) => {
-    const res = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
-    const body = await res.json();
-    assert.ok(res.ok, `${m} ${u}: ${JSON.stringify(body)}`);
-    return body;
-  };
-  await call('POST', '/api/providers/claude/login');
-  const { sessions } = await call('POST', '/api/sessions', { items: [{ role: 'impl', prompt: 'say ok' }], worktree: false });
-  const name = sessions[0].name;
-  // Wait until the fake turn's cost is counted.
-  for (let i = 0; i < 100; i++) {
-    const { days } = await call('GET', '/api/usage');
-    if (days.at(-1).cost > 0) break;
-    await new Promise((r) => setTimeout(r, 100));
+    const call = async (m, u, b) => {
+      const res = await fetch(BASE + u, { method: m, headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: b && JSON.stringify(b) });
+      const body = await res.json();
+      assert.ok(res.ok, `${m} ${u}: ${JSON.stringify(body)}`);
+      return body;
+    };
+    at('fake session');
+    await call('POST', '/api/providers/claude/login');
+    const { sessions } = await call('POST', '/api/sessions', { items: [{ role: 'impl', prompt: 'say ok' }], worktree: false });
+    const name = sessions[0].name;
+    // Wait until the fake turn's cost is counted and the session is at rest, so nothing moves under the page.
+    let settled = false;
+    for (let i = 0; i < 100 && !settled; i++) {
+      const { days } = await call('GET', '/api/usage');
+      const { sessions: list } = await call('GET', '/api/state');
+      settled = days.at(-1).cost > 0 && list.find((s) => s.name === name)?.state === 'resting';
+      if (!settled) await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(settled, 'the fake turn should finish with its cost counted');
+
+    browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME });
+    const errors = [];
+    page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
+    let usageFetches = 0;
+    page.on('request', (r) => { if (new URL(r.url()).pathname === '/api/usage') usageFetches++; });
+
+    at('사용량');
+    await page.goto(`${BASE}/dispatch#usage`);
+    const nav = page.getByRole('navigation', { name: '세션 화면' });
+    await nav.getByRole('link', { name: '사용량' }).and(page.locator('[aria-current="page"]')).waitFor();
+    await page.getByText('$1.25').first().waitFor();
+    await page.locator('[data-limit="5시간"]').getByText('42%').waitFor();
+    await page.locator(`[data-session="${name}"]`).waitFor();
+    assert.ok(await page.getByRole('columnheader', { name: '모델' }).first().isVisible());
+    // Cost shares are neutral bars: the only session holds 100% of the cost, which must not read as a limit warning.
+    const shares = page.locator('[aria-label$="비용 비율"]');
+    assert.ok(await shares.count() >= 1, 'at least one cost share bar');
+    for (const tone of await shares.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))) assert.equal(tone, 'neutral');
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-usage.png'), fullPage: true });
+    // Session events that don't move the cost total (the snapshot, state pushes) don't refetch /api/usage.
+    await page.waitForTimeout(2500);
+    assert.equal(usageFetches, 1, 'one /api/usage request while the cost total stays the same');
+
+    at('타임라인');
+    await nav.getByRole('link', { name: '타임라인' }).click();
+    assert.equal(new URL(page.url()).hash, '#timeline');
+    const row = page.locator(`[data-row="${name}"]`);
+    await row.waitFor();
+    assert.match(await row.getAttribute('aria-label'), new RegExp(`^${name}, 지금 `));
+    await row.locator('[data-span]').first().waitFor(); // at least one state span
+    // A finished fake turn leaves the session resting; its bar is drawn solid so it stays visible on the track.
+    const resting = row.locator('[data-span="resting"] > span');
+    if (await resting.count()) assert.equal(await resting.first().evaluate((e) => getComputedStyle(e).opacity), '1');
+    // The 실패한 순간 legend mark uses the failure colour token in both themes (a missing token renders it transparent).
+    const legend = page.locator('[data-legend="failed"]');
+    const themeAtStart = await page.evaluate(() => document.documentElement.dataset.theme ?? null);
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate((th) => (document.documentElement.dataset.theme = th), theme);
+      const bg = await legend.evaluate((e) => getComputedStyle(e).backgroundColor);
+      assert.ok(!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg) && !/\/ 0\)$/.test(bg), `legend mark is transparent in ${theme}: ${bg}`);
+    }
+    await page.evaluate((th) => (th ? (document.documentElement.dataset.theme = th) : delete document.documentElement.dataset.theme), themeAtStart);
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline.png') });
+    // Forced colors drop the bar backgrounds; a system-colour border keeps each mark visible.
+    await page.emulateMedia({ forcedColors: 'active' });
+    for (const mark of [row.locator('[data-span] > span').first(), legend]) {
+      const b = await mark.evaluate((e) => { const c = getComputedStyle(e); return { style: c.borderLeftStyle, width: parseFloat(c.borderLeftWidth) }; });
+      assert.ok(b.style !== 'none' && b.width > 0, `mark has no border in forced colors: ${JSON.stringify(b)}`);
+    }
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline-forced.png') });
+    await page.emulateMedia({ forcedColors: 'none' });
+
+    // 상시 화면: dark, a tile per session, Esc goes back to the board.
+    at('상시 화면');
+    const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme);
+    await page.getByRole('link', { name: '상시 화면' }).click();
+    await page.locator('[data-always-on]').waitFor();
+    assert.equal(new URL(page.url()).hash, '#tv');
+    await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark');
+    await page.locator(`[data-tile="${name}"]`).waitFor();
+    if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-always-on.png') });
+    at('상시 화면 after reload');
+    await page.reload();
+    await page.locator(`[data-tile="${name}"]`).waitFor(); // #tv survives a reload
+    await page.keyboard.press('Escape');
+    await page.locator('[data-always-on]').waitFor({ state: 'detached' });
+    assert.equal(new URL(page.url()).hash, '');
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), themeBefore);
+
+    // A tile opens the session sheet on the board.
+    at('tile opens the sheet');
+    await page.goto(`${BASE}/dispatch#tv`);
+    await page.locator(`[data-tile="${name}"]`).click();
+    await page.locator('[data-always-on]').waitFor({ state: 'detached' });
+    await page.getByRole('dialog').waitFor();
+
+    assert.deepEqual(errors, []);
+  } catch (e) {
+    const shot = join(tmpdir(), `dispatch-usage-fail-${Date.now()}.png`);
+    await page?.screenshot({ path: shot, fullPage: true }).catch(() => {});
+    throw new Error(`[step: ${step}] ${e.message}\nscreenshot: ${shot}\nserver log tail:\n${log.slice(-1500)}`, { cause: e });
   }
-
-  browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME });
-  const errors = [];
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
-
-  // 사용량
-  await page.goto(`${BASE}/dispatch#usage`);
-  const nav = page.getByRole('navigation', { name: '세션 화면' });
-  await nav.getByRole('link', { name: '사용량' }).and(page.locator('[aria-current="page"]')).waitFor();
-  await page.getByText('$1.25').first().waitFor();
-  await page.locator('[data-limit="5시간"]').getByText('42%').waitFor();
-  await page.locator(`[data-session="${name}"]`).waitFor();
-  assert.ok(await page.getByRole('columnheader', { name: '모델' }).first().isVisible());
-  // Cost shares are neutral bars: the only session holds 100% of the cost, which must not read as a limit warning.
-  const shares = page.locator('[aria-label$="비용 비율"]');
-  assert.ok(await shares.count() >= 1, 'at least one cost share bar');
-  for (const tone of await shares.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))) assert.equal(tone, 'neutral');
-  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-usage.png'), fullPage: true });
-
-  // 타임라인
-  await nav.getByRole('link', { name: '타임라인' }).click();
-  assert.equal(new URL(page.url()).hash, '#timeline');
-  const row = page.locator(`[data-row="${name}"]`);
-  await row.waitFor();
-  assert.match(await row.getAttribute('aria-label'), new RegExp(`^${name}, 지금 `));
-  assert.ok(await row.locator('[data-span]').count() >= 1, 'at least one state span');
-  // A finished fake turn leaves the session resting; its bar is drawn solid so it stays visible on the track.
-  const resting = row.locator('[data-span="resting"] > span');
-  if (await resting.count()) assert.equal(await resting.first().evaluate((e) => getComputedStyle(e).opacity), '1');
-  // The 실패한 순간 legend mark uses the failure colour token in both themes (a missing token renders it transparent).
-  const legend = page.locator('[data-legend="failed"]');
-  const themeAtStart = await page.evaluate(() => document.documentElement.dataset.theme ?? null);
-  for (const theme of ['light', 'dark']) {
-    await page.evaluate((th) => (document.documentElement.dataset.theme = th), theme);
-    const bg = await legend.evaluate((e) => getComputedStyle(e).backgroundColor);
-    assert.ok(!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg) && !/\/ 0\)$/.test(bg), `legend mark is transparent in ${theme}: ${bg}`);
-  }
-  await page.evaluate((th) => (th ? (document.documentElement.dataset.theme = th) : delete document.documentElement.dataset.theme), themeAtStart);
-  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline.png') });
-
-  // 상시 화면: dark, a tile per session, Esc goes back to the board.
-  const themeBefore = await page.evaluate(() => document.documentElement.dataset.theme);
-  await page.getByRole('link', { name: '상시 화면' }).click();
-  await page.locator('[data-always-on]').waitFor();
-  assert.equal(new URL(page.url()).hash, '#tv');
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'dark');
-  await page.locator(`[data-tile="${name}"]`).waitFor();
-  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-always-on.png') });
-  await page.reload();
-  await page.locator(`[data-tile="${name}"]`).waitFor(); // #tv survives a reload
-  await page.keyboard.press('Escape');
-  await page.locator('[data-always-on]').waitFor({ state: 'detached' });
-  assert.equal(new URL(page.url()).hash, '');
-  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), themeBefore);
-
-  // A tile opens the session sheet on the board.
-  await page.goto(`${BASE}/dispatch#tv`);
-  await page.locator(`[data-tile="${name}"]`).click();
-  await page.locator('[data-always-on]').waitFor({ state: 'detached' });
-  await page.getByRole('dialog').waitFor();
-
-  assert.deepEqual(errors, []);
 });
