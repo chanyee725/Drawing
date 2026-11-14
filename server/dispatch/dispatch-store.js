@@ -36,6 +36,8 @@ export class Store {
     this.file = path.join(root, ".dispatch", "state.json");
     this.data = { seq: 0, sessions: {}, daily: {}, settings: { guard: { enabled: true, five: 0.9, seven: 0.85 }, enabled: { claude: false, openai: false } } };
     this.timer = null;
+    this.closed = false;
+    this.writing = Promise.resolve();
   }
 
   async load() {
@@ -49,16 +51,32 @@ export class Store {
   }
 
   save() {
+    // After close() nothing more is written: a child that exits late must not race the next server's writes
+    // to the same state file (or a test's cleanup of the folder).
+    if (this.closed) return;
     clearTimeout(this.timer);
-    this.timer = setTimeout(() => this.flush(), 500);
+    this.timer = setTimeout(() => this.flush().catch(e => console.error("dispatch state:", e.code ?? e.name)), 500);
   }
 
-  async flush() {
+  /** Writes now. Writes run one at a time, so two never share the temp file. */
+  flush() {
     clearTimeout(this.timer);
-    await mkdir(path.dirname(this.file), { recursive: true });
-    const tmp = this.file + ".tmp";
-    await writeFile(tmp, JSON.stringify(diskView(this.data), null, 2));
-    await rename(tmp, this.file);
+    this.timer = null;
+    const run = this.writing.catch(() => {}).then(async () => {
+      await mkdir(path.dirname(this.file), { recursive: true });
+      const tmp = this.file + ".tmp";
+      await writeFile(tmp, JSON.stringify(diskView(this.data), null, 2));
+      await rename(tmp, this.file);
+    });
+    this.writing = run;
+    return run;
+  }
+
+  /** The last write, then no more: a pending save is cancelled and later save() calls do nothing. */
+  close() {
+    const last = this.flush();
+    this.closed = true;
+    return last;
   }
 
   // Adds a usage delta to today's bucket.
