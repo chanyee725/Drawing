@@ -12,7 +12,8 @@ import { AGENT_CLIS, FAKE_MARKER, spawnCli } from "../../../server/dispatch/cli.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-export function fakeCliBin({ scenario, exit } = {}) {
+// `scenarios` gives one CLI its own lines ({ codex: [...] }); `codexModels` is what `codex debug models` lists.
+export function fakeCliBin({ scenario, scenarios = {}, codexModels, exit } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "drawing-fake-cli-"));
   for (const bin of AGENT_CLIS) {
     const file = path.join(dir, bin);
@@ -26,6 +27,12 @@ export function fakeCliBin({ scenario, exit } = {}) {
     env.FAKE_CLI_SCENARIO = path.join(dir, "scenario.jsonl");
     writeFileSync(env.FAKE_CLI_SCENARIO, scenario.map(l => JSON.stringify(l)).join("\n") + "\n");
   }
+  for (const [bin, lines] of Object.entries(scenarios)) {
+    const file = path.join(dir, `scenario.${bin}.jsonl`);
+    env[`FAKE_CLI_SCENARIO_${bin.toUpperCase()}`] = file;
+    writeFileSync(file, lines.map(l => JSON.stringify(l)).join("\n") + "\n");
+  }
+  if (codexModels) env.FAKE_CLI_CODEX_MODELS = JSON.stringify({ models: codexModels });
   if (exit != null) env.FAKE_CLI_EXIT = String(exit);
   return {
     dir, log, env,

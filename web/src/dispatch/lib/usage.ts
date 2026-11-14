@@ -88,3 +88,37 @@ export function rowHistory(s: Pick<Session, 'status' | 'state' | 'stateSince'>, 
   recordState(h, stateOf(s), Math.min(now, s.stateSince ?? now));
   return h;
 }
+
+export const REFETCH_DELAY_MS = 2000;
+export const REFETCH_MAX_WAIT_MS = 10_000;
+
+/** What the usage page knows when it schedules the next GET /api/usage. */
+export type RefetchClock = {
+  /** A load has succeeded at least once. */
+  loaded: boolean;
+  /** When the first change since the last request came in (only after a load). */
+  pendingSince: number | null;
+  /** When the last request went out, or null to go at once (first load, or the reload button). */
+  lastTry: number | null;
+};
+
+/** Milliseconds until the next /api/usage request. After a load: REFETCH_DELAY_MS after the latest change, so a
+ *  burst of finished turns costs one request, but never later than REFETCH_MAX_WAIT_MS after the first change while
+ *  changes keep coming. Before a load (the first one failed): at most one try per REFETCH_DELAY_MS, however many
+ *  session events come in. */
+export function refetchDelay(c: RefetchClock, now: number): number {
+  if (!c.loaded) return c.lastTry == null ? 0 : Math.max(0, c.lastTry + REFETCH_DELAY_MS - now);
+  const since = c.pendingSince ?? now;
+  return Math.max(0, Math.min(REFETCH_DELAY_MS, since + REFETCH_MAX_WAIT_MS - now));
+}
+
+/** Changes when any session's cost or token totals move (Codex and agy report tokens but no cost). */
+export function usageKey(sessions: readonly Pick<Session, 'cost' | 'usage'>[]): string {
+  let cost = 0;
+  let tokens = 0;
+  for (const s of sessions) {
+    cost += s.cost ?? 0;
+    tokens += s.usage.input + s.usage.output + s.usage.cacheRead + s.usage.cacheWrite;
+  }
+  return `${cost.toFixed(4)}|${tokens}`;
+}

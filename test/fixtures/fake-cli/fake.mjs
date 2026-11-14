@@ -3,6 +3,8 @@
 // - answers the status commands the server uses (--version, auth status, login status);
 // - for a session turn, prints the JSON lines of $FAKE_CLI_SCENARIO (a JSON-lines file) or a short
 //   default reply in that CLI's stream format, then exits with $FAKE_CLI_EXIT (default 0).
+//   $FAKE_CLI_SCENARIO_<BIN> (e.g. FAKE_CLI_SCENARIO_CODEX) takes over for that one CLI.
+//   $FAKE_CLI_CODEX_MODELS (JSON) replaces the empty `codex debug models` answer.
 //   Two scenario lines are actions, not output: { "$sleep": ms } waits, { "$write": { file, text } } writes
 //   `text` to the absolute path `file` (a test's scratch folder), like an agent editing a file.
 // It never talks to the network and never reads credentials.
@@ -34,7 +36,7 @@ const STATUS = {
 };
 
 function scenario(bin) {
-  const file = process.env.FAKE_CLI_SCENARIO;
+  const file = process.env[`FAKE_CLI_SCENARIO_${bin.toUpperCase()}`] || process.env.FAKE_CLI_SCENARIO;
   if (!file) return DEFAULT[bin];
   return readFileSync(file, "utf8").split("\n").filter(l => l.trim()).map(l => JSON.parse(l));
 }
@@ -52,7 +54,8 @@ export function run(bin) {
   const args = process.argv.slice(2);
   if (process.env.FAKE_CLI_LOG) appendFileSync(process.env.FAKE_CLI_LOG, JSON.stringify({ bin, args, cwd: process.cwd() }) + "\n");
   if (args[0] === "--version") { process.stdout.write(`${bin} 0.0.0-fake\n`); return finish(); }
-  const status = STATUS[bin][args.slice(0, 2).join(" ")];
+  const cmd = args.slice(0, 2).join(" ");
+  const status = bin === "codex" && cmd === "debug models" && process.env.FAKE_CLI_CODEX_MODELS ? process.env.FAKE_CLI_CODEX_MODELS : STATUS[bin][cmd];
   if (status !== undefined) { process.stdout.write(status + "\n"); return finish(); }
 
   if (bin !== "claude") { emit(scenario(bin)).then(finish); return; }
