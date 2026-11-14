@@ -532,3 +532,16 @@ test('emoji are measured per grapheme cluster at 1em and drawn as one wide run (
   const flags = wrapText('🇰🇷🇯🇵🇺🇸🇫🇷', 25, 12, 'clean', true);
   assert.deepEqual(flags, ['🇰🇷🇯🇵', '🇺🇸🇫🇷']);
 });
+
+test('wrapText breaks long words between grapheme clusters, not code points (#311)', async () => {
+  const { wrapText } = await import('../../shared/render/text.ts');
+  const keycap = '1️⃣';
+  // A bare '1' (0.58em) fits after 'ab' where the whole keycap (1em) does not: a code-point cut would leave
+  // '1' on the first line and the orphaned FE0F + U+20E3 on the next.
+  assert.deepEqual(wrapText(`ab${keycap}`, (0.55 + 0.55 + 0.58 + 0.1) * 10, 10, 'clean', true), ['ab', keycap]);
+  // A decomposed é (e + U+0301) stays whole too.
+  const e = 'é';
+  assert.deepEqual(wrapText(`${e}${e}${e}`, 18, 10, 'clean', true), [e, e, e]);
+  // One cluster wider than the limit is kept as it is, not cut into code points.
+  assert.deepEqual(wrapText(keycap, 5, 10, 'clean', true), [keycap]);
+});
