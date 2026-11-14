@@ -229,16 +229,43 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
     for (let i = 1; i < tries.length; i++) assert.ok(tries[i] - tries[i - 1] >= 1900, `tries ${i - 1} and ${i} are ${tries[i] - tries[i - 1]} ms apart`);
 
     // #334: a slow answer that is out while session events come in is still applied, not dropped and asked again.
+    // No wall-clock waits: the first request is held until session events have reached the page, and any later
+    // request is never answered, so the page can only show the numbers if the held answer was applied.
     at('a slow answer survives session events');
     await retrying.unroute('**/api/usage');
     const slow = [];
-    await retrying.route('**/api/usage', async (r) => { slow.push(Date.now()); await new Promise((ok) => setTimeout(ok, 1500)); await r.continue(); });
-    await retrying.waitForTimeout(2100); // past the 2 s spacing, so the next event sends a request at once
-    const churning = churn(4000);
-    await retrying.getByText('캐시 적중률').waitFor({ timeout: 3800 });
-    assert.equal(slow.length, 1, `one slow request should be enough (requests: ${slow.length})`);
+    let release;
+    const held = new Promise((ok) => (release = ok));
+    await retrying.route('**/api/usage', async (r) => {
+      slow.push(Date.now());
+      if (slow.length > 1) return; // never answered
+      await held;
+      await r.continue();
+    });
+    // One fake turn at a time until the page sends its retry (spaced 2 s after the last failed try).
+    const progress = async () => {
+      const s = (await call('GET', '/api/state')).sessions.find((x) => x.id === sessionId);
+      return { out: s.turns, resting: s.state === 'resting' };
+    };
+    const turn = async () => {
+      const before = (await progress()).out;
+      await call('POST', `/api/sessions/${sessionId}/message`, { text: 'say ok' });
+      for (let i = 0; i < 200; i++) {
+        const now = await progress();
+        if (now.out > before && now.resting) return;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      assert.fail('the fake turn did not finish');
+    };
+    const giveUp = Date.now() + 30_000; // only a bound for a broken page; the loop ends on the request
+    while (slow.length === 0 && Date.now() < giveUp) await turn();
+    assert.equal(slow.length, 1, `session events should send one retry (requests: ${slow.length})`);
+    // Two more finished turns (cost and state events) while it is out, then the answer.
+    await turn();
+    await turn();
+    release();
+    await retrying.getByText('캐시 적중률').waitFor();
     assert.equal(await retrying.getByRole('alert').filter({ hasText: '사용량을 불러오지 못했어요' }).count(), 0);
-    await churning;
     await retrying.close();
 
     assert.deepEqual(errors, []);
