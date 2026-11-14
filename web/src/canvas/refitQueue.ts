@@ -40,13 +40,14 @@ export class RefitQueue {
   /**
    * `scene` with the waiting texts measured, or null when there is nothing to do yet: no scene, nothing waiting or
    * the font not loaded. Texts queued without `bump` keep their versions (the new size is saved with the next edit);
-   * those queued with it go through `bumped`. A text not in the scene yet keeps waiting: the font can load before
-   * the opened file's texts enter the scene, and the canvas runs the queue again on its next change (#305).
+   * those queued with it go through `bumped`, required so a pasted text is never saved without a new version. A text
+   * not in the scene yet keeps waiting: the font can load before the opened file's texts enter the scene, and the
+   * canvas runs the queue again on its next change (#305).
    */
   take<T extends FitEl>(
     scene: readonly T[] | null,
     measure: (els: T[]) => readonly T[],
-    bumped?: (el: T, patch: Partial<FitEl>) => T,
+    bumped: (el: T, patch: Partial<FitEl>) => T,
   ): { elements: readonly T[]; changed: boolean } | null {
     if (!scene || !this.ids.size || !this.fontLoaded()) return null;
     const kept = new Set<string>();
