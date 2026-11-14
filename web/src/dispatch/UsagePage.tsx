@@ -1,7 +1,7 @@
 // 사용량 screen (E29): usage limits, cost and token numbers for this project, from the metadata the server keeps
 // (GET /api/usage: 14 days of daily cost, token counts per model and cost per role and session). Read-only: the
 // limit guard is changed in 설정.
-import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { roleColor } from '../run/overlayModel';
@@ -104,6 +104,7 @@ function DailyPanel({ days }: { days: UsageDay[] }) {
 }
 
 const th = 'pb-2 font-normal';
+const REFETCH_DELAY_MS = 2000;
 
 export function UsagePage() {
   const models = useDispatch(s => s.models);
@@ -112,15 +113,20 @@ export function UsagePage() {
   const [days, setDays] = useState<UsageDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Refetch when the session list changes: a finished turn adds cost to today.
+  // Refetch only when the sessions' cost total moves (a finished turn adds cost to today), not on every session
+  // event, and wait a moment after a change so a burst of finished turns costs one request.
+  const costTotal = Math.round(sessions.reduce((a, s) => a + (s.cost ?? 0), 0) * 1e4);
+  const loaded = useRef(false);
   useEffect(() => {
     let alive = true;
-    api<{ days: UsageDay[] }>('GET', '/api/usage').then(
-      r => { if (alive) { setDays(r.days); setError(null); } },
-      (e: Error) => alive && setError(e.message),
-    );
-    return () => { alive = false; };
-  }, [sessions]);
+    const timer = setTimeout(() => {
+      api<{ days: UsageDay[] }>('GET', '/api/usage').then(
+        r => { if (alive) { loaded.current = true; setDays(r.days); setError(null); } },
+        (e: Error) => alive && setError(e.message),
+      );
+    }, loaded.current ? REFETCH_DELAY_MS : 0);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [costTotal]);
 
   const list = days ?? [];
   const agg = useMemo(() => aggregate((days ?? []).slice(-WEEK)), [days]);
