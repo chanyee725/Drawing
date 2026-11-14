@@ -1,6 +1,13 @@
 // Texts that changed font (cleanStyle.ts) are measured again, and nothing else in the scene is touched.
 // Excalidraw does the measuring (`measure`, its restoreElements); this picks the measured size of those texts only
 // and grows a shape whose label no longer fits, as Excalidraw does when a label is edited.
+//
+// Known gaps (#305):
+// - Rotated shapes (`angle` is not read): a shape that grows keeps its unrotated `y`, so its centre, which it is
+//   rotated around, moves and the shape shifts on screen instead of growing from its visual top edge; the label
+//   (`y + height / 2`) follows the shape. Rotated hand-drawn labels are rare in saved files.
+// - Arrows bound to a shape that grows are not moved here, and an elbow arrow's `fixedSegments` are left as they
+//   are: Excalidraw re-routes bound arrows when the scene updates.
 
 export type FitEl = {
   id: string;
