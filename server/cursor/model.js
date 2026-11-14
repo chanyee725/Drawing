@@ -64,3 +64,11 @@ export function changedCentre(before, after) {
   if (x0 === Infinity) return null;
   return { x: Math.round((x0 + x1) / 2), y: Math.round((y0 + y1) / 2) };
 }
+
+/** Keys (`el:<id>` / `block:<id>`) of what changed from `before` to `after`: added, changed and removed shapes. */
+export function changedKeys(before, after) {
+  const out = [];
+  for (const [k, s] of after) if (before.get(k)?.sig !== s.sig) out.push(k);
+  for (const k of before.keys()) if (!after.has(k)) out.push(k);
+  return out;
+}

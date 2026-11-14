@@ -2,8 +2,8 @@
 // Everything runs in a temp dir with a scratch git repo; no agent CLI is started.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -208,6 +208,69 @@ test('start.sh refuses a folder that is not a git project top', () => {
     const r = spawnSync('bash', [START, dir], { encoding: 'utf8' });
     assert.notEqual(r.status, 0);
     assert.match(r.stderr, /Not a git project/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- pid-file safety and write order (fake processes only) ---
+
+const STOP = new URL('../plugin/skills/dispatch/scripts/stop.sh', import.meta.url).pathname;
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+const waitDead = async (pid) => { for (let i = 0; i < 50 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100)); };
+
+function scratchProject() {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'drawing-pid-')));
+  const project = join(dir, 'proj');
+  execFileSync('mkdir', ['-p', join(project, '.dispatch')]);
+  execFileSync('git', ['init', '-q', project]);
+  return { dir, project };
+}
+
+test('stop.sh signals only node running a Drawing server for this project; anything else is a stale pid file', async () => {
+  const { dir, project } = scratchProject();
+  const pidFile = join(project, '.dispatch', 'server.pid');
+  mkdirSync(join(dir, 'fake/server'), { recursive: true });
+  writeFileSync(join(dir, 'fake/server/index.js'), 'setInterval(() => {}, 1000);\n');
+  const ours = spawn(process.execPath, [join(dir, 'fake/server/index.js'), '--project-mode', join(project, 'pipelines')], { stdio: 'ignore' });
+  const elsewhere = spawn(process.execPath, [join(dir, 'fake/server/index.js'), '--project-mode', join(dir, 'other/pipelines')], { stdio: 'ignore' });
+  const unrelated = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const stop = () => spawnSync('bash', [STOP, project], { encoding: 'utf8' });
+  try {
+    for (const p of [elsewhere, unrelated]) {
+      writeFileSync(pidFile, String(p.pid));
+      const r = stop();
+      assert.equal(r.status, 0, r.stderr);
+      assert.match(r.stdout, /No Dispatch server running/);
+      assert.ok(alive(p.pid), 'foreign process must not be signalled');
+      assert.ok(!existsSync(pidFile), 'stale pid file removed');
+    }
+    writeFileSync(pidFile, String(ours.pid));
+    const r = stop();
+    assert.match(r.stdout, /Dispatch stopped/);
+    await waitDead(ours.pid);
+    assert.ok(!alive(ours.pid));
+  } finally {
+    for (const p of [ours, elsewhere, unrelated]) p.kill();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('start.sh writes server.pid only after the server is ready; a failed start keeps the old file', () => {
+  const { dir, project } = scratchProject();
+  const fakeHome = join(dir, 'home');
+  mkdirSync(join(fakeHome, 'server'), { recursive: true });
+  mkdirSync(join(project, 'pipelines'), { recursive: true });
+  // A "server" that exits at once: readiness never succeeds.
+  writeFileSync(join(fakeHome, 'server/index.js'), 'process.exit(1);\n');
+  const pidFile = join(project, '.dispatch', 'server.pid');
+  writeFileSync(pidFile, '424242\n');
+  try {
+    const r = spawnSync('bash', [START, project], { env: { ...process.env, HOME: dir, DRAWING_HOME: fakeHome, DRAW_PORT: '', DISPATCH_PORT: '' }, encoding: 'utf8' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /did not start/);
+    assert.equal(readFileSync(pidFile, 'utf8'), '424242\n', 'old pid file untouched');
+    assert.ok(!existsSync(join(project, '.dispatch', 'server.port')));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
