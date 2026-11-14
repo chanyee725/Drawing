@@ -113,6 +113,8 @@ export async function setup(ctx) {
     };
     // Session metadata goes to the run record of its lead's running plan, under the step its task names.
     // `skip` holds plans whose run record could not be read (missing, corrupt, another runId) during this pass.
+    // `unreadable` remembers, per plan and run, a read that failed, so later events do not read it again.
+    const unreadable = new Set();
     const follow = (s, skip = new Set()) => {
       if (!s?.parent) return;
       for (const [path, e] of leadEntries(s.parent, ['running', 'paused'])) {
@@ -120,6 +122,7 @@ export async function setup(ctx) {
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
+          if (unreadable.has(`${path}\0${e.runId}`)) continue;
           // A paused run a server restart dropped from memory: which steps it carried over is on disk. Read that
           // first and look again, so a link is never saved to a carried step meanwhile. Stop here rather than try
           // the next plan, or the session could end up linked to both. Look again with the session as it is then,
@@ -127,7 +130,9 @@ export async function setup(ctx) {
           // the read fails, its carried steps stay unknown: look again without that plan, so the session can still
           // be linked to the lead's other plans.
           if (e.runId && recorder.isCarried(e.runId, '') === null) {
-            void recorder.readCarried(path, e.runId).then((ok) => {
+            const runId = e.runId;
+            void recorder.readCarried(path, runId).then((ok) => {
+              if (!ok) unreadable.add(`${path}\0${runId}`);
               const now = hub.get(s.id);
               if (now) follow(hub.publicSession(now), ok ? skip : new Set([...skip, path]));
             });

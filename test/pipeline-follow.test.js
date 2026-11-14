@@ -14,9 +14,10 @@ async function rig(plans, tasks, { readOk = true } = {}) {
   let release;
   const gate = new Promise((r) => (release = r));
   const updates = [];
+  const reads = [];
   const recorder = {
     isCarried: (runId, step) => (runId === 'r-old' && !known.has(runId) ? null : false),
-    readCarried: (_path, runId) => gate.then(() => (readOk && known.add(runId), readOk)),
+    readCarried: (_path, runId) => (reads.push(runId), gate).then(() => (readOk && known.add(runId), readOk)),
     updateSession: (runId, step, meta) => updates.push({ runId, step, cost: meta.cost }),
   };
   const sessions = {};
@@ -38,7 +39,7 @@ async function rig(plans, tasks, { readOk = true } = {}) {
   };
   const mod = await pipeline.setup(ctx);
   const settle = () => new Promise((r) => setTimeout(r, 20));
-  return { mod, hub, sessions, plans, updates, release, settle };
+  return { mod, hub, sessions, plans, updates, reads, release, settle };
 }
 
 const mate = { id: 'm1', name: 'impl-1', parent: 'lead', provider: 'claude', model: 'm', state: 'working', cost: 1 };
@@ -98,6 +99,29 @@ test('a paused plan whose run record cannot be read is skipped, so the running p
     assert.equal(plans['a.drawing'].links?.[mate.id], undefined);
     assert.equal(plans['b.drawing'].links?.[mate.id], 'api');
     assert.deepEqual(t.updates, [{ runId: 'r-new', step: 'api', cost: 2 }]);
+  } finally {
+    t.mod.close();
+  }
+});
+
+test('a run record that failed to read is read once, not again on every later session event (E206g)', async () => {
+  const plans = {
+    'a.drawing': { lead: 'lead', state: 'paused', approvedAt: 2, runId: 'r-old', steps: ['api'] },
+    'b.drawing': { lead: 'lead', state: 'running', approvedAt: 1, runId: 'r-new', steps: ['api'] },
+  };
+  const t = await rig(plans, [{ lead: 'lead', step: 'api', owner: mate.name, stage: 'impl' }], { readOk: false });
+  try {
+    t.sessions[mate.id] = { ...mate };
+    t.release();
+    t.hub.emit('session', { ...mate });
+    await t.settle();
+    assert.deepEqual(t.reads, ['r-old'], 'the first event reads the record once');
+    for (let i = 0; i < 3; i++) {
+      t.hub.emit('session', { ...mate, cost: 2 + i });
+      await t.settle();
+      assert.deepEqual(t.reads, ['r-old'], `event ${i + 2} read the failed record again`);
+    }
+    assert.equal(plans['b.drawing'].links?.[mate.id], 'api');
   } finally {
     t.mod.close();
   }
