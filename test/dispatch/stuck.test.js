@@ -244,3 +244,14 @@ test("nothing about the command text reaches the transcript-free state", () => {
   assert.match(JSON.stringify(hub.transcript("a")), /playwright/);
   assert.doesNotMatch(JSON.stringify(hub.store.data), /playwright|secret output/);
 });
+
+test("push numbers each session's entries, and the message event carries the number (#207)", () => {
+  const a = session(), b = session({ id: "b" });
+  const { hub, events } = fakeHub([a, b]);
+  hub.push(a, { kind: "assistant", text: "1" });
+  hub.push(b, { kind: "assistant", text: "1" });
+  hub.push(a, { kind: "assistant", text: "2" });
+  assert.deepEqual(hub.transcript("a").map(e => e.id), [1, 2]);
+  assert.deepEqual(hub.transcript("b").map(e => e.id), [1]);
+  assert.deepEqual(events.filter(([ev]) => ev === "message").map(([, d]) => [d.id, d.entry.id]), [["a", 1], ["b", 1], ["a", 2]]);
+});
