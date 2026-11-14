@@ -2,7 +2,8 @@
 # Starts the Drawing server for another git project, in project mode (Dispatch run screen only).
 #   start.sh <project>
 # Workspace = <project>/pipelines (created when missing). The port is kept in
-# <project>/.dispatch/server.port (its pid in server.pid, which stop.sh reads); a server that already
+# <project>/.dispatch/server.port (its pid in server.pid, which stop.sh reads; both written only once
+# the server is ready, a failed start leaves the old files alone); a server that already
 # answers there is reused only when <project>/pipelines/.drawing/server.lock names it (live pid, same
 # port), so another project's server on a recycled port is never mistaken for ours. Port order: remembered live server, else $DRAW_PORT, else $DISPATCH_PORT (team.sh and
 # restart.sh pass it; handed to the server as DRAW_PORT). No ~/.dispatch/servers registry is written, else a free port. Prints nothing but the URL on success.
@@ -17,7 +18,7 @@ top=$(git -C "$project" rev-parse --show-toplevel 2>/dev/null) || { echo "Not a 
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 home=${DRAWING_HOME:-$(cd "$here/../.." && pwd -P)}
-[ -f "$home/server/index.js" ] || { echo "Drawing server not found in $home (set DRAWING_HOME)" >&2; exit 1; }
+[ -f "$home/server/index.js" ] || { echo "Drawing server not found in $home (DRAWING_HOME must be a Drawing checkout)" >&2; exit 1; }
 
 workspace=$project/pipelines
 state=$project/.dispatch
@@ -67,14 +68,12 @@ port=$(node -e '
 log=$state/server.log
 DRAW_PORT=$port nohup node "$home/server/index.js" --project-mode "$workspace" >"$log" 2>&1 &
 pid=$!
-echo "$pid" > "$state/server.pid"
 
 for _ in $(seq 1 100); do
-  ours "$port" "$pid" && { echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
+  ours "$port" "$pid" && { echo "$pid" > "$state/server.pid"; echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done
 echo "Server did not start; see $log" >&2
 kill "$pid" 2>/dev/null || true
-rm -f "$state/server.pid"
 exit 1

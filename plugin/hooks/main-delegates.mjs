@@ -2,14 +2,17 @@
 // Claude Code PreToolUse hook shipped with the Dispatch plugin (issue #31).
 // Inside a Dispatch session (DISPATCH_SESSION / DISPATCH_PARENT / DISPATCH_SELF set) it does nothing. In any other
 // Claude Code session, before a file edit — or a Bash command that looks like a write (issue #33) — it checks whether
-// a live Dispatch server runs for the project that holds the file (~/.dispatch/servers/*.json, pid check only, no
-// network). If so it adds a note to the model's context: the main session delegates implementation to a lead instead
-// of editing files itself. It repeats the note at most every REMIND_MS (30 min) per session. It never blocks the tool.
+// a Drawing server runs for the project that holds the file: the project is the git top-level of the hook's cwd, its
+// port is in <project>/.dispatch/server.port (written by plugin/scripts/start.sh) and must be all digits, the project's
+// <project>/pipelines/.drawing/server.lock must name that port and a live pid (the rule of ours() in start.sh), and
+// http://127.0.0.1:<port>/api/info must answer as a project-mode server (loopback only, short timeout). If so it adds
+// a note to the model's context: the main session delegates implementation to a lead instead of editing files itself. It repeats the note at most every REMIND_MS (30 min) per session. It never blocks the tool.
 // Any failure exits 0 silently. The marker holds no personal data: its name is the sanitized session id, its content
 // is empty, and its mtime is the time of the last note. Command text is never stored.
-import { existsSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { get } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 export const NOTE = "[Dispatch 훅] 이 프로젝트에는 Dispatch 서버가 돌고 있다. 메인 세션은 구현·수정·조사를 직접 하지 않는다. 파일을 직접 고치지 말고 Dispatch 관리자(lead)에게 맡겨라: 브리프를 쓰고, 머지 전에 확인하고, PR에 코멘트하고 머지하는 것만 한다. 다른 흐름의 일(다른 영역·저장소, 또는 지금 관리자의 컨텍스트가 무겁거나 longRun)이면 기존 관리자에 얹지 말고 새 관리자를 만들어라. 리뷰의 작은 should-fix도 담당 관리자에게 돌려보낸다.";
 
@@ -81,35 +84,70 @@ export function expandHome(p, home = homedir()) {
   return p;
 }
 
-export function alive(pid) {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === "EPERM"; }
-}
-
 function inside(file, dir) {
   const d = resolve(dir);
   return file === d || file.startsWith(d.endsWith(sep) ? d : d + sep);
 }
 
-// Returns the registry entry of a live Dispatch server whose project contains `target`, or null.
-export function findServer(target, registryDir, home = homedir()) {
-  for (const f of readdirSync(registryDir)) {
-    if (!f.endsWith(".json")) continue;
-    let e;
-    try { e = JSON.parse(readFileSync(join(registryDir, f), "utf8")); } catch { continue; }
-    if (typeof e?.path !== "string" || !e.path) continue;
-    const dir = expandHome(e.path, home);
-    if (!isAbsolute(dir)) continue;
-    if (inside(target, dir) && alive(e.pid)) return e;
+// Git top-level of `dir` (nearest ancestor holding .git), or null. Reads the file system only; no child process.
+export function projectRoot(dir) {
+  let d = resolve(dir);
+  for (;;) {
+    if (existsSync(join(d, ".git"))) return d;
+    const up = dirname(d);
+    if (up === d) return null;
+    d = up;
   }
-  return null;
 }
 
-export function run(env = process.env, input = {}, registryDir = join(homedir(), ".dispatch", "servers"), markDir = tmpdir(), home = homedir(), now = Date.now()) {
-  try { return check(env, input, registryDir, markDir, home, now); } catch { return null; }
+// The port in <root>/.dispatch/server.port when it is plain digits in 1..65535, else null.
+export function readPort(root) {
+  let raw;
+  try { raw = readFileSync(join(root, ".dispatch", "server.port"), "utf8").trim(); } catch { return null; }
+  if (!/^[0-9]+$/.test(raw)) return null;
+  const n = Number(raw);
+  return n >= 1 && n <= 65535 ? n : null;
 }
 
-function check(env, input, registryDir, markDir, home, now) {
+// True when <root>/pipelines/.drawing/server.lock names `port` and a live pid (EPERM means alive, owned by another user).
+export function lockLive(root, port) {
+  try {
+    const lock = JSON.parse(readFileSync(join(root, "pipelines", ".drawing", "server.lock"), "utf8"));
+    if (!lock || String(lock.port) !== String(port) || !Number.isInteger(lock.pid) || lock.pid <= 0) return false;
+    try { process.kill(lock.pid, 0); } catch (e) { if (e?.code !== "EPERM") return false; }
+    return true;
+  } catch { return false; }
+}
+
+// True when a project-mode Drawing server on the "pipelines" workspace answers /api/info on 127.0.0.1:<port>.
+export function probe(port, timeout = 1500) {
+  return new Promise(done => {
+    const req = get({ host: "127.0.0.1", port, path: "/api/info", timeout }, res => {
+      let b = "";
+      res.setEncoding("utf8");
+      res.on("data", c => { if (b.length < 4096) b += c; });
+      res.on("end", () => { try { done(res.statusCode === 200 && (i => i?.mode === "project" && i.workspace === "pipelines")(JSON.parse(b))); } catch { done(false); } });
+      res.on("error", () => done(false));
+    });
+    req.on("error", () => done(false));
+    req.on("timeout", () => { req.destroy(); done(false); });
+  });
+}
+
+// Returns { root, port } of the live Drawing server of the project that holds `target`, or null.
+export async function findServer(target, cwd) {
+  const root = projectRoot(cwd ?? target);
+  if (!root || !inside(target, root)) return null;
+  const port = readPort(root);
+  if (port === null || !lockLive(root, port) || !(await probe(port))) return null;
+  return { root, port };
+}
+
+export async function run(env = process.env, input = {}, markDir = tmpdir(), home = homedir(), now = Date.now()) {
+  try { return await check(env, input, markDir, home, now); } catch { return null; }
+}
+
+async function check(env, input, markDir, home, now) {
   if (env.DISPATCH_SESSION || env.DISPATCH_PARENT || env.DISPATCH_SELF) return null;
   if (!input || typeof input !== "object") return null;
   const sid = typeof input.session_id === "string" ? input.session_id.replace(/[^\w-]/g, "_").slice(0, 80) : "";
@@ -121,7 +159,7 @@ function check(env, input, registryDir, markDir, home, now) {
   if (!target || !isAbsolute(target)) return null;
   const mark = join(markDir, `dispatch-main-${sid}`);
   if (existsSync(mark) && now - statSync(mark).mtimeMs < REMIND_MS) return null;
-  if (!existsSync(registryDir) || !findServer(target, registryDir, home)) return null;
+  if (!cwd || !(await findServer(target, cwd))) return null;
   writeFileSync(mark, "");
   utimesSync(mark, new Date(now), new Date(now));
   return { hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: NOTE } };
@@ -131,9 +169,9 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
   let raw = "";
   process.stdin.setEncoding("utf8");
   process.stdin.on("data", c => { raw += c; });
-  process.stdin.on("end", () => {
+  process.stdin.on("end", async () => {
     try {
-      const out = run(process.env, JSON.parse(raw));
+      const out = await run(process.env, JSON.parse(raw));
       if (out) process.stdout.write(JSON.stringify(out));
     } catch { /* fail silently */ }
     process.exit(0);
