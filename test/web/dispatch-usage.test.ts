@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  aggregate, alwaysOnOrder, burnNow, cacheRate, hashOf, outliers, rowHistory, topSessions, totals, viewOf, weekHint,
+  REFETCH_DELAY_MS, REFETCH_MAX_WAIT_MS, aggregate, alwaysOnOrder, burnNow, cacheRate, hashOf, outliers, refetchDelay, rowHistory,
+  topSessions, totals, usageKey, viewOf, weekHint, type RefetchClock,
 } from '../../web/src/dispatch/lib/usage.ts';
 import type { SessionState, UsageDay } from '../../shared/dispatch/types.ts';
 
@@ -75,4 +76,57 @@ test('a timeline row adds the live state after the server history', () => {
   assert.deepEqual(server, [[100, 'working']], 'server entries not mutated');
   assert.deepEqual(rowHistory({ status: 'running', state: 'working', stateSince: 150 }, server, 300), [[100, 'working']]);
   assert.deepEqual(rowHistory({ status: 'idle' }, undefined, 300), [[300, 'resting']]);
+});
+
+// Plays the page's scheduling: each change (re)arms one timer with refetchDelay; returns the times requests went out.
+function playRefetch(changes: number[], start: RefetchClock, until: number): number[] {
+  const c = { ...start };
+  const sent: number[] = [];
+  let due: number | null = null;
+  const arm = (now: number) => {
+    if (c.loaded) c.pendingSince ??= now;
+    due = now + refetchDelay(c, now);
+  };
+  const queue = [...changes];
+  for (let now = 0; now <= until; now++) {
+    if (due === now) { c.pendingSince = null; c.lastTry = now; sent.push(now); due = null; }
+    while (queue[0] === now) { queue.shift(); arm(now); }
+  }
+  return sent;
+}
+
+test('refetchDelay waits for a burst to end but never longer than the max wait', () => {
+  const loaded = { loaded: true, pendingSince: null, lastTry: 0 };
+  // One change: one request REFETCH_DELAY_MS later.
+  assert.deepEqual(playRefetch([100], loaded, 20_000), [100 + REFETCH_DELAY_MS]);
+  // A burst inside the delay: one request after the last change.
+  assert.deepEqual(playRefetch([100, 600, 1100], loaded, 20_000), [1100 + REFETCH_DELAY_MS]);
+  // Changes every second, forever: still a request within REFETCH_MAX_WAIT_MS of the first unanswered change.
+  const steady = Array.from({ length: 30 }, (_, i) => 1000 + i * 1000);
+  const sent = playRefetch(steady, loaded, 40_000);
+  assert.ok(sent.length >= 2, `requests: ${sent}`);
+  assert.ok(sent[0] - 1000 <= REFETCH_MAX_WAIT_MS, `first request ${sent[0]}`);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i] - sent[i - 1] <= REFETCH_MAX_WAIT_MS + 1000, `gap before ${sent[i]}`);
+});
+
+test('refetchDelay spaces out retries while the first load keeps failing', () => {
+  // The first load goes at once.
+  assert.equal(refetchDelay({ loaded: false, pendingSince: null, lastTry: null }, 5), 0);
+  // After a failed try, session events every 100 ms cost one request per REFETCH_DELAY_MS, not one each.
+  const events = Array.from({ length: 60 }, (_, i) => 100 + i * 100);
+  const sent = playRefetch(events, { loaded: false, pendingSince: null, lastTry: 0 }, 7000);
+  assert.ok(sent.length <= 7000 / REFETCH_DELAY_MS, `requests: ${sent}`);
+  for (let i = 1; i < sent.length; i++) assert.ok(sent[i] - sent[i - 1] >= REFETCH_DELAY_MS, `gap before ${sent[i]}`);
+  assert.equal(sent[0], REFETCH_DELAY_MS);
+  // The reload button clears lastTry: the next try goes at once.
+  assert.equal(refetchDelay({ loaded: false, pendingSince: null, lastTry: null }, 900), 0);
+});
+
+test('usageKey moves with cost or tokens, so a cost-less session still triggers a refetch', () => {
+  const s = (cost: number | null, output: number) => ({ cost, usage: { input: 10, output, cacheRead: 0, cacheWrite: 0 } });
+  assert.equal(usageKey([s(1.25, 5)]), usageKey([s(1.25, 5)]));
+  assert.notEqual(usageKey([s(null, 5)]), usageKey([s(null, 6)]));
+  assert.notEqual(usageKey([s(1, 5)]), usageKey([s(1.01, 5)]));
+  // A cost step and a token step that would cancel out in one sum still read as a change.
+  assert.notEqual(usageKey([s(1, 5)]), usageKey([s(0.9999, 6)]));
 });
