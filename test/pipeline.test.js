@@ -360,6 +360,10 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     const go = await call('POST', '/api/pipeline/start', { path, revision: rev.body.revision });
     assert.equal(go.status, 200, JSON.stringify(go.body));
     assert.notEqual(go.body.runId, runId);
+    // The task board speaks again (a merge check, another set_task): the mate that finished api relinks to the new
+    // run through its old task, and its idle state must not reopen the carried step.
+    d.hub.emit('tasks', d.hub.tasks);
+    await until(() => d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
     const next = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
     assert.equal(next.steps.api.state, 'done');
     assert.equal(next.steps.api.carried, runId);
