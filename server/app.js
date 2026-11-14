@@ -15,7 +15,7 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
  *   match is the RegExp match (or [pathname] for a string path); url is the parsed URL.
  * Modules are closed in reverse setup order.
  * A module may also return listening(): run once the server listens (ctx.port is known then).
- * ctx = { workspaceDir, hub, modules, port } where modules holds each module's
+ * ctx = { workspaceDir, projectMode, hub, modules, port } where modules holds each module's
  * setup() result by name, so later modules can use earlier ones; port is the listening port
  * (0 before listen).
  */
@@ -24,6 +24,7 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
   let server = null;
   const ctx = {
     workspaceDir: opts.workspaceDir,
+    projectMode: !!opts.projectMode,
     hub,
     modules: {},
     get port() {
@@ -33,7 +34,7 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
   const routes = [
     { method: 'GET', path: '/api/events', handler: (req, res) => hub.attach(req, res) },
     // Folder name only, never the full path.
-    { method: 'GET', path: '/api/info', handler: (req, res) => sendJson(res, 200, { workspace: basename(ctx.workspaceDir ?? '') }) },
+    { method: 'GET', path: '/api/info', handler: (req, res) => sendJson(res, 200, { workspace: basename(ctx.workspaceDir ?? ''), mode: ctx.projectMode ? 'project' : 'drawing' }) },
   ];
   const closers = [];
   const listeners = [];
