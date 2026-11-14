@@ -1,6 +1,6 @@
 // 타임라인 view of the 세션 board (E29): one row per session in role lanes, the last two hours across, each stretch
 // drawn by state. Shape tells states apart without colour: active states fill the row, stuck is hatched, resting is
-// a low bar, done a thin line, a failure a red tick. History is state and time only (GET /api/timeline).
+// a low solid bar (no fade, so it keeps 3:1 against the track), done a thin faded line, a failure a red tick. History is state and time only (GET /api/timeline).
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../lib/utils';
 import { roleColor } from '../run/overlayModel';
@@ -18,7 +18,7 @@ const SHAPE: Record<SessionState, { h: string; hatch?: boolean; fade?: boolean }
   waiting: { h: 'h-full' },
   stuck: { h: 'h-full', hatch: true },
   failed: { h: 'h-full' },
-  resting: { h: 'h-2/5', fade: true },
+  resting: { h: 'h-2/5' },
   done: { h: 'h-0.5', fade: true },
 };
 const LEGEND: SessionState[] = ['working', 'waiting', 'stuck', 'failed', 'resting', 'done'];
@@ -66,7 +66,7 @@ function Row({ s, history, now, windowMs, onOpen }: { s: Session; history: Entry
       <span aria-hidden className="relative block h-5 overflow-hidden rounded-sm bg-muted/50">
         {spans.map(p => (
           <span key={p.from} data-span={p.state} title={`${STATE[known(p.state)].label} · ${hhmm(p.from)}–${hhmm(p.to)} (${mins(p.to - p.from)})`}
-            className="absolute inset-y-0 flex items-center" style={{ left: x(p.from), width: w(p.from, p.to) }}>
+            className="absolute inset-y-0 flex min-w-0.5 items-center" style={{ left: x(p.from), width: w(p.from, p.to) }}>
             <span className={cn('w-full', SHAPE[known(p.state)].h)} style={barStyle(known(p.state))} />
           </span>
         ))}
@@ -129,7 +129,7 @@ export function SessionTimeline({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">최근 2시간</span>
         {LEGEND.map(st => <span key={st} className="inline-flex items-center gap-1.5"><Swatch state={st} />{STATE[st].label}</span>)}
-        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="h-3 w-[3px] bg-bad" />실패한 순간</span>
+        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-[3px] bg-bad" />실패한 순간</span>
       </div>
       <div className="flex flex-col gap-5">
         {lanes.map(role => {
