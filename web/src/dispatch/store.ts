@@ -28,7 +28,7 @@ export function useDispatch<T>(select: (s: DispatchState) => T): T {
 }
 export const getState = () => state;
 /** Tests only: back to the empty state. */
-export const resetState = () => { state = initial(); gone.clear(); pending = null; };
+export const resetState = () => { state = initial(); gone.clear(); loading.clear(); pending = null; };
 
 /** JSON request to the Dispatch API. Writes carry x-drawing: 1 (server/app.js rejects them otherwise). */
 export async function api<T = unknown>(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
@@ -43,9 +43,34 @@ export async function api<T = unknown>(method: string, url: string, body?: unkno
   return data as T;
 }
 
+// Live messages that arrived while a session's transcript request was in flight, per session id.
+// Only the latest request for an id owns its buffer; an older answer is dropped.
+const loading = new Map<string, { buf: Entry[] }>();
+
+/** Loaded history plus the live entries it does not have yet (by id; entries without one by content). */
+export function mergeEntries(loaded: Entry[], live: Entry[]): Entry[] {
+  const key = (e: Entry) => (e.id !== undefined ? `#${e.id}` : `${e.at}|${e.kind}|${e.name ?? ''}|${e.text}`);
+  const seen = new Set(loaded.map(key));
+  const out = [...loaded];
+  for (const e of live) {
+    const k = key(e);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+  }
+  return out;
+}
+
 export async function loadTranscript(id: string) {
-  const res = await api<{ messages: Entry[] }>('GET', `/api/sessions/${encodeURIComponent(id)}/messages`);
-  setState({ transcripts: { ...state.transcripts, [id]: res.messages } });
+  const mine = { buf: [] as Entry[] };
+  loading.set(id, mine);
+  try {
+    const res = await api<{ messages: Entry[] }>('GET', `/api/sessions/${encodeURIComponent(id)}/messages`);
+    if (loading.get(id) !== mine || gone.has(id)) return;
+    setState({ transcripts: { ...state.transcripts, [id]: mergeEntries(res.messages, mine.buf) } });
+  } finally {
+    if (loading.get(id) === mine) loading.delete(id);
+  }
 }
 
 /** Drops a closed session's transcript from memory. */
@@ -87,12 +112,14 @@ export function apply(ev: string, d: unknown) {
     case 'removed': {
       const { id } = d as { id: string };
       gone.add(id);
+      loading.delete(id);
       const { [id]: _, ...transcripts } = state.transcripts;
       setState({ sessions: state.sessions.filter(s => s.id !== id), transcripts });
       break;
     }
     case 'message': {
       const { id, entry } = d as { id: string; entry: Entry };
+      loading.get(id)?.buf.push(entry);
       const cur = state.transcripts[id];
       if (cur) setState({ transcripts: { ...state.transcripts, [id]: [...cur, entry] } });
       break;

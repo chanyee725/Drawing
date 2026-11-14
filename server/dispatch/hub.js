@@ -142,7 +142,7 @@ export class Hub extends EventEmitter {
   rt(id) {
     let r = this.live.get(id);
     if (!r) {
-      this.live.set(id, r = { proc: null, transcript: [], perms: new Map(), seenMsgIds: new Set(), pendingReport: null,
+      this.live.set(id, r = { proc: null, transcript: [], seq: 0, perms: new Map(), seenMsgIds: new Set(), pendingReport: null,
         fails: new Map(), checks: new Map(), lastEventAt: Date.now() });
       // A repeat-fail flag survives a restart: seed its counter so the next failure continues the count.
       const st = this.get(id)?.stuck;
@@ -216,6 +216,8 @@ export class Hub extends EventEmitter {
     // Everything in the ring buffer (and so everything the UI and the lead get) is masked first.
     if (typeof entry.text === "string") entry.text = redact(entry.text);
     entry.at = Date.now();
+    // Per-session sequence number: the UI merges a loaded transcript with live events by it.
+    entry.id = ++r.seq;
     r.lastEventAt = entry.at;
     if (s.stuck?.reason === "silent") this.refreshStuck(s, entry.at);
     if (entry.kind === "tool") {

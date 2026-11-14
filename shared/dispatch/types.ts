@@ -82,6 +82,8 @@ export interface Entry {
   tool?: string;
   error?: boolean;
   at: number;
+  /** Per-session sequence number set by the hub; the UI dedupes a loaded transcript against live events by it. */
+  id?: number;
 }
 
 export interface Model {

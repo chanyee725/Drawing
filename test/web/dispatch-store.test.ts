@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { apply, connect, forgetTranscript, getState, resetState, setState } from '../../web/src/dispatch/store.ts';
+import { apply, connect, forgetTranscript, getState, loadTranscript, mergeEntries, resetState, setState } from '../../web/src/dispatch/store.ts';
 import type { Entry, Session } from '../../shared/dispatch/types.ts';
 
 const sess = (id: string, extra: Partial<Session> = {}) => ({ id, name: id, status: 'running', pending: [], ...extra }) as unknown as Session;
@@ -189,4 +189,57 @@ test('after the stream closes for good (404, 502) it reconnects with backoff and
     delete g.EventSource;
     f.restore();
   }
+});
+
+// #207: live messages that arrive while the transcript request is in flight.
+const msg = (id: number, text = `m${id}`): Entry => ({ kind: 'assistant', text, at: id, id });
+const texts = (id: string) => getState().transcripts[id]?.map(e => e.text);
+
+test('mergeEntries appends only live entries the loaded history lacks, by id', () => {
+  assert.deepEqual(mergeEntries([msg(1), msg(2)], [msg(2), msg(3), msg(3)]).map(e => e.id), [1, 2, 3]);
+  const old = (text: string): Entry => ({ kind: 'user', text, at: 5 }); // no id: compared by content
+  assert.deepEqual(mergeEntries([old('a')], [old('a'), old('b')]).map(e => e.text), ['a', 'b']);
+});
+
+test('messages arriving while the transcript loads are kept, without duplicates', async () => {
+  const f = fakeFetch();
+  try {
+    const p = loadTranscript('a');
+    apply('message', { id: 'a', entry: msg(2) }); // already in the answer below
+    apply('message', { id: 'a', entry: msg(3) }); // sent after the server built the answer
+    apply('message', { id: 'b', entry: msg(9) }); // another session: not buffered here
+    f.calls[0].resolve({ messages: [msg(1), msg(2)] });
+    await p;
+    assert.deepEqual(texts('a'), ['m1', 'm2', 'm3']);
+    assert.equal('b' in getState().transcripts, false);
+    apply('message', { id: 'a', entry: msg(4) }); // after the load: appended as before
+    assert.deepEqual(texts('a'), ['m1', 'm2', 'm3', 'm4']);
+  } finally { f.restore(); }
+});
+
+test('reloading a loaded transcript keeps live messages and drops a stale answer', async () => {
+  const f = fakeFetch();
+  try {
+    setState({ transcripts: { a: [msg(1)] } });
+    const first = loadTranscript('a');
+    const second = loadTranscript('a');
+    apply('message', { id: 'a', entry: msg(2) });
+    f.calls[1].resolve({ messages: [msg(1)] });
+    await second;
+    f.calls[0].resolve({ messages: [] }); // the older request answers last: ignored
+    await first;
+    assert.deepEqual(texts('a'), ['m1', 'm2']);
+  } finally { f.restore(); }
+});
+
+test('a session removed during the load does not get its transcript back', async () => {
+  const f = fakeFetch();
+  try {
+    apply('session', sess('a'));
+    const p = loadTranscript('a');
+    apply('removed', { id: 'a' });
+    f.calls[0].resolve({ messages: [msg(1)] });
+    await p;
+    assert.equal('a' in getState().transcripts, false);
+  } finally { f.restore(); }
 });
