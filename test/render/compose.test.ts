@@ -256,7 +256,8 @@ function reference(): number {
 
 // Main-thread CPU clock: process.threadCpuUsage (added in Node 23.9, missing on older 22.x). process.cpuUsage also counts V8's
 // background threads (GC helpers, concurrent marking, JIT), whose work from one call spills into the next and
-// let a 3x slower compose pass (#320 review). Older Node falls back to the process-wide clock.
+// let a 3x slower compose pass (#320 review). Older Node falls back to the process-wide clock, which brings that
+// spill-over back: on early Node 22.x this test can be unstable (both false passes and false failures).
 const cpuClock: (prev?: NodeJS.CpuUsage) => NodeJS.CpuUsage =
   typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage.bind(process) : process.cpuUsage.bind(process);
 
@@ -272,8 +273,10 @@ function cpuMs(fn: () => unknown): number {
 }
 
 // The thread CPU clock ticks in about 1 ms steps and one compose + SVG takes a few ms, so each sample runs it
-// COMPOSE_REPS times and divides, to keep one tick well under the budget's margin.
+// COMPOSE_REPS times and divides, to keep one tick well under the budget's margin. The reference (about 10 ms)
+// is repeated REF_REPS times the same way: one tick on a single run was a 10-14% error in the ratio (#311).
 const COMPOSE_REPS = 4;
+const REF_REPS = 3;
 
 // Main-thread CPU-time ratio of one compose + SVG of the diagram below to the reference (Node 24, 32 cores):
 // 0.34-0.43 idle and with 48 busy loops; a 2x slower compose 0.62-0.84, a 3x slower one 0.87-1.13.
@@ -306,7 +309,9 @@ test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference 
     let comp = Infinity;
     let ref = Infinity;
     for (let i = 0; i < 9; i++) {
-      ref = Math.min(ref, cpuMs(reference));
+      ref = Math.min(ref, cpuMs(() => {
+        for (let k = 0; k < REF_REPS; k++) reference();
+      }) / REF_REPS);
       comp = Math.min(comp, cpuMs(() => {
         for (let k = 0; k < COMPOSE_REPS; k++) compose();
       }) / COMPOSE_REPS);
