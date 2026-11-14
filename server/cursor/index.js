@@ -3,7 +3,8 @@
 // disk, and the position comes only from the agent's own edits (no mouse data).
 //
 // Attribution: a session's recent tool calls (masked, clipped input text from the Dispatch hub) that mention the
-// changed file's path. Read-only tools do not count. The newest such mention within ATTRIBUTE_MS wins.
+// changed file's path, within ATTRIBUTE_MS. Read-only tools do not count, nor do calls that failed or finished more
+// than SETTLE_MS before the change (a jq or curl GET that left no edit). Several sessions left: see `pick`.
 import { AGENT_COLORS } from '../dispatch/colors.js';
 import { changedCentre, changedKeys, mentionsFile, shapesOf } from './model.js';
 
@@ -11,15 +12,25 @@ const ATTRIBUTE_MS = 60_000;
 const RECENT_PER_SESSION = 20;
 const MAX_FILES = 50;
 const END_GRACE_MS = 2000;
+const SETTLE_MS = 3000; // a finished call's own edit reaches onChange well within this (watcher debounce: 60ms)
 const LIVE = new Set(['running', 'starting', 'waiting']);
 const DPX_RE = /[^\s"'`=?&<>|;(),]*\.dpx\.json/g;
 const EMPTY = new Map();
+
+// Whether `text` names `id` as a whole token, so a short id ("a") does not match inside other words.
+const namesId = (text, id) => {
+  if (!id) return false;
+  for (let i = text.indexOf(id); i !== -1; i = text.indexOf(id, i + 1)) {
+    if (!/[\w-]/.test(text[i - 1] ?? '') && !/[\w-]/.test(text[i + id.length] ?? '')) return true;
+  }
+  return false;
+};
 
 export async function setup(ctx) {
   const ws = ctx.modules.workspace;
   const hub = ctx.modules.dispatch?.hub;
   if (!ws?.store || !ws.onChange || !hub) return {};
-  const recent = new Map(); // session id -> [{ entry, at }]
+  const recent = new Map(); // session id -> [{ entry, at, done, failed }]
   // Two kinds of "before" per file, kept apart so a slow tool-time read can never overwrite what a change reported:
   // `seen` is the version from the file's last reported change (watcher or API), the exact version the next change
   // starts from; `pre` is read when a tool call mentions a file with no reported change yet.
@@ -62,24 +73,37 @@ export async function setup(ctx) {
   }
 
   const onMessage = ({ id, entry }) => {
+    if (entry?.kind === 'tool_result') {
+      // Results come in call order: this one finishes the session's oldest call still running.
+      const call = recent.get(id)?.find((c) => c.done === null);
+      if (call) {
+        call.done = Date.now();
+        call.failed = !!entry.error;
+      }
+      return;
+    }
     if (entry?.kind !== 'tool' || typeof entry.text !== 'string') return;
     const list = recent.get(id) ?? [];
-    list.push({ entry, at: Date.now() });
+    // Codex reports a file edit only once it is made, with no result to follow.
+    const now = Date.now();
+    list.push({ entry, at: now, done: entry.name === 'edit' ? now : null, failed: false });
     if (list.length > RECENT_PER_SESSION) list.shift();
     recent.set(id, list);
     if (entry.text.includes('.dpx.json')) baseline(entry.text).catch(() => {});
   };
 
-  // Every live session with a recent edit-tool mention of `rel` (its newest one). Several sessions can edit one
-  // file at once (two agents, two blocks of one diagram): choosing among them waits for the diff, see `pick`.
+  // Every live session with a recent edit-tool mention of `rel` that could have made this change (its newest one):
+  // still running, or finished within SETTLE_MS, and not failed. Several sessions can edit one file at once (two
+  // agents, two blocks of one diagram): choosing among them waits for the diff, see `pick`.
   function whoEdited(rel, now) {
     const out = [];
     for (const [id, list] of recent) {
       const s = hub.get(id);
       if (!s) continue;
       for (let i = list.length - 1; i >= 0; i--) {
-        const { entry, at } = list[i];
+        const { entry, at, done, failed } = list[i];
         if (now - at > ATTRIBUTE_MS) break;
+        if (failed || (done !== null && now - done > SETTLE_MS)) continue;
         if (mentionsFile(entry, rel)) { out.push({ s, entry, at }); break; }
       }
     }
@@ -87,13 +111,17 @@ export async function setup(ctx) {
   }
 
   const used = new WeakSet(); // tool entries already credited with a change
-  // One change, several candidate sessions: the one whose tool call names a changed block or element wins; else the
-  // oldest call that has not been credited yet (each agent's call precedes its own change); else the newest.
+  // One change, several candidate sessions: the one whose tool call names a changed block or element and no
+  // unchanged one wins (a whole-file Write or curl PUT body names every id, so it tells nothing); else the oldest
+  // call that has not been credited yet (each agent's call precedes its own change); else the newest.
   function pick(cands, before, after) {
     if (cands.length < 2) return cands[0] ?? null;
-    const ids = changedKeys(before, after).map((k) => k.slice(k.indexOf(':') + 1));
+    const changed = new Set(changedKeys(before, after));
+    const idOf = (k) => k.slice(k.indexOf(':') + 1);
+    const hit = [...changed].map(idOf).filter(Boolean);
+    const miss = [...new Set([...before.keys(), ...after.keys()])].filter((k) => !changed.has(k)).map(idOf).filter(Boolean);
     const newest = (l) => l.reduce((a, c) => (c.at > a.at ? c : a));
-    const named = cands.filter((c) => ids.some((id) => id && c.entry.text.includes(id)));
+    const named = cands.filter((c) => hit.some((id) => namesId(c.entry.text, id)) && !miss.some((id) => namesId(c.entry.text, id)));
     if (named.length) return newest(named);
     const fresh = cands.filter((c) => !used.has(c.entry));
     if (fresh.length) return fresh.reduce((a, c) => (c.at < a.at ? c : a));
