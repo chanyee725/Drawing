@@ -112,6 +112,81 @@ export function refetchDelay(c: RefetchClock, now: number): number {
   return Math.max(0, Math.min(REFETCH_DELAY_MS, since + REFETCH_MAX_WAIT_MS - now));
 }
 
+/** Timers the refetcher uses; the page passes nothing (the real ones), tests pass a fake clock. */
+export type RefetchTimers = {
+  now: () => number;
+  setTimeout: (fn: () => void, ms: number) => unknown;
+  clearTimeout: (handle: unknown) => void;
+};
+
+export type UsageRefetcher = {
+  /** Something moved: the cost/token key, or a session event while the first load has failed. Arms the next request
+   *  with refetchDelay; while a request is out it only marks a change, picked up when that request settles. */
+  change(): void;
+  /** The reload button: go at once. Ignored (returns false) while a request is out. */
+  reload(): boolean;
+  /** Mount: results are applied again. Unmount: the timer is cleared and results are dropped. */
+  start(): void;
+  stop(): void;
+  /** For tests: the scheduling state. */
+  readonly clock: Readonly<RefetchClock>;
+};
+
+/**
+ * Schedules GET /api/usage for the usage page. One request at a time: a change while a request is out does not
+ * cancel or drop it (its answer, success or failure, is always applied and clears `loading`); the change re-arms
+ * the timer once the request settles, so requests stay spaced out by refetchDelay.
+ */
+export function createUsageRefetcher<T>(
+  fetch: () => Promise<T>,
+  on: { result: (value: T) => void; error: (message: string) => void; loading: (on: boolean) => void },
+  timers: RefetchTimers = { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: h => clearTimeout(h as ReturnType<typeof setTimeout>) },
+): UsageRefetcher {
+  const c: RefetchClock = { loaded: false, pendingSince: null, lastTry: null };
+  let timer: unknown = null;
+  let inFlight = false;
+  let changedInFlight = false;
+  let live = true;
+  const disarm = () => { if (timer != null) timers.clearTimeout(timer); timer = null; };
+  const arm = () => {
+    disarm();
+    if (!live) return;
+    timer = timers.setTimeout(send, refetchDelay(c, timers.now()));
+  };
+  const send = () => {
+    timer = null;
+    c.pendingSince = null;
+    c.lastTry = timers.now();
+    inFlight = true;
+    on.loading(true);
+    fetch().then(
+      v => { c.loaded = true; if (live) on.result(v); },
+      (e: Error) => { if (live) on.error(e?.message ?? String(e)); },
+    ).finally(() => {
+      inFlight = false;
+      if (live) on.loading(false);
+      if (changedInFlight) { changedInFlight = false; r.change(); }
+    });
+  };
+  const r: UsageRefetcher = {
+    change() {
+      if (inFlight) { changedInFlight = true; return; }
+      if (c.loaded) c.pendingSince ??= timers.now();
+      arm();
+    },
+    reload() {
+      if (inFlight) return false;
+      c.lastTry = null;
+      arm();
+      return true;
+    },
+    start() { live = true; },
+    stop() { live = false; disarm(); },
+    get clock() { return c; },
+  };
+  return r;
+}
+
 /** Changes when any session's cost or token totals move (Codex and agy report tokens but no cost). */
 export function usageKey(sessions: readonly Pick<Session, 'cost' | 'usage'>[]): string {
   let cost = 0;
