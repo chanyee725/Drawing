@@ -250,6 +250,8 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     const step = stepOf(run, stepId);
     if (!STEP_STATES_WITHOUT_SESSIONS.includes(state)) throw new StoreError(400, 'invalid step state');
     if (step.sessions.length > 0) throw new StoreError(409, 'step has sessions; its state follows them');
+    // A step carried over from an earlier run is done for good (stepStateOf), also once a session attaches later.
+    if (step.carried) throw new StoreError(409, 'step finished in an earlier run; it stays done');
     if (step.state === state) return;
     const t = now();
     step.state = state;

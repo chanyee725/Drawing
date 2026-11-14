@@ -258,6 +258,17 @@ test('stepRows: steps carried over from a stopped run show as done', () => {
   assert.deepEqual([plan.view, plan.label, plan.time], ['done', '완료', '12분']);
 });
 
+test('stepRows: a carried step an old record marked skipped still shows as done, like the server (E205)', () => {
+  const r = record({
+    steps: {
+      ...record().steps,
+      plan: { state: 'skipped', startedAt: T0 - 60 * MIN, endedAt: T0 - 48 * MIN, sessions: [{ sid: 's0', name: 'Mira', state: 'working' }], carried: '0000000000000-aaaaaa' },
+    },
+  });
+  const plan = stepRows(r, new Map(), T0 + 20 * MIN).find((x) => x.id === 'plan')!;
+  assert.deepEqual([plan.view, plan.label, plan.skipped], ['done', '완료', false]);
+});
+
 test('applyRunEvent: the run summary carries the pause', () => {
   const r = record();
   const pause = { by: 'limit' as const, at: T0, resetAt: T0 + MIN };
