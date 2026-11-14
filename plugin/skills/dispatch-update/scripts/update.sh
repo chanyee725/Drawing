@@ -8,12 +8,15 @@
 # Only the given project (default: the git project of the current folder) is restarted, found by
 # <project>/.dispatch/server.pid and server.port. Other projects: run restart.sh in each of them.
 #
+# DRAWING_INSTALL_BASE overrides ~/.dispatch/drawing.
 # Uses gh (already logged in) for the download. Unpacks into ~/.dispatch/drawing/<ver>/ and points
 # ~/.dispatch/drawing/current at it. Older versions are kept; delete them by hand when you like.
 set -euo pipefail
 
 repo="chanyee725/Drawing"
-base="${DRAWING_HOME:-$HOME/.dispatch/drawing}"
+# DRAWING_INSTALL_BASE = where releases are unpacked. (DRAWING_HOME, read by start.sh, is a Drawing
+# checkout; it is set below for the restart only.)
+base="${DRAWING_INSTALL_BASE:-$HOME/.dispatch/drawing}"
 tag=""
 restart=true
 project_arg=""
@@ -29,6 +32,24 @@ done
 
 command -v gh >/dev/null || { echo "gh is not installed (https://cli.github.com)" >&2; exit 1; }
 command -v node >/dev/null || { echo "node is not installed" >&2; exit 1; }
+
+# Succeeds only when pid $1 is node running a Drawing server/index.js in project mode on workspace $2
+# (what start.sh launches). Reads /proc/<pid>/cmdline, falls back to `ps -o command=`; nothing is eval'd.
+is_our_server() {
+  local pid=$1 workspace=$2 cmd first
+  [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 0 ] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [ -r "/proc/$pid/cmdline" ]; then
+    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+  else
+    cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
+  fi
+  cmd=${cmd%"${cmd##*[![:space:]]}"}
+  [ -n "$cmd" ] || return 1
+  first=${cmd%% *}
+  case "${first##*/}" in node|nodejs) ;; *) return 1 ;; esac
+  [[ "$cmd" == *"/server/index.js --project-mode $workspace" ]]
+}
 
 step() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 ok() { printf '  ✓ %s\n' "$1"; }
@@ -84,11 +105,11 @@ if $restart; then
   pid=""; port=""
   [ ! -f "$pid_file" ] || pid="$(cat "$pid_file")"
   [ ! -f "$port_file" ] || port="$(cat "$port_file")"
-  if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+  if is_our_server "$pid" "$project/pipelines"; then
     if [[ "$port" =~ ^[0-9]+$ ]]; then
-      DISPATCH_PORT="$port" DRAW_PORT="$port" "$base/current/plugin/skills/dispatch/scripts/restart.sh" "$project" | sed 's/^/    /'
+      DRAWING_HOME="$base/$ver" DISPATCH_PORT="$port" DRAW_PORT="$port" "$base/current/plugin/skills/dispatch/scripts/restart.sh" "$project" | sed 's/^/    /'
     else
-      "$base/current/plugin/skills/dispatch/scripts/restart.sh" "$project" | sed 's/^/    /'
+      DRAWING_HOME="$base/$ver" "$base/current/plugin/skills/dispatch/scripts/restart.sh" "$project" | sed 's/^/    /'
     fi
     ok "restarted the server of $project; cut-off turns resume on their own"
   else
