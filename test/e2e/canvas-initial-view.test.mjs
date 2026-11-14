@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url';
 
 const ON = process.env.DRAW_E2E === '1' && process.env.CHROME && process.env.PLAYWRIGHT_CORE;
 const SKIP = !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run';
+const SHOTS = process.env.DRAW_SHOTS;
 const freePort = () =>
   new Promise((ok, fail) => {
     const s = createServer();
@@ -89,6 +90,7 @@ test('an empty file an agent fills fits the new blocks; a view the user moved to
   write([rect('a', 3000, 0), rect('b', 6000, 0)]);
   const fitted = await zoomAfterEdit((z) => z < 100);
   assert.ok(fitted <= 40, `the new blocks were fitted, zoom ${fitted}%`);
+  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'initial-view-filled.png') });
 
   // The user zooms in; another outside edit keeps their view.
   await page.locator('.zoom-in-button').first().click();
@@ -99,5 +101,6 @@ test('an empty file an agent fills fits the new blocks; a view the user moved to
   write([rect('a', 3000, 0), rect('b', 6000, 0), rect('c', 20000, 0)]);
   await page.waitForTimeout(2500);
   assert.equal(await zoom(), mine, 'the view the user moved to is kept');
+  if (SHOTS) await page.screenshot({ path: join(SHOTS, 'initial-view-kept.png') });
   assert.deepEqual(errors, []);
 });
