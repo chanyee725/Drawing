@@ -357,9 +357,9 @@ test('restart.sh aborts without starting when our server ignores SIGTERM', async
     await new Promise((r) => setTimeout(r, 300));
     writeFileSync(join(project, '.dispatch', 'server.pid'), String(ours.pid));
     const out = join(dir, 'out');
-    const r = spawnSync('bash', [restart, project], { env: { ...process.env, OUT: out }, encoding: 'utf8' });
+    const r = spawnSync('bash', [restart, project], { env: { ...process.env, OUT: out, DRAW_RESTART_WAIT_TENTHS: '20' }, encoding: 'utf8' });
     assert.equal(r.status, 1);
-    assert.match(r.stderr, /did not exit after about 10s/);
+    assert.match(r.stderr, /did not exit within the wait/);
     assert.ok(!existsSync(out), 'start.sh not called');
   } finally {
     ours.kill('SIGKILL');

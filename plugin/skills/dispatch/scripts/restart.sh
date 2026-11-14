@@ -22,8 +22,10 @@ old=""
 # Wait (about 10s; each poll also costs a ps call) for the old server to exit so start.sh never finds it still answering.
 if [ -n "$old" ]; then
   # A zombie (exited, not yet reaped by its parent) counts as gone.
-  running() { kill -0 "$old" 2>/dev/null && [[ "$(ps -o stat= -p "$old" 2>/dev/null || true)" != Z* ]]; }
-  for _ in $(seq 1 100); do running || break; sleep 0.1; done
-  if running; then echo "old server (pid $old) did not exit after about 10s; not starting a new one" >&2; exit 1; fi
+  # A pid recycled by an unrelated process during the wait also counts as gone.
+  running() { kill -0 "$old" 2>/dev/null && [[ "$(ps -o stat= -p "$old" 2>/dev/null || true)" != Z* ]] && is_our_server "$old" "$proj/pipelines"; }
+  # DRAW_RESTART_WAIT_TENTHS (default 100 = about 10s) only exists so tests can shorten the wait.
+  for _ in $(seq 1 "${DRAW_RESTART_WAIT_TENTHS:-100}"); do running || break; sleep 0.1; done
+  if running; then echo "old server (pid $old) did not exit within the wait (about 10s by default); not starting a new one" >&2; exit 1; fi
 fi
 "$start" "${1:-$PWD}"
