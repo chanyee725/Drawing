@@ -124,6 +124,9 @@ function solveLsq(cols: number[][], b: number[]): number[] | null {
 
 const hex2 = (x: number) => Math.round(clamp01(x) * 255).toString(16).padStart(2, '0');
 
+/** What the dark canvas shows where nothing is drawn: the filter over Excalidraw's white background (#121212). */
+export const DARK_CANVAS_BACKGROUND = `#${applyDarkFilter([1, 1, 1]).map(hex2).join('')}`;
+
 /**
  * `color` (`#rgb`, `#rrggbb`, `rgb(...)` or `rgba(...)`) rewritten so the dark filter shows it as given.
  * Alpha is kept: the filter is affine per pixel, so a translucent fill over a pre-filtered background blends right.
