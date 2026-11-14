@@ -117,11 +117,11 @@ export function UsagePage() {
   const [loading, setLoading] = useState(false);
 
   // Refetch only when the sessions' cost or token totals move (a finished turn adds to today), not on every session
-  // event; the refetcher spaces the requests out, also while a failed first load keeps retrying, and never drops a
-  // request that is already out.
+  // event; the refetcher spaces the requests out, also while a failed first load keeps retrying, never drops a
+  // request that is already out, and gives up on one that does not answer within REFETCH_TIMEOUT_MS.
   const key = usageKey(sessions);
   const [refetcher] = useState(() => createUsageRefetcher(
-    () => api<{ days: UsageDay[] }>('GET', '/api/usage').then(r => r.days),
+    signal => api<{ days: UsageDay[] }>('GET', '/api/usage', undefined, signal).then(r => r.days),
     { result: d => { setDays(d); setError(null); }, error: setError, loading: setLoading },
   ));
   useEffect(() => { refetcher.start(); return () => refetcher.stop(); }, [refetcher]);

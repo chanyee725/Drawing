@@ -31,9 +31,10 @@ export const getState = () => state;
 export const resetState = () => { state = initial(); gone.clear(); pending = null; };
 
 /** JSON request to the Dispatch API. Writes carry x-drawing: 1 (server/app.js rejects them otherwise). */
-export async function api<T = unknown>(method: string, url: string, body?: unknown): Promise<T> {
+export async function api<T = unknown>(method: string, url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method,
+    signal,
     headers: { 'content-type': 'application/json', ...(method === 'GET' ? {} : { 'x-drawing': '1' }) },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
