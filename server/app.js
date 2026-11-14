@@ -1,6 +1,7 @@
 // HTTP app: API routes from feature modules, SSE hub, static files from public/.
 import { createServer } from 'node:http';
-import { basename } from 'node:path';
+import { stat } from 'node:fs/promises';
+import { basename, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHub } from './events.js';
 import { serveStatic } from './static.js';
@@ -33,10 +34,26 @@ const PROJECT_MODE_BLOCKED = [
   ['POST', /^\/api\/workspace\/pr-tracking$/],
 ];
 
-/** True for a path the SPA entry answers (index.html fallback): not /dispatch, not /api, not an asset. */
-export function isEditorEntry(pathname) {
+/**
+ * True for a path the SPA entry answers (index.html fallback): not /dispatch, not /api, and not a real asset.
+ * A real asset is an existing file in publicDir (other than index.html) or anything under /assets/; a dotted
+ * path such as /notes.v2 is just an editor route.
+ */
+export async function isEditorEntry(pathname, publicDir = PUBLIC_DIR) {
   if (/^\/(dispatch|api)(\/|$)/.test(pathname)) return false;
-  return pathname === '/index.html' || !/\.[A-Za-z0-9]+$/.test(pathname.split('/').pop());
+  if (pathname === '/index.html') return true;
+  if (pathname.startsWith('/assets/')) return false;
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname).replace(/^\/+/, '');
+  } catch {
+    return true;
+  }
+  const root = publicDir.endsWith(sep) ? publicDir : publicDir + sep;
+  const file = join(publicDir, rel);
+  if (!file.startsWith(root)) return true;
+  const st = await stat(file).catch(() => null);
+  return !(st && st.isFile());
 }
 
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
@@ -88,7 +105,7 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
         }
         return sendJson(res, 404, { error: 'not found' });
       }
-      if (ctx.projectMode && (req.method === 'GET' || req.method === 'HEAD') && isEditorEntry(url.pathname)) {
+      if (ctx.projectMode && (req.method === 'GET' || req.method === 'HEAD') && (await isEditorEntry(url.pathname, publicDir))) {
         res.writeHead(302, { location: '/dispatch', 'cache-control': 'no-store' });
         return res.end();
       }

@@ -390,22 +390,27 @@ test('start.sh writes server.pid only after the server is ready; a failed start 
 test('project mode: editor URLs 302 to /dispatch, assets and /dispatch are served; drawing mode serves the editor', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'drawing-e30-redir-'));
   writeFileSync(join(dir, 'index.html'), '<p>spa</p>');
+  writeFileSync(join(dir, 'app.v2.js'), 'x');
   try {
     for (const projectMode of [true, false]) {
       const app = await createApp({ workspaceDir: dir, projectMode }, { moduleList: [], publicDir: dir + '/' });
       await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
       const base = `http://127.0.0.1:${app.server.address().port}`;
       try {
-        for (const p of ['/', '/index.html', '/some/editor/route']) {
-          const r = await fetch(base + p, { redirect: 'manual' });
-          if (projectMode) {
-            assert.equal(r.status, 302, p);
-            assert.equal(r.headers.get('location'), '/dispatch');
-          } else assert.equal(r.status, 200, p);
+        // Dotted editor routes (/notes.v2) are not assets (#396); HEAD redirects like GET (#397).
+        for (const method of ['GET', 'HEAD']) {
+          for (const p of ['/', '/index.html', '/some/editor/route', '/notes.v2', '/a/b.c.d']) {
+            const r = await fetch(base + p, { method, redirect: 'manual' });
+            if (projectMode) {
+              assert.equal(r.status, 302, `${method} ${p}`);
+              assert.equal(r.headers.get('location'), '/dispatch');
+            } else assert.equal(r.status, 200, `${method} ${p}`);
+          }
         }
+        assert.equal((await fetch(base + '/app.v2.js', { redirect: 'manual' })).status, 200); // real file
         for (const p of ['/dispatch', '/dispatch/usage']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 200, p);
         assert.equal((await fetch(base + '/api/info')).status, 200);
-        assert.notEqual((await fetch(base + '/missing.js', { redirect: 'manual' })).status, 302);
+        assert.notEqual((await fetch(base + '/assets/missing.js', { redirect: 'manual' })).status, 302);
       } finally {
         await app.close();
       }
@@ -435,7 +440,11 @@ test('project mode: editor document writes answer 403; pipeline and plan routes 
           assert.equal(await call(m, p), projectMode ? 403 : 200, `${m} ${p}`);
         assert.equal(await call('POST', '/api/pipeline/start'), 200);
         assert.equal(await call('PATCH', '/api/file/plan'), 200);
-        assert.equal(await call('POST', '/api/move', {}), 403); // header rule still applies
+        // Header rule still applies, and it fires before the project-mode block: compare bodies (#397).
+        const body = async (path, headers) => (await fetch(base + path, { method: 'POST', headers })).json();
+        assert.equal(await call('POST', '/api/move', {}), 403);
+        assert.deepEqual(await body('/api/move', {}), { error: 'forbidden' });
+        assert.deepEqual(await body('/api/move', { 'x-drawing': '1' }), projectMode ? { error: 'project mode: documents are read-only here' } : {});
       } finally {
         await app.close();
       }
