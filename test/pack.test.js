@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { packBundle } from '../scripts/pack.mjs';
 
-function fakeRoot({ version = '1.2.3', withPublic = true } = {}) {
+function fakeRoot({ version = '1.2.3', withPublic = true, withStart = true } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'pack-src-'));
   const put = (rel, text = 'x') => {
     mkdirSync(join(root, rel, '..'), { recursive: true });
-    writeFileSync(join(root, rel), text);
+    writeFileSync(join(root, rel), text, { mode: rel.endsWith('.sh') ? 0o755 : 0o644 });
   };
   put('package.json', JSON.stringify({ name: 'drawing', version, type: 'module', engines: { node: '>=22' }, devDependencies: { vite: '1' } }));
   put('NOTICE.md');
@@ -20,6 +20,10 @@ function fakeRoot({ version = '1.2.3', withPublic = true } = {}) {
   put('plugin/.claude-plugin/plugin.json', JSON.stringify({ name: 'dispatch', version: '0.0.0' }));
   put('plugin/hooks/hooks.json', '{}');
   put('plugin/skills/dispatch/SKILL.md');
+  for (const f of ['restart.sh', 'stop.sh']) {
+    put(`plugin/skills/dispatch/scripts/${f}`, readFileSync(new URL(`../plugin/skills/dispatch/scripts/${f}`, import.meta.url), 'utf8'));
+  }
+  if (withStart) put('plugin/scripts/start.sh', '#!/bin/sh\necho "$DRAW_PORT $DISPATCH_PORT $1" > "$HOME/started"\n');
   put('plugin/.env', 'SECRET=1');
   put('test/a.test.js');
   put('web/src/main.tsx');
@@ -126,5 +130,95 @@ cp "${bundle}" "$dir/"
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(work, { recursive: true, force: true });
+  }
+});
+
+// --- update.sh restart behaviour (temp HOME, fake gh, fake start.sh; no real server) ---
+
+function updateEnv({ version = '3.1.4', withStart = true } = {}) {
+  const root = fakeRoot({ version, withStart });
+  const work = mkdtempSync(join(tmpdir(), 'upd-'));
+  const bundle = packBundle({ root, out: join(work, 'rel') });
+  const bin = join(work, 'bin');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+if [ "$2" = view ]; then echo v${version}; exit 0; fi
+while [ $# -gt 0 ]; do [ "$1" = --dir ] && dir="$2"; shift; done
+cp "${bundle}" "$dir/"
+`, { mode: 0o755 });
+  const home = join(work, 'home');
+  mkdirSync(home);
+  const project = join(work, 'proj');
+  mkdirSync(join(project, '.dispatch'), { recursive: true });
+  execFileSync('git', ['init', '-q', project]);
+  const script = new URL('../plugin/skills/dispatch-update/scripts/update.sh', import.meta.url).pathname;
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_HOME: join(home, 'd') };
+  const run = (args = []) => execFileSync('bash', [script, ...args], { encoding: 'utf8', env, cwd: project, stdio: ['ignore', 'pipe', 'pipe'] });
+  const cleanup = () => { rmSync(root, { recursive: true, force: true }); rmSync(work, { recursive: true, force: true }); };
+  return { work, home, project, env, run, cleanup };
+}
+
+test('dispatch-update: restarts only this project server, with the port passed as DRAW_PORT and DISPATCH_PORT', () => {
+  const t = updateEnv();
+  const child = spawn('sleep', ['60'], { stdio: 'ignore' });
+  try {
+    writeFileSync(join(t.project, '.dispatch/server.pid'), String(child.pid));
+    writeFileSync(join(t.project, '.dispatch/server.port'), '4411');
+    // A leftover standalone-Dispatch registry entry must be ignored.
+    mkdirSync(join(t.home, '.dispatch/servers'), { recursive: true });
+    const other = join(t.work, 'other');
+    mkdirSync(other);
+    writeFileSync(join(t.home, '.dispatch/servers/4330.json'), JSON.stringify({ pid: process.pid, port: 4330, path: other }));
+    const out = t.run();
+    assert.match(out, /restarted the server of/);
+    assert.match(out, /run restart\.sh in each of them/);
+    const started = readFileSync(join(t.home, 'started'), 'utf8').trim();
+    assert.match(started, /^4411 4411 .*proj$/);
+    assert.ok(!existsSync(join(other, '.dispatch')), 'registry project untouched');
+  } finally {
+    child.kill();
+    t.cleanup();
+  }
+});
+
+test('dispatch-update: no running server means no restart; a bad port value is never executed', () => {
+  const t = updateEnv();
+  try {
+    writeFileSync(join(t.project, '.dispatch/server.pid'), '999999');
+    writeFileSync(join(t.project, '.dispatch/server.port'), `1; touch ${join(t.work, 'pwned')}`);
+    assert.match(t.run(), /no running server/);
+    assert.ok(!existsSync(join(t.home, 'started')));
+    assert.ok(!existsSync(join(t.work, 'pwned')));
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('dispatch-update: a bundle without plugin/scripts/start.sh stops before current is switched', () => {
+  const t = updateEnv({ withStart: false });
+  try {
+    assert.throws(() => t.run(), /start\.sh/);
+    assert.ok(!existsSync(join(t.home, 'd/current')));
+    assert.ok(!existsSync(join(t.home, 'd/drawing-3.1.4')));
+    t.run(['--no-restart']);
+    assert.ok(existsSync(join(t.home, 'd/current/server/index.js')));
+  } finally {
+    t.cleanup();
+  }
+});
+
+test('dispatch-update: re-downloading the same version replaces it without leftovers', () => {
+  const t = updateEnv();
+  try {
+    t.run();
+    const dir = join(t.home, 'd/drawing-3.1.4');
+    writeFileSync(join(dir, 'stale.txt'), 'old');
+    t.run();
+    assert.ok(!existsSync(join(dir, 'stale.txt')));
+    assert.ok(existsSync(join(t.home, 'd/current/server/index.js')));
+    const left = execFileSync('ls', ['-A', join(t.home, 'd')], { encoding: 'utf8' }).split('\n').filter(Boolean).sort();
+    assert.deepEqual(left, ['current', 'drawing-3.1.4']);
+  } finally {
+    t.cleanup();
   }
 });
