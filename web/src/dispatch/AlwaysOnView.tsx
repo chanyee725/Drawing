@@ -1,6 +1,6 @@
 // 상시 화면 (E29): a wall-display view of /dispatch#tv. Dark, big state tiles and the 확인 필요 strip only; no
 // auto-scroll and no motion. Esc or the close button goes back to the board; a tile opens its session sheet.
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { X } from 'lucide-react';
 import { roleColor } from '../run/overlayModel';
 import { AttentionStrip } from './AttentionStrip';
@@ -13,14 +13,15 @@ export function AlwaysOnView({ onExit, onOpen }: { onExit: () => void; onOpen: (
   const sessions = useDispatch(s => s.sessions);
   const project = useDispatch(s => s.project);
 
-  // Dark while mounted, then the user's theme comes back.
-  useEffect(() => {
+  // Dark while mounted, then the user's theme comes back. Layout effects, so the theme and the Esc key are in place
+  // before the first paint: no light flash, and an Esc pressed as soon as the tiles show is never lost.
+  useLayoutEffect(() => {
     const root = document.documentElement;
     const before = root.dataset.theme;
     root.dataset.theme = 'dark';
     return () => { if (before) root.dataset.theme = before; else delete root.dataset.theme; };
   }, []);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) onExit(); };
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
