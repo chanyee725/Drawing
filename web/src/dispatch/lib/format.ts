@@ -47,6 +47,8 @@ export const TONE_TEXT: Record<Tone | 'none', string> = {
 export const TONE_BG: Record<Tone | 'none', string> = {
   ok: 'bg-ok', warn: 'bg-warn', bad: 'bg-destructive', idle: 'bg-muted-foreground', none: 'bg-muted-foreground',
 };
+/** CSS colour per tone, for drawn marks (timeline bars) rather than text. */
+export const TONE_COLOR: Record<Tone, string> = { ok: 'var(--ok)', warn: 'var(--warn)', bad: 'var(--bad)', idle: 'var(--idle)' };
 export const levelTone = (l: Level): Tone | 'none' => (l === 'none' ? 'none' : l);
 
 const FROM_STATUS: Record<Status, SessionState> = {
