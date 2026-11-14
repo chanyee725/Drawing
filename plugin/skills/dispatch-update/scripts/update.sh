@@ -17,6 +17,13 @@ repo="chanyee725/Drawing"
 # DRAWING_INSTALL_BASE = where releases are unpacked. (DRAWING_HOME, read by start.sh, is a Drawing
 # checkout; it is set below for the restart only.)
 base="${DRAWING_INSTALL_BASE:-$HOME/.dispatch/drawing}"
+# Older versions used DRAWING_HOME as the install dir. When it still holds one (a `current` link) and
+# nothing says otherwise, tell the user where the new version goes (Korean message, on stderr).
+if [ -z "${DRAWING_INSTALL_BASE:-}" ] && [ -n "${DRAWING_HOME:-}" ] && [ -L "$DRAWING_HOME/current" ] \
+   && [ "$DRAWING_HOME" != "$base" ]; then
+  echo "알림: DRAWING_HOME($DRAWING_HOME)에 설치돼 있어요. 새 버전은 $base 에 풀려요." >&2
+  echo "      계속 그 폴더를 쓰려면 DRAWING_INSTALL_BASE=$DRAWING_HOME 으로 실행하세요." >&2
+fi
 tag=""
 restart=true
 project_arg=""
