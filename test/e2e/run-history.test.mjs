@@ -112,6 +112,9 @@ test('version labels, past runs and 복제해서 새 계획', { skip: !ON && 'se
   await item.waitFor();
   assert.match(await item.innerText(), /계획 초안\s*승인\s*완료/);
   if (process.env.DRAW_E2E_SHOT) await page.screenshot({ path: `${process.env.DRAW_E2E_SHOT}-history.png` });
+  // The 더 보기 menu stays mounted while its exit animation runs, and Radix hands Escape to that closing layer
+  // instead of the dialog. Wait for it to go before pressing Escape (#330).
+  await page.getByRole('menu', { includeHidden: true }).waitFor({ state: 'detached' });
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'hidden' });
 
