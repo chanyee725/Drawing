@@ -1,4 +1,4 @@
-import { test, after } from "node:test";
+import { test, after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readdirSync, symlinkSync, mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ function fakeGh(scenario, extra = {}) {
   writeFileSync(sc, JSON.stringify(scenario));
   const log = path.join(bin, "calls.jsonl");
   const env = { PATH: bin, FAKE_GH_SCENARIO: sc, FAKE_CLI_LOG: log, ...extra };
-  const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).length : 0);
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").slice(0, -1).filter(Boolean).length : 0);
   return { bin, ws, env, calls };
 }
 
@@ -117,12 +117,28 @@ test("setPrTracking keeps the other keys", async () => {
 });
 
 test("gh starts at most once per minGapMs even when calls overlap", async () => {
-  const starts = [];
-  const run = async (_bin, args) => { starts.push({ at: Date.now(), branch: args.at(-1) }); return { stdout: JSON.stringify(OK) }; };
-  const get = createPrStatus({ cwd: tmp(), run, minGapMs: 80 });
-  await Promise.all(["b/1", "b/2", "b/3"].map(b => get(b)));
-  assert.equal(starts.length, 3);
-  for (let i = 1; i < starts.length; i++) assert.ok(starts[i].at - starts[i - 1].at >= 70, `gap ${i}: ${starts[i].at - starts[i - 1].at}ms`);
+  // Fake clock and timers: the gaps are exact, so load on the machine cannot shrink them.
+  mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1000 });
+  try {
+    const starts = [];
+    const run = async (_bin, args) => { starts.push({ at: Date.now(), branch: args.at(-1) }); return { stdout: JSON.stringify(OK) }; };
+    const get = createPrStatus({ cwd: tmp(), run, minGapMs: 80 });
+    const flush = () => new Promise(r => setImmediate(r));
+    const all = Promise.all(["b/1", "b/2", "b/3"].map(b => get(b)));
+    await flush();
+    assert.deepEqual(starts, [{ at: 1000, branch: "b/1" }]);
+    mock.timers.tick(79); await flush();
+    assert.equal(starts.length, 1, "second start waits the full gap");
+    mock.timers.tick(1); await flush();
+    assert.deepEqual(starts.at(-1), { at: 1080, branch: "b/2" });
+    mock.timers.tick(79); await flush();
+    assert.equal(starts.length, 2, "third start waits the full gap");
+    mock.timers.tick(1); await flush();
+    assert.deepEqual(starts.at(-1), { at: 1160, branch: "b/3" });
+    assert.equal((await all).every(r => r.ok), true);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("cwd is required, and gh gets the branch after --", async () => {
