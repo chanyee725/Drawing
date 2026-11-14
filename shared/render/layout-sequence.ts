@@ -229,7 +229,7 @@ export async function layoutSequence(d: SequenceDiagram): Promise<Scene> {
       heads.push({ kind: 'icon', name: d.columns[idx.get(c.id)!]!.attrs.icon!, x, y: cy - c.iconSize / 2, size: c.iconSize, paint: c.style.paint, inside: true });
       x += c.iconSize + 8;
     }
-    heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', on: c.style.paint, lineHeight: lineHeightOf(c.label.size) }));
+    heads.push(textItem(c.label.lines, c.iconSize ? x : c.x, cy - c.label.h / 2, { size: c.label.size, font: c.style.typeface, anchor: c.iconSize ? 'start' : 'middle', on: c.style.paint, onRole: 'column', lineHeight: lineHeightOf(c.label.size) }));
   };
   for (const c of cols) {
     lifelines.push({ kind: 'line', points: [{ x: c.x, y: headerH }, { x: c.x, y: bottom }], dashed: false, tone: 'muted', cut: true });

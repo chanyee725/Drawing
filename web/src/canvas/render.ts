@@ -7,7 +7,7 @@ import type { Scene } from '../../../shared/render/scene.ts';
 import { drawSig, fileIdFor, hash, type BlockLike, type OriginAnchor } from './sync.ts';
 import { svgDataURL } from './resolution.ts';
 import { sceneToSvg } from '../../../shared/render/index.ts';
-import { preDarkFilterColor } from '../../../shared/render/darkFilter.ts';
+import { DARK_CANVAS_BACKGROUND, preDarkFilterColor } from '../../../shared/render/darkFilter.ts';
 
 /**
  * How a picture is painted: `light`, `dark`, or `dark-canvas` = the dark palette pre-corrected for Excalidraw's dark
@@ -132,6 +132,7 @@ async function draw(b: BlockLike, theme: PicTheme, key: string) {
   const applied = !state.stale && !state.failed && !reset && (!b.layout || b.layout.v === BLOCK_LAYOUT_VERSION);
   const o = state.scene.origin;
   const anchor = applied && o ? { key: hash(`${theme}\n${b.type}\n${b.code}`), x: o.x, y: o.y } : undefined;
-  const svg = theme === 'dark-canvas' ? sceneToSvg(state.scene, { theme: 'dark', mapColor: preDarkFilterColor }) : state.svg;
+  // The picture is transparent on the canvas, so boxes meant to match the background take the canvas colour.
+  const svg = theme === 'dark-canvas' ? sceneToSvg(state.scene, { theme: 'dark', mapColor: preDarkFilterColor, surface: DARK_CANVAS_BACKGROUND }) : state.svg;
   return { svg, width: state.scene.width, height: state.scene.height, scene: state.scene, errors: state.errors.length, lastGood: state.stale, failed: state.failed, anchor, layoutReset: reset };
 }
