@@ -149,28 +149,49 @@ test('a handwriting text opens in the clean font with its width measured in that
   assert.deepEqual(errors, []);
 });
 
-test('a text that changed font before the clean font loads is measured once it has (#305)', SKIP, async (t) => {
-  // Excalidraw's copy of the clean font is held back until the scene is on screen, so the text must not be measured
-  // with a fallback font: it waits for the font (RefitQueue).
+/**
+ * Holds Excalidraw's copy of the clean font until `release()`, so texts must wait for it (RefitQueue). Pass `hold`
+ * as `open`'s `before`. `loaded()` tells whether the font is in; `fallbackWidth(str)` measures `str` now, with
+ * whatever font the browser falls back to; `loadedAfterRelease()` releases and waits for the font.
+ */
+function heldFont() {
   let release;
   const held = new Promise((r) => (release = r));
-  const str = 'Waits for the font';
-  const { page, saved, errors, cleanWidth, edit } = await open(t, 'wait', [text('late', 100, 100, str, 5)], (p) =>
+  const hold = (p) =>
     p.route('**/LiberationSans-Regular.woff2', async (route) => {
       await held;
       await route.continue();
-    }),
-  );
-  const loaded = () => page.evaluate(() => [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Liberation Sans' && f.status === 'loaded'));
+    });
+  const helpers = (page) => {
+    const loaded = () => page.evaluate(() => [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Liberation Sans' && f.status === 'loaded'));
+    const fallbackWidth = (str) =>
+      page.evaluate((s) => {
+        const ctx = document.createElement('canvas').getContext('2d');
+        ctx.font = '20px Liberation Sans';
+        return ctx.measureText(s).width;
+      }, str);
+    const loadedAfterRelease = async () => {
+      release();
+      for (let i = 0; i < 50 && !(await loaded()); i++) await page.waitForTimeout(100);
+      return loaded();
+    };
+    return { loaded, fallbackWidth, loadedAfterRelease };
+  };
+  return { hold, helpers };
+}
+
+// The order where the font loads while the scene is still empty (#305) is covered by the unit test only: Excalidraw
+// puts the opened scene in right after initialData resolves, before a font event can run.
+test('a text that changed font before the clean font loads is measured once it has', SKIP, async (t) => {
+  // Excalidraw's copy of the clean font is held back until the scene is on screen, so the text must not be measured
+  // with a fallback font: it waits for the font (RefitQueue).
+  const font = heldFont();
+  const str = 'Waits for the font';
+  const { page, saved, errors, cleanWidth, edit } = await open(t, 'wait', [text('late', 100, 100, str, 5)], font.hold);
+  const { loaded, fallbackWidth, loadedAfterRelease } = font.helpers(page);
   assert.equal(await loaded(), false, 'the clean font is still held back');
-  const before = await page.evaluate(() => {
-    const ctx = document.createElement('canvas').getContext('2d');
-    ctx.font = '20px Liberation Sans';
-    return ctx.measureText('Waits for the font').width;
-  });
-  release();
-  for (let i = 0; i < 50 && !(await loaded()); i++) await page.waitForTimeout(100);
-  assert.equal(await loaded(), true, 'the clean font loaded once released');
+  const before = await fallbackWidth(str);
+  assert.equal(await loadedAfterRelease(), true, 'the clean font loaded once released');
   await page.waitForTimeout(300);
   await edit();
   const late = (await saved()).get('late');
@@ -178,6 +199,30 @@ test('a text that changed font before the clean font loads is measured once it h
   const want = await cleanWidth(str);
   assert.ok(Math.abs(want - before) >= 1, `the fallback font measures differently (${before} vs ${want}), or this test proves nothing`);
   assert.ok(Math.abs(late.width - want) < 1, `width ${late.width}, measured in the clean font ${want}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a text pasted before the clean font loads is measured once it has, and saved without another edit', SKIP, async (t) => {
+  const font = heldFont();
+  const str = 'Pasted before the font';
+  const { page, saved, errors, cleanWidth } = await open(t, 'early-paste', [], font.hold);
+  const { loaded, fallbackWidth, loadedAfterRelease } = font.helpers(page);
+  await page.mouse.click(600, 400);
+  await page.evaluate((data) => {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', data);
+    document.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true }));
+  }, JSON.stringify({ type: 'excalidraw/clipboard', elements: [text('pasted', 0, 0, str, 1)], files: {} }));
+  await page.waitForTimeout(300);
+  assert.equal(await loaded(), false, 'the clean font is still held back when the text is pasted');
+  const before = await fallbackWidth(str);
+  assert.equal(await loadedAfterRelease(), true, 'the clean font loaded once released');
+  const pasted = [...(await saved()).values()].find((e) => e.type === 'text' && e.text === str);
+  assert.ok(pasted, 'the pasted text is saved');
+  assert.equal(pasted.fontFamily, 9);
+  const want = await cleanWidth(str);
+  assert.ok(Math.abs(want - before) >= 1, `the fallback font measures differently (${before} vs ${want}), or this test proves nothing`);
+  assert.ok(Math.abs(pasted.width - want) < 1, `pasted width ${pasted.width}, measured in the clean font ${want}`);
   assert.deepEqual(errors, []);
 });
 
