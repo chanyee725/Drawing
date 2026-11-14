@@ -107,6 +107,31 @@ test('outline, heading link and wikilink in a headless browser', { skip: !ON && 
   await page.waitForFunction(() => location.hash.startsWith('#file=other'));
   assert.match(await page.evaluate(() => location.hash), /^#file=other(\.dpx\.json)?$/);
 
+  // 문서 only on a wide screen: hovering the side gutter (outside the text column) reveals the 목차 button,
+  // and Esc closes the open outline and returns focus to the button.
+  const wide = await browser.newPage({ viewport: { width: 1800, height: 800 } });
+  wide.on('pageerror', (e) => errors.push(String(e)));
+  await wide.goto(`${BASE}/#file=main`);
+  await wide.waitForSelector('.doc-editor h1');
+  await wide.getByRole('button', { name: '문서', exact: true }).click();
+  const btn = wide.getByRole('button', { name: '목차' });
+  const opacity = () => btn.evaluate((el) => getComputedStyle(el).opacity);
+  await wide.mouse.move(1, 790);
+  await wide.waitForFunction(() => getComputedStyle(document.querySelector('.doc-outline-btn')).opacity === '0');
+  const pane = await wide.locator('.doc-pane').boundingBox();
+  const host = await wide.locator('.doc-host').boundingBox();
+  assert.ok(pane.x - host.x > 40, `expected a gutter left of the text column: ${JSON.stringify({ pane, host })}`);
+  await wide.mouse.move(host.x + 10, pane.y + 40);
+  await wide.waitForFunction(() => getComputedStyle(document.querySelector('.doc-outline-btn')).opacity === '1');
+  assert.equal(await opacity(), '1');
+  await btn.click();
+  await wide.locator('#doc-outline').waitFor();
+  await wide.locator('#doc-outline li button').first().focus();
+  await wide.keyboard.press('Escape');
+  await wide.locator('#doc-outline').waitFor({ state: 'detached' });
+  assert.equal(await btn.evaluate((el) => el === document.activeElement), true);
+  await wide.close();
+
   assert.deepEqual(errors, []);
   assert.ok(log.includes(`workspace ${ws}`));
 });

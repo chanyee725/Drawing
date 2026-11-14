@@ -350,7 +350,7 @@ body {
 /* Outline (목차) and heading links */
 .doc-outline-wrap { position: relative; align-self: flex-end; }
 .doc-outline-btn { color: var(--muted-foreground); opacity: 0; transition: opacity 0.15s; }
-.doc-pane:hover .doc-outline-btn, .doc-pane:focus-within .doc-outline-btn, .doc-outline-btn[aria-expanded="true"] { opacity: 1; }
+.doc-host:hover .doc-outline-btn, .doc-host:focus-within .doc-outline-btn, .doc-outline-btn[aria-expanded="true"] { opacity: 1; }
 @media (hover: none) { .doc-outline-btn { opacity: 1; } }
 .doc-outline-btn:hover { color: var(--foreground); }
 .doc-outline { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; width: 260px; max-height: 50vh; overflow-y: auto; padding: 6px; border: 1px solid var(--border); border-radius: 8px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--shadow-pop); }

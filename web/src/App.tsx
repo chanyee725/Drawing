@@ -749,11 +749,12 @@ export function App() {
 
   const dark = theme === 'dark';
   const place = useMemo(() => docPlace(projects, path), [projects, path]);
+  // .doc-host spans the whole doc pane (gutters included), so hovering anywhere in it reveals the 목차 button.
   const doc = hasFile && path && (
-    <>
+    <div className="doc-host">
       <DocSlot session={session} dark={dark} tree={tree} jump={jump} onOpenFile={openFile} onNotice={setStatus} onShow={showBlock} onShowFrame={showFrame} onExportBlock={blockExport} onFail={flushForReload} />
       <SubDocs node={place.node} onOpen={openFile} onAdd={() => void newFile(undefined, 'doc', true)} />
-    </>
+    </div>
   );
   const canvas = <CanvasSlot session={session} focus={focus} dark={dark} handle={canvasHandle} onFail={flushForReload} />;
 
