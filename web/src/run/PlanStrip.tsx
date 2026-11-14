@@ -31,6 +31,7 @@ export function PlanStrip({ session }: { session: FileSession }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const noticeId = useId();
+  const blockersId = useId();
 
   const refresh = useCallback(async () => {
     if (!path || !hasPlan) return setStatus(null);
@@ -129,15 +130,19 @@ export function PlanStrip({ session }: { session: FileSession }) {
         )}
       </span>
       <span className="text-muted-foreground">예상 {status.sessions}세션</span>
-      <Button
-        size="sm"
-        disabled={blocked || busy}
-        title={blocked ? status.blockers.join('\n') : undefined}
-        className="px-3 text-sm hover:bg-primary"
-        onClick={() => void open()}
-      >
-        시작하기
-      </Button>
+      {/* A disabled button gets no pointer events, so the tooltip with every blocker sits on the wrapper. */}
+      <span title={blocked ? status.blockers.join('\n') : undefined} data-testid="start-wrap" className="inline-flex">
+        <Button
+          size="sm"
+          disabled={blocked || busy}
+          aria-describedby={blocked ? blockersId : undefined}
+          className="px-3 text-sm hover:bg-primary"
+          onClick={() => void open()}
+        >
+          시작하기
+        </Button>
+      </span>
+      {blocked && <span id={blockersId} className="sr-only">{status.blockers.join(', ')}</span>}
       <dialog
         ref={dialog}
         aria-labelledby={titleId}

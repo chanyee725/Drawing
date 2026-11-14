@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { etaLine, groupByStage, span, stageSpans } from '../../web/src/dispatch/lib/board.ts';
+import { DONE_LIMIT, etaLine, groupByStage, span, stageSpans, visibleTasks } from '../../web/src/dispatch/lib/board.ts';
 import type { BoardTask } from '../../web/src/dispatch/types.ts';
 
 const MIN = 60_000;
@@ -39,4 +39,17 @@ test('etaLine: minutes left, almost, late, none, done', () => {
   assert.deepEqual(etaLine({ stage: 'impl', etaAt: 100 * MIN }, 115 * MIN), { text: '15분 지났어요', late: true });
   assert.equal(etaLine({ stage: 'impl', etaAt: null }, 0), null);
   assert.equal(etaLine({ stage: 'done', etaAt: 5 }, 0), null);
+});
+
+test('완료 column lists the newest first and caps at DONE_LIMIT with a hidden count', () => {
+  const done = Array.from({ length: DONE_LIMIT + 3 }, (_, i) => mk(`d${i}`, 'done', i));
+  const g = groupByStage(done);
+  assert.equal(g.done[0]!.id, `d${DONE_LIMIT + 2}`);
+  const v = visibleTasks('done', g.done, false);
+  assert.equal(v.shown.length, DONE_LIMIT);
+  assert.equal(v.more, 3);
+  assert.equal(visibleTasks('done', g.done, true).more, 0);
+  assert.equal(visibleTasks('done', g.done, true).shown.length, DONE_LIMIT + 3);
+  const impl = groupByStage(Array.from({ length: 15 }, (_, i) => mk(`i${i}`, 'impl', i))).impl;
+  assert.equal(visibleTasks('impl', impl, false).shown.length, 15);
 });

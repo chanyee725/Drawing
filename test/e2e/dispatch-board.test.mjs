@@ -103,6 +103,15 @@ test('작업 보드 shows tasks by stage and follows live changes', { skip: !ON 
     await page.waitForFunction(() => document.querySelector('[data-slot=sheet-content]').getAnimations().length === 0);
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e19b-board.png') });
 
+    at('blocked reason and capped done column');
+    await card('배포 막힘').locator('[data-blocked-reason]').filter({ hasText: '키가 없어요' }).waitFor();
+    for (let i = 0; i < 12; i++) await call('POST', '/api/tasks', { title: `끝난 일 ${i}`, stage: 'done' });
+    const done = board.locator('[data-stage="done"]');
+    await done.getByRole('button', { name: '2개 더 보기' }).waitFor();
+    assert.equal(await done.locator('[data-task]').count(), 10);
+    await done.getByRole('button', { name: '2개 더 보기' }).click();
+    assert.equal(await done.locator('[data-task]').count(), 12);
+
     at('live stage change');
     const { id } = (await call('GET', '/api/tasks')).tasks.find((x) => x.title === '로그인 화면 만들기');
     await call('POST', '/api/tasks', { id, stage: 'test' });

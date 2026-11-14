@@ -19,7 +19,18 @@ export function groupByStage(tasks: readonly BoardTask[]): Record<TaskStage, Boa
   const out = Object.fromEntries(STAGES.map(s => [s.id, [] as BoardTask[]])) as Record<TaskStage, BoardTask[]>;
   for (const t of tasks) (out[t.stage] ?? out.plan).push(t);
   for (const list of Object.values(out)) list.sort((a, b) => a.stageAt - b.stageAt || a.id.localeCompare(b.id));
+  // Finished work piles up: the newest finished first, so the column's top is what just landed.
+  out.done.reverse();
   return out;
+}
+
+/** How many finished tasks the 완료 column shows before "N개 더 보기". */
+export const DONE_LIMIT = 10;
+
+/** The cards a column shows: every stage in full except 완료, which is capped unless `all`. `more` is how many are hidden. */
+export function visibleTasks(stage: TaskStage, list: readonly BoardTask[], all: boolean, limit = DONE_LIMIT): { shown: BoardTask[]; more: number } {
+  if (stage !== 'done' || all || list.length <= limit) return { shown: [...list], more: 0 };
+  return { shown: list.slice(0, limit), more: list.length - limit };
 }
 
 /** Milliseconds spent in each stage, in history order (a stage visited twice sums up). The current stage runs to `now`. */
