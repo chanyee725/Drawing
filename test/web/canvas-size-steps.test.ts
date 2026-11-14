@@ -28,10 +28,10 @@ for (const kind of ['prod', 'dev']) {
     assert.ok(out);
     assert.deepEqual(buttonSizes(out), [13, 16, 20, 28]);
     assert.equal(out.length, code.length, 'nothing else changed length');
-    // Only the four numbers differ.
+    // Only the digits of the four numbers differ: 16>13, 20>16, 28>20, 36>28.
     let diff = 0;
     for (let i = 0; i < code.length; i++) if (code[i] !== out[i]) diff++;
-    assert.ok(diff > 0 && diff <= 8, `${diff} characters differ`);
+    assert.equal(diff, 6, `${diff} characters differ`);
   });
 }
 

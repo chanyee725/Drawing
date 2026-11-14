@@ -253,6 +253,12 @@ test('the size buttons hold the 13px step: it is on for new text and can be pick
   }
   await page.keyboard.press('Escape');
 
+  // The saved 36px text is the only element: selected, its size is not a step, so no size button is on.
+  await page.keyboard.press('Control+a');
+  await button('small').waitFor();
+  assert.deepEqual(await checked(), [], 'a 36px text has no size button on');
+  await page.keyboard.press('Escape');
+
   await type('First', 500, 500);
   await type('Bigger', 500, 600, 'large');
   assert.deepEqual(await checked(), ['fontSize-large']);
