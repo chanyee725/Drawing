@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireBreak } from '../../server/lock.js';
+import { acquireBreak, clearDeadBreak } from '../../server/lock.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isDead = async (name) => name.startsWith('dead-');
@@ -175,6 +175,95 @@ test('acquireBreak: a staging folder left by a dead process is swept, one from a
     await release();
     assert.equal(existsSync(deadStage), false);
     assert.equal(existsSync(liveStage), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #205: clearDeadBreak on its own. A live holder's .break is never moved or removed; only dead
+// owner names are unlinked, and the folder goes only once it is empty.
+test('clearDeadBreak: a live holder is left in place and nothing is cleared', async () => {
+  const { dir, brk } = scratch();
+  try {
+    mkdirSync(brk);
+    writeFileSync(join(brk, 'live-A'), '');
+    assert.equal(await clearDeadBreak(brk, isDead), false);
+    assert.deepEqual(readdirSync(brk), ['live-A']);
+    assert.deepEqual(readdirSync(dir), ['x.lock.break'], 'nothing moved aside');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clearDeadBreak: a dead holder is unlinked and the emptied folder removed', async () => {
+  const { dir, brk } = scratch();
+  try {
+    mkdirSync(brk);
+    writeFileSync(join(brk, 'dead-D'), '');
+    assert.equal(await clearDeadBreak(brk, isDead), true);
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clearDeadBreak: a live holder next to a dead name keeps the folder and its own file', async () => {
+  const { dir, brk } = scratch();
+  try {
+    mkdirSync(brk);
+    writeFileSync(join(brk, 'dead-D'), '');
+    writeFileSync(join(brk, 'live-B'), '');
+    assert.equal(await clearDeadBreak(brk, isDead), true);
+    assert.deepEqual(readdirSync(brk), ['live-B']);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clearDeadBreak: a dead name already cleared by someone else, then taken by a live holder, is a no-op', async () => {
+  const { dir, brk } = scratch();
+  try {
+    mkdirSync(brk);
+    writeFileSync(join(brk, 'dead-D'), '');
+    // Between the readdir and the unlink, another waiter clears D and B takes the break.
+    const swap = async (name) => {
+      rmSync(brk, { recursive: true });
+      mkdirSync(brk);
+      writeFileSync(join(brk, 'live-B'), '');
+      return isDead(name);
+    };
+    assert.equal(await clearDeadBreak(brk, swap), false);
+    assert.deepEqual(readdirSync(brk), ['live-B'], "B's break is untouched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('clearDeadBreak: a missing or empty .break counts as cleared', async () => {
+  const { dir, brk } = scratch();
+  try {
+    assert.equal(await clearDeadBreak(brk, isDead), true);
+    mkdirSync(brk);
+    assert.equal(await clearDeadBreak(brk, isDead), true);
+    assert.equal(existsSync(brk), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('acquireBreak: held() turns false once our break was cleared and taken by someone else', async () => {
+  const { dir, brk } = scratch();
+  try {
+    const releaseA = await acquireBreak(brk, { owner: 'dead-A', isDead });
+    assert.equal(await releaseA.held(), true);
+    const releaseB = await acquireBreak(brk, { owner: 'live-B', isDead }); // judges A dead, clears it
+    assert.equal(await releaseA.held(), false, 'A must not act as the holder any more');
+    assert.equal(await releaseB.held(), true);
+    await releaseA();
+    assert.deepEqual(readdirSync(brk), ['live-B']);
+    await releaseB();
+    assert.equal(await releaseB.held(), false);
+    assert.equal(existsSync(brk), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

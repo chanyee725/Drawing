@@ -54,12 +54,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /**
  * Removes the lock at `file` only if it still reads `raw` (the content judged stale). Removal runs
  * under `<file>.break`, so two servers replacing the same stale lock cannot have the slower one
- * delete the lock the faster one just took.
+ * delete the lock the faster one just took. Right before the rm we check `.break` still names us
+ * (#205): if we were cleared as dead meanwhile, someone else may be inside, so we delete nothing and
+ * claimLock's next attempt starts over.
  */
 async function removeIfUnchanged(file, raw) {
   const release = await acquireBreak(`${file}.break`);
   try {
-    if ((await readLock(file)).raw === raw) await rm(file, { force: true });
+    if ((await release.held()) && (await readLock(file)).raw === raw) await rm(file, { force: true });
   } finally {
     await release();
   }
@@ -73,7 +75,8 @@ const OWNER_NAME = /^(\d+)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
 const ownerPid = (name) => Number.parseInt(name, 10);
 
 /**
- * Takes the mutex `brk` and returns its async release(). The mutex is a folder holding one file
+ * Takes the mutex `brk` and returns its async release(); release.held() is true while `brk` still
+ * holds our owner file (false once we were judged dead and cleared). The mutex is a folder holding one file
  * named after its owner (`<pid>-<uuid>`). It is made as `<brk>.<owner>.tmp/<owner>` and renamed
  * into place: rename onto a missing or empty folder succeeds, onto a held one (never empty) fails.
  *
@@ -95,7 +98,9 @@ export async function acquireBreak(brk, { owner = `${process.pid}-${randomUUID()
     await writeFile(join(stage, owner), '', { flag: 'wx' });
     try {
       await rename(stage, brk);
-      return () => releaseBreak(brk, owner);
+      const release = () => releaseBreak(brk, owner);
+      release.held = () => holdsBreak(brk, owner);
+      return release;
     } catch (err) {
       if (!['ENOTEMPTY', 'EEXIST', 'ENOTDIR', 'EISDIR'].includes(err.code)) throw err;
     } finally {
@@ -123,8 +128,23 @@ async function sweepStages(brk) {
   }
 }
 
-/** Clears `brk` when its holder is dead; true when something was cleared (retry at once). */
-async function clearDeadBreak(brk, dead) {
+/** True when `brk` is a real folder that holds `owner`'s file. lstat: a link planted at either name is not ours. */
+async function holdsBreak(brk, owner) {
+  try {
+    if (!(await lstat(brk)).isDirectory()) return false;
+    return (await lstat(join(brk, owner))).isFile();
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return false;
+    throw err;
+  }
+}
+
+/**
+ * Clears `brk` when its holder is dead; true when something was cleared (retry at once). Exported
+ * for tests. Only names `dead(name)` judges dead are unlinked and the folder is removed only while
+ * empty, so a live holder's `.break` is never moved or removed (#205).
+ */
+export async function clearDeadBreak(brk, dead) {
   let names;
   try {
     // A link at `.break` (planted or stray) is never followed: readdir/unlink would act on its target.
@@ -167,6 +187,7 @@ async function clearOldBreakFile(brk) {
   return true;
 }
 
+/** Unlinks our own owner file only (so it never acts on a `.break` that no longer names us), then the folder while empty. */
 async function releaseBreak(brk, owner) {
   try {
     await unlink(join(brk, owner));
