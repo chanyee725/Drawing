@@ -5,15 +5,18 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import * as pipeline from '../server/pipeline/index.js';
 
-/** A pipeline module on fakes. `readCarried` stays pending until `release()`; after that isCarried() answers. */
-async function rig(plans, tasks) {
+/**
+ * A pipeline module on fakes. `readCarried` stays pending until `release()`; after that isCarried() answers, or,
+ * with `readOk: false`, the read fails (missing or corrupt record) and isCarried() keeps answering null.
+ */
+async function rig(plans, tasks, { readOk = true } = {}) {
   const known = new Set();
   let release;
   const gate = new Promise((r) => (release = r));
   const updates = [];
   const recorder = {
     isCarried: (runId, step) => (runId === 'r-old' && !known.has(runId) ? null : false),
-    readCarried: (_path, runId) => gate.then(() => (known.add(runId), true)),
+    readCarried: (_path, runId) => gate.then(() => (readOk && known.add(runId), readOk)),
     updateSession: (runId, step, meta) => updates.push({ runId, step, cost: meta.cost }),
   };
   const sessions = {};
@@ -74,6 +77,27 @@ test('after the run record is read, the session is recorded as it is now, not as
     await t.settle();
     assert.equal(plans['a.drawing'].links?.[mate.id], 'api');
     assert.equal(t.updates.at(-1)?.cost, 2);
+  } finally {
+    t.mod.close();
+  }
+});
+
+test('a paused plan whose run record cannot be read is skipped, so the running plan still gets the session (E206f)', async () => {
+  const plans = {
+    'a.drawing': { lead: 'lead', state: 'paused', approvedAt: 2, runId: 'r-old', steps: ['api'] },
+    'b.drawing': { lead: 'lead', state: 'running', approvedAt: 1, runId: 'r-new', steps: ['api'] },
+  };
+  const t = await rig(plans, [{ lead: 'lead', step: 'api', owner: mate.name, stage: 'impl' }], { readOk: false });
+  try {
+    t.sessions[mate.id] = { ...mate, cost: 1 };
+    t.hub.emit('session', { ...mate, cost: 1 });
+    await t.settle();
+    t.sessions[mate.id] = { ...mate, cost: 2 };
+    t.release();
+    await t.settle();
+    assert.equal(plans['a.drawing'].links?.[mate.id], undefined);
+    assert.equal(plans['b.drawing'].links?.[mate.id], 'api');
+    assert.deepEqual(t.updates, [{ runId: 'r-new', step: 'api', cost: 2 }]);
   } finally {
     t.mod.close();
   }

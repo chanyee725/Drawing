@@ -112,20 +112,24 @@ export async function setup(ctx) {
       return null;
     };
     // Session metadata goes to the run record of its lead's running plan, under the step its task names.
-    const follow = (s) => {
+    // `skip` holds plans whose run record could not be read (missing, corrupt, another runId) during this pass.
+    const follow = (s, skip = new Set()) => {
       if (!s?.parent) return;
       for (const [path, e] of leadEntries(s.parent, ['running', 'paused'])) {
+        if (skip.has(path)) continue;
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
           // A paused run a server restart dropped from memory: which steps it carried over is on disk. Read that
           // first and look again, so a link is never saved to a carried step meanwhile. Stop here rather than try
           // the next plan, or the session could end up linked to both. Look again with the session as it is then,
-          // so an event that came in meanwhile is not rolled back.
+          // so an event that came in meanwhile is not rolled back. A session deleted during the read is skipped. If
+          // the read fails, its carried steps stay unknown: look again without that plan, so the session can still
+          // be linked to the lead's other plans.
           if (e.runId && recorder.isCarried(e.runId, '') === null) {
             void recorder.readCarried(path, e.runId).then((ok) => {
-              const now = ok && hub.get(s.id);
-              if (now) follow(hub.publicSession(now));
+              const now = hub.get(s.id);
+              if (now) follow(hub.publicSession(now), ok ? skip : new Set([...skip, path]));
             });
             return;
           }
@@ -155,7 +159,7 @@ export async function setup(ctx) {
         return;
       }
     };
-    hub.on('session', follow);
+    hub.on('session', (s) => follow(s));
     // A task that names a step and an owner links that owner's session (set_task often comes after create_sessions).
     hub.on('tasks', () => {
       for (const s of hub.sessions) if (s.parent && leadEntries(s.parent, ['running', 'paused']).length) follow(hub.publicSession(s));
