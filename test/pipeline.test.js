@@ -377,7 +377,10 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     const carriedApi = next.steps.api.sessions[0];
     await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', owner: mate.name, stage: 'impl' });
     await until(() => d.store.data.pipelines[path].links[mate.id] === 'ui', 10_000);
-    d.hub.emit('session', { ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5, usage: { input: 1234, output: 56 } });
+    // Its new turn's numbers, kept on the session so the fake CLI's own events carry the same ones.
+    await until(() => ['idle', 'done'].includes(d.hub.get(mate.id).status), 10_000);
+    Object.assign(d.hub.get(mate.id), { cost: 7.5, usage: { input: 1234, output: 56 } });
+    d.hub.emit('session', d.hub.publicSession(d.hub.get(mate.id)));
     await until(async () => (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body.steps.ui.sessions[0]?.cost === 7.5, 10_000);
     const reused = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
     assert.equal(reused.steps.ui.sessions[0].sid, mate.id);
