@@ -24,7 +24,7 @@ const freePort = () =>
     s.on('error', fail);
   });
 
-test('settings dialog: PR/CI switch flips, persists, names a broken settings file once, keeps focus and recovers', { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 }, async (t) => {
+test('settings dialog: PR/CI switch flips, persists, names a broken settings file once, keeps focus, says when a retry still fails and recovers', { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 }, async (t) => {
   const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_CORE, 'index.mjs')).href);
   const repo = mkdtempSync(join(tmpdir(), 'draw-prtoggle-'));
   const home = mkdtempSync(join(tmpdir(), 'draw-prtoggle-home-'));
@@ -88,6 +88,7 @@ test('settings dialog: PR/CI switch flips, persists, names a broken settings fil
   // 2. File breaks while the dialog is open: the toggle's 409 shows the cause once (not in the status line too),
   // the red line describes the switch, and the switch stays enabled with keyboard focus on it.
   const BROKEN = '설정 파일을 읽을 수 없어요. 파일을 확인해 주세요.';
+  const STILL = '아직 읽을 수 없어요.';
   const describedBy = async () => {
     const ids = (await sw().getAttribute('aria-describedby')) ?? '';
     return page.evaluate((list) => list.split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? '').join(' '), ids);
@@ -102,17 +103,29 @@ test('settings dialog: PR/CI switch flips, persists, names a broken settings fil
   assert.equal(await describedBy(), BROKEN);
   assert.equal(await sw().isDisabled(), false);
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch', 'focus stays on the switch');
+  assert.equal(await dialog.getByText(STILL).count(), 0, 'the first 409 shows no retry notice');
 
   // 2b. Pressing again with the file still broken keeps the cause and focus; after fixing the file it recovers in place.
+  // A retry that still fails says so in the status line, every time (#409).
   await page.keyboard.press('Space');
+  await dialog.getByRole('status').filter({ hasText: STILL }).waitFor();
   await dialog.getByText(BROKEN).waitFor();
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch');
+  await dialog.getByRole('status').evaluate((el) => {
+    const seen = [];
+    new MutationObserver(() => seen.push(el.textContent)).observe(el, { childList: true, subtree: true, characterData: true });
+    window.__statusSeen = seen;
+  });
+  await page.keyboard.press('Space');
+  await page.waitForFunction(() => window.__statusSeen.at(-1) === '아직 읽을 수 없어요.' && window.__statusSeen.includes(''));
   writeFileSync(settingsFile, JSON.stringify({ prStatus: true }));
   await page.keyboard.press('Space');
   await dialog.getByText('켜짐', { exact: true }).waitFor();
   assert.equal(await sw().getAttribute('aria-checked'), 'true');
   assert.equal(await dialog.getByText(BROKEN).count(), 0);
   assert.equal(await sw().getAttribute('aria-describedby'), null);
+  // The red live region stays rendered (not display:none) while empty, so its next text is announced (#409).
+  assert.equal(await dialog.locator('p[aria-live="polite"]').evaluate((el) => el.textContent === '' && getComputedStyle(el).display !== 'none'), true);
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch');
   await page.keyboard.press('Space');
   await dialog.getByText('꺼짐', { exact: true }).waitFor();
@@ -126,5 +139,8 @@ test('settings dialog: PR/CI switch flips, persists, names a broken settings fil
   assert.equal(await dialog.getByText('이 서버에선 바꿀 수 없어요').count(), 0);
   assert.equal(await describedBy(), BROKEN);
   assert.equal(await sw().isDisabled(), false);
+  await sw().focus();
+  await page.keyboard.press('Space');
+  await dialog.getByRole('status').filter({ hasText: STILL }).waitFor();
   assert.deepEqual(errors, []);
 });
