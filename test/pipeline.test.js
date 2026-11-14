@@ -360,15 +360,30 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     const go = await call('POST', '/api/pipeline/start', { path, revision: rev.body.revision });
     assert.equal(go.status, 200, JSON.stringify(go.body));
     assert.notEqual(go.body.runId, runId);
-    // The task board speaks again (a merge check, another set_task): the mate that finished api relinks to the new
-    // run through its old task, and its idle state must not reopen the carried step.
+    // The task board speaks again (a merge check, another set_task): the mate that finished api does not relink to
+    // the new run through its old, closed task (E205); the carried step keeps the sessions it ran with.
     d.hub.emit('tasks', d.hub.tasks);
-    await until(() => d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
+    d.hub.emit('session', { ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5 });
     const next = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(d.store.data.pipelines[path].links[mate.id], undefined);
     assert.equal(next.steps.api.state, 'done');
     assert.equal(next.steps.api.carried, runId);
     assert.equal(next.steps.api.sessions[0].sid, mate.id);
+    assert.notEqual(next.steps.api.sessions[0].cost, 7.5);
     assert.equal(next.steps.ui.state, 'pending');
+
+    // The lead reuses that mate for new work: its session links to the new step, and its cost and tokens land there,
+    // not on the carried step.
+    const carriedApi = next.steps.api.sessions[0];
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', owner: mate.name, stage: 'impl' });
+    await until(() => d.store.data.pipelines[path].links[mate.id] === 'ui', 10_000);
+    d.hub.emit('session', { ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5, usage: { input: 1234, output: 56 } });
+    await until(async () => (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body.steps.ui.sessions[0]?.cost === 7.5, 10_000);
+    const reused = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(reused.steps.ui.sessions[0].sid, mate.id);
+    assert.deepEqual(reused.steps.ui.sessions[0].tokens, { input: 1234, output: 56 });
+    assert.deepEqual(reused.steps.api.sessions, [carriedApi]);
+    assert.equal(reused.steps.api.state, 'done');
     assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api/);
     assert.equal(d.store.data.pipelines[path].carry, undefined);
 
