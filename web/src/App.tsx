@@ -7,6 +7,8 @@ import { blocksInFrame, frameScene as sceneOf, frameSceneSig, type CanvasEl } fr
 import { Sidebar } from './Sidebar';
 import { Home, type CreateKind } from './home/Home';
 import { CHORD_MS, chord, folderPrefix } from './home/model';
+import { Alert } from './components/ui/alert';
+import { Button } from './components/ui/button';
 import { SidebarInset, SidebarProvider } from './components/ui/sidebar';
 import { asTreeNode, docPlace, newFileDir, paletteScope, shellKey, subFolderOf, type Crumb, type Section } from './projectNav';
 import { SubDocs } from './SubDocs';
@@ -140,7 +142,7 @@ const DocSlot = memo(function DocSlot({ session, dark, tree, jump, onOpenFile, o
     <LazyBoundary key={key} onFail={onFail}>
       <Suspense
         fallback={
-          <p className="p-6 text-sm" style={{ color: 'var(--muted-foreground)' }}>
+          <p className="p-6 text-sm text-muted-foreground">
             문서를 불러오는 중이에요…
           </p>
         }
@@ -830,29 +832,23 @@ export function App() {
           {trashOpen && <TrashDialog onClose={() => setTrashOpen(false)} onRestored={() => void refreshTree()} />}
           {paletteOpen && <CommandPalette commands={registry.list()} scope={paletteScope(docScreen ? section : homeSection, projects, path)} onlyGroup={paletteGroup} onClose={() => setPaletteOpen(false)} />}
           {conflict && (
-            <div role="alert" className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
+            <Alert className="border-b-0 bg-muted">
               <span className="mr-auto">이 파일이 다른 곳에서 바뀌었어요. 어떻게 할까요?</span>
-              <button type="button" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }} onClick={() => void reload()}>
+              <Button variant="outline" size="sm" className="bg-transparent px-3 text-sm" onClick={() => void reload()}>
                 다시 불러오기
-              </button>
-              <button
-                type="button"
-                disabled={conflict.revision === undefined}
-                className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
-                style={{ background: 'var(--primary)' }}
-                onClick={overwrite}
-              >
+              </Button>
+              <Button size="sm" disabled={conflict.revision === undefined} className="px-3 text-sm hover:bg-primary" onClick={overwrite}>
                 내 것으로 덮어쓰기
-              </button>
-            </div>
+              </Button>
+            </Alert>
           )}
           {error && (
-            <div role="alert" className="flex items-center gap-2 px-4 py-2 text-sm" style={{ background: 'var(--muted)' }}>
+            <Alert className="flex-nowrap border-b-0 bg-muted">
               <span>{error}</span>
               <button type="button" className="ml-auto underline" onClick={() => setError(null)}>
                 닫기
               </button>
-            </div>
+            </Alert>
           )}
           {!docScreen ? (
             <Home

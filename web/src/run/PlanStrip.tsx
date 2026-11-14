@@ -1,6 +1,8 @@
 // The plan gate under the top bar (E20, docs/design/dispatch-integration/3-ux-flow.md §3): while a pipeline file
 // is a 계획, it says what would start and holds the one 시작하기 button; the confirm shows sessions, limits,
 // what the person changed and unanswered asks. Running files are E22's strip, so this one hides then.
+import { Alert } from '../components/ui/alert';
+import { Button } from '../components/ui/button';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { FileSession } from '../fileSession';
 import { useSession } from '../useSession';
@@ -115,7 +117,7 @@ export function PlanStrip({ session }: { session: FileSession }) {
   };
 
   return (
-    <div role="status" className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm" style={{ background: 'var(--muted)' }} data-testid="plan-strip">
+    <Alert role="status" className="bg-muted" data-testid="plan-strip">
       <span aria-hidden="true">◐</span>
       <span className="mr-auto">
         {error ? (
@@ -127,16 +129,15 @@ export function PlanStrip({ session }: { session: FileSession }) {
         )}
       </span>
       <span className="text-muted-foreground">예상 {status.sessions}세션</span>
-      <button
-        type="button"
+      <Button
+        size="sm"
         disabled={blocked || busy}
         title={blocked ? status.blockers.join('\n') : undefined}
-        className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
-        style={{ background: 'var(--primary)' }}
+        className="px-3 text-sm hover:bg-primary"
         onClick={() => void open()}
       >
         시작하기
-      </button>
+      </Button>
       <dialog
         ref={dialog}
         aria-labelledby={titleId}
@@ -158,21 +159,20 @@ export function PlanStrip({ session }: { session: FileSession }) {
           {asks > 0 && <p className="text-destructive">물어볼 것 {asks}개에 답이 없어요. 그래도 시작할까요?</p>}
         </div>
         <form method="dialog" className="flex items-center justify-end gap-2 border-t px-4 py-2.5">
-          <button type="submit" value="cancel" className="h-7 rounded-md border px-3" style={{ borderColor: 'var(--border)' }}>
+          <Button type="submit" value="cancel" variant="outline" size="sm" className="bg-transparent px-3 text-sm">
             취소
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            size="sm"
             disabled={busy}
             aria-describedby={notice ? noticeId : undefined}
-            className="h-7 rounded-md px-3 font-medium text-primary-foreground disabled:opacity-50"
-            style={{ background: 'var(--primary)' }}
+            className="px-3 text-sm hover:bg-primary"
             onClick={() => void start()}
           >
             시작하기
-          </button>
+          </Button>
         </form>
       </dialog>
-    </div>
+    </Alert>
   );
 }
