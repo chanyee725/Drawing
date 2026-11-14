@@ -1,8 +1,8 @@
 // The infinite canvas: Excalidraw (MIT) with diagram blocks shown as image elements.
 // Loaded lazily from CanvasPane so the editor shell does not wait for it.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CaptureUpdateAction, Excalidraw, convertToExcalidrawElements, exportToBlob, exportToSvg, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
-import type { AppState, ExcalidrawImperativeAPI, BinaryFileData } from '@excalidraw/excalidraw/types';
+import { CaptureUpdateAction, Excalidraw, convertToExcalidrawElements, exportToBlob, exportToSvg, getCommonBounds, newElementWith, restoreElements, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
+import type { AppState, ExcalidrawImperativeAPI, BinaryFileData, NormalizedZoomValue } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement, ExcalidrawImageElement, FileId } from '@excalidraw/excalidraw/element/types';
 import '@excalidraw/excalidraw/index.css';
 import type { Block } from '../api';
@@ -26,6 +26,7 @@ import { AgentCursors } from './AgentCursors';
 import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSession';
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE, cleanElements } from './cleanStyle';
+import { openingView, rememberView } from './initialView';
 import { refitTexts, type FitEl } from './refit';
 import { RefitQueue } from './refitQueue';
 import './clean.css';
@@ -149,6 +150,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     refitLater.wait(ids, bump);
     return els;
   };
+  const pathRef = useRef(path);
+  pathRef.current = path;
   const focusRef = useRef(focus);
   focusRef.current = focus;
   const focusDone = useRef(0);
@@ -357,7 +360,14 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
         placed.map((b, i) => blockImageSkeleton(b, pics[i].fileId, newElId(b.id)) as unknown as ExcalidrawElement),
         null,
       );
-      return { elements: [...free, ...images], files: Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)])), appState: CLEAN_APP_STATE, scrollToContent: true };
+      const elements = [...free, ...images];
+      // First open fits everything (at most 100%); a view the user left the file at is kept (E494).
+      const live = elements.filter((e) => !e.isDeleted);
+      const box = wrap.current?.getBoundingClientRect();
+      const view = openingView(path, live.length ? getCommonBounds(live) : null, box?.width ?? 0, box?.height ?? 0);
+      const files = Object.fromEntries(pics.map((p) => [p.fileId, fileData(p)]));
+      if (!view) return { elements, files, appState: CLEAN_APP_STATE, scrollToContent: true };
+      return { elements, files, appState: { ...CLEAN_APP_STATE, scrollX: view.scrollX, scrollY: view.scrollY, zoom: { value: view.zoom as NormalizedZoomValue } } };
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
@@ -494,6 +504,8 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   }, [scheduleSharpen]);
 
   const handleChange = useCallback((sceneEls: readonly ExcalidrawElement[], appState: AppState) => {
+    // The view is kept for the file's next open; not while the scene is still loading (Excalidraw's default view).
+    if (!appState.isLoading) rememberView(pathRef.current, { scrollX: appState.scrollX, scrollY: appState.scrollY, zoom: appState.zoom.value });
     const sel = sceneEls.filter((e) => appState.selectedElementIds[e.id] && !e.isDeleted);
     const view = `${appState.zoom.value}|${sceneEls.map((e) => (e.type === 'image' && !e.isDeleted && blockIdOf(e as unknown as SceneEl) !== null ? `${e.id}:${(e as ExcalidrawImageElement).fileId}:${Math.round(e.width)}` : '')).join('')}`;
     if (view !== sharpenView.current) {
