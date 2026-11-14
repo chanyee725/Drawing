@@ -11,7 +11,7 @@ H=(-H 'content-type: application/json' -H 'x-dispatch: 1')
 | Request | Returns |
 |---|---|
 | `GET /api/state` | `project`, `roles`, `perms`, `models`, `providers`, `limits`, `settings`, `sessions`. `limits` (Claude windows) is shared by every server on this machine. |
-| `GET /api/sessions/<id>/messages` | `{ session, messages }` — the last 400 transcript entries, kept across server restarts (kinds: `user`, `assistant`, `tool`, `tool_result`, `perm`, `error`, `system`) |
+| `GET /api/sessions/<id>/messages` | `{ session, messages }` — the session's transcript entries for the current server run (kinds: `user`, `assistant`, `tool`, `tool_result`, `perm`, `error`, `system`). Transcripts live in memory only: after a server restart they are gone, and disk keeps metadata only (step states, times, model, token counts, cost, branch, commit, PR number) |
 | `GET /api/sessions/<id>/diff` | `{ files, add, del, untracked, patch }` for the session's worktree |
 | `GET /api/usage` | `{ days }` — last 14 days of cost and tokens per model and role. `days[].sessions` maps a session id to `{ name, role, cost }` spent that day (Claude sessions; days recorded before this field existed omit it) |
 | `GET /api/projects` | `{ projects: [{ port, name, path, current }] }` — Dispatch servers running on this machine, one per project. Each server registers itself in `~/.dispatch/servers/<port>.json`; older servers on ports 4330–4330 are found by probing. The UI's project selector switches by opening the chosen port. |

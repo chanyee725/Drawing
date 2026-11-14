@@ -21,7 +21,7 @@ Drawing (the Dispatch plugin) serves http://127.0.0.1:4330 and spawns `claude` /
 4. **Hand over or drive.** Give the user the URL. When the user asked you to start work, create the sessions through the API in [reference/api.md](reference/api.md), then report each session's name, model and branch.
    Done when every requested session appears in `GET /api/state` with status `running`, `waiting` or `idle`.
 
-Stop the server with `<skill-dir>/scripts/stop.sh "<project-root>"`; restart it (to load new server code) with `<skill-dir>/scripts/restart.sh "<project-root>"`. A restart cuts running turns, but those sessions are resumed with a note, and transcripts survive.
+Stop the server with `<skill-dir>/scripts/stop.sh "<project-root>"`; restart it (to load new server code) with `<skill-dir>/scripts/restart.sh "<project-root>"`. A restart cuts running turns, but those sessions are resumed with a note; the transcript itself lives in memory only and is gone after a restart.
 
 ## Update
 
@@ -47,6 +47,6 @@ Any role can run on any listed model; model ids come from `GET /api/state` → `
 - **Long sessions.** A session that runs for many turns re-reads its whole history on every call, even when turn rotation keeps its context small (one lead processed 29M tokens). Replace it instead of feeding it more work: past `settings.team.handoffMTokens` (default 15M tokens processed, `0` = off) Dispatch flags the session (`longRun`, a 확인 필요 warning, `long: true` in the lead's `list_sessions`) and says once who should act — a teammate's lead is told to stop it and give the rest to a fresh teammate; a lead is told to write a handover. When you drive a lead yourself and it shows `longRun`, read its handover, create a fresh lead with that handover as its task, and remove the old one. The plugin's hook (`hooks/long-session.mjs`) repeats the notice inside the session after a tool call, in case the lead missed it.
 - **Permissions.** Claude sessions in `manual` mode wait for the user to approve tools in Drawing의 실행 화면 (status `waiting`). Codex runs non-interactively: `acceptEdits` / `auto` → workspace-write sandbox, `manual` / `plan` → read-only.
 - **Cost.** Claude reports USD (an API-price estimate, not a bill on subscriptions); Codex reports tokens only, so its cost is `null`.
-- **Privacy.** Dispatch stores session metadata and usage totals in `<project>/.dispatch/state.json` and each session's last 400 transcript entries in `<project>/.dispatch/transcripts/<id>.jsonl` (local only, deleted when the session is removed; keep `.dispatch/` gitignored). Keys and account details stay inside the CLIs.
+- **Privacy.** Transcripts live in the server's memory only. Disk keeps metadata only (step states, times, model, token counts, cost, branch, commit, PR number) in `<project>/.dispatch/`; keep `.dispatch/` gitignored. Keys and account details stay inside the CLIs.
 - **Watchdog.** Every 30 s the server retries undelivered reports and sets `session.stall` (shown on the card) for a teammate with no lead, or a lead whose whole team has been idle over 10 minutes.
 - **Worktrees** need a git repo with at least one commit; otherwise the session runs in the project folder and its transcript says so.
