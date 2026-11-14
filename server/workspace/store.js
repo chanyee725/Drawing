@@ -1048,8 +1048,8 @@ export function createStore(
   }
 
   // Compare disk with what we know; only differences (= outside changes) are reported.
-  const reconcile = (rel) => serial(() => reconcileNow(rel));
-  async function reconcileNow(rel) {
+  const reconcile = (rel, catchUp = false) => serial(() => reconcileNow(rel, catchUp));
+  async function reconcileNow(rel, catchUp = false) {
     let segs;
     try {
       segs = parseRelPath(rel);
@@ -1097,11 +1097,11 @@ export function createStore(
     if (!loaded.file || floor === undefined) {
       known.set(rel, { hash: sha(loaded.text), revision: loaded.file?.revision ?? floor ?? 0 });
       tombstones.delete(rel);
-      onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: loaded.file?.revision ?? null });
+      onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: loaded.file?.revision ?? null, ...(catchUp ? { catchUp } : {}) });
       return;
     }
     const { file } = await syncExternal(rel, loaded, abs); // raises the revision if the editor did not
-    onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: file.revision });
+    onExternalChange?.({ kind: prev ? 'change' : 'create', path: rel, revision: file.revision, ...(catchUp ? { catchUp } : {}) });
   }
 
   let closed = false;
@@ -1152,7 +1152,7 @@ export function createStore(
         // Catch what changed while nothing was watching (known files only; new ones show up with the next tree refresh).
         for (const rel of [...known.keys()]) {
           if (closed) break;
-          await reconcile(rel).catch(() => {});
+          await reconcile(rel, true).catch(() => {});
         }
       } catch {
         restartDelay = Math.min(restartDelay * 2, 30000);

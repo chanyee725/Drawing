@@ -4,7 +4,9 @@
 //
 // Attribution: a session's recent tool calls (masked, clipped input text from the Dispatch hub) that mention the
 // changed file's path, within ATTRIBUTE_MS. Read-only tools do not count, nor do calls that failed or finished more
-// than SETTLE_MS before the change (a jq or curl GET that left no edit). Several sessions left: see `pick`.
+// than SETTLE_MS before the change (a jq or curl GET that left no edit), except in a watcher catch-up (see
+// `onChange`). Several sessions left: see `pick`. Results are paired with calls by `callId` (Claude: tool_use id, so
+// parallel and subagent calls cannot swap); without one, in call order. Codex entries are `final`: already finished.
 import { AGENT_COLORS } from '../dispatch/colors.js';
 import { changedCentre, changedKeys, mentionsFile, shapesOf } from './model.js';
 
@@ -17,11 +19,14 @@ const LIVE = new Set(['running', 'starting', 'waiting']);
 const DPX_RE = /[^\s"'`=?&<>|;(),]*\.dpx\.json/g;
 const EMPTY = new Map();
 
-// Whether `text` names `id` as a whole token, so a short id ("a") does not match inside other words.
+// Whether `text` names `id` as a whole token, so a short id ("a") does not match inside other words. A path segment
+// ("flow" in flow.dpx.json or /api/file) is not a mention: common words as ids would otherwise match every call.
 const namesId = (text, id) => {
   if (!id) return false;
   for (let i = text.indexOf(id); i !== -1; i = text.indexOf(id, i + 1)) {
-    if (!/[\w-]/.test(text[i - 1] ?? '') && !/[\w-]/.test(text[i + id.length] ?? '')) return true;
+    const before = text[i - 1] ?? '';
+    const after = text.slice(i + id.length, i + id.length + 2);
+    if (!/[\w\-/.]/.test(before) && !/^[\w\-/]/.test(after) && !/^\.\w/.test(after)) return true;
   }
   return false;
 };
@@ -74,8 +79,10 @@ export async function setup(ctx) {
 
   const onMessage = ({ id, entry }) => {
     if (entry?.kind === 'tool_result') {
-      // Results come in call order: this one finishes the session's oldest call still running.
-      const call = recent.get(id)?.find((c) => c.done === null);
+      if (entry.final) return; // Codex: its result belongs to the entry just before, which was final already
+      // Paired by call id; without one, in call order: the session's oldest call still running.
+      const open = recent.get(id)?.filter((c) => c.done === null);
+      const call = entry.callId ? open?.find((c) => c.entry.callId === entry.callId) : open?.[0];
       if (call) {
         call.done = Date.now();
         call.failed = !!entry.error;
@@ -84,9 +91,10 @@ export async function setup(ctx) {
     }
     if (entry?.kind !== 'tool' || typeof entry.text !== 'string') return;
     const list = recent.get(id) ?? [];
-    // Codex reports a file edit only once it is made, with no result to follow.
+    // Codex reports a call only once it has finished, with no result to follow.
     const now = Date.now();
-    list.push({ entry, at: now, done: entry.name === 'edit' ? now : null, failed: false });
+    const final = entry.final === true || entry.name === 'edit';
+    list.push({ entry, at: now, done: final ? now : null, failed: final && !!entry.error });
     if (list.length > RECENT_PER_SESSION) list.shift();
     recent.set(id, list);
     if (entry.text.includes('.dpx.json')) baseline(entry.text).catch(() => {});
@@ -95,7 +103,7 @@ export async function setup(ctx) {
   // Every live session with a recent edit-tool mention of `rel` that could have made this change (its newest one):
   // still running, or finished within SETTLE_MS, and not failed. Several sessions can edit one file at once (two
   // agents, two blocks of one diagram): choosing among them waits for the diff, see `pick`.
-  function whoEdited(rel, now) {
+  function whoEdited(rel, now, settle = SETTLE_MS) {
     const out = [];
     for (const [id, list] of recent) {
       const s = hub.get(id);
@@ -103,7 +111,7 @@ export async function setup(ctx) {
       for (let i = list.length - 1; i >= 0; i--) {
         const { entry, at, done, failed } = list[i];
         if (now - at > ATTRIBUTE_MS) break;
-        if (failed || (done !== null && now - done > SETTLE_MS)) continue;
+        if (failed || (done !== null && now - done > settle)) continue;
         if (mentionsFile(entry, rel)) { out.push({ s, entry, at }); break; }
       }
     }
@@ -152,8 +160,10 @@ export async function setup(ctx) {
   }
 
   // Changes of one file are handled in order: each diffs against the version the one before it left in `seen`.
-  const onChange = (rel) => {
-    const cands = whoEdited(rel, Date.now());
+  // A watcher catch-up (it restarted after a failure, backoff up to 30s) reports edits made while it was down, so
+  // the call finishing before it is no longer a sign of a read-only call: any call within ATTRIBUTE_MS can be it.
+  const onChange = (rel, { catchUp = false } = {}) => {
+    const cands = whoEdited(rel, Date.now(), catchUp ? ATTRIBUTE_MS : SETTLE_MS);
     const run = (queue.get(rel) ?? Promise.resolve()).then(() => place(rel, cands, pending.get(rel)));
     const tail = run.catch(() => {});
     queue.set(rel, tail);
@@ -190,7 +200,7 @@ export async function setup(ctx) {
   hub.on('message', onMessage);
   hub.on('session', onSession);
   hub.on('removed', onRemoved);
-  const offChange = ws.onChange((rel) => { onChange(rel).catch(() => {}); });
+  const offChange = ws.onChange((rel, opts) => { onChange(rel, opts).catch(() => {}); });
   return {
     close() {
       for (const t of ending.values()) clearTimeout(t);
