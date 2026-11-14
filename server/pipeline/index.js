@@ -118,7 +118,13 @@ export async function setup(ctx) {
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
-          const task = hub.tasks.find((t) => t.lead === s.parent && t.step && t.owner === s.name && e.steps?.includes(t.step));
+          // Only tasks of this run: open ones, or ones closed after its 시작하기. A task an earlier run closed (a step
+          // 계획 다시 열기 carried over) must not pull the session that did it into this run, or new work it gets
+          // lands on the carried step.
+          const since = e.approvedAt ?? 0;
+          const task = hub.tasks.find(
+            (t) => t.lead === s.parent && t.step && t.owner === s.name && e.steps?.includes(t.step) && (t.stage !== 'done' || (t.stageAt ?? 0) >= since),
+          );
           if (!task) continue;
           step = links[s.id] = task.step;
           save();

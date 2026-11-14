@@ -146,7 +146,7 @@ export async function createDispatch({ root, broadcast, port, deps = {} }) {
     async close() {
       for (const t of timers) clearInterval(t);
       hub.stopAll();
-      await store.flush().catch(() => {});
+      await store.close().catch(() => {});
     },
   };
 }

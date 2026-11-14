@@ -192,7 +192,8 @@ export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.n
     const step = record.steps[ps.id] ?? { state: 'pending', startedAt: null, endedAt: null, sessions: [] };
     const node = ps.node ?? ps.id;
     const states = step.sessions.map((s) => stateNow(s, live, running)).filter((x): x is SessionState => !!x);
-    const skipped = step.state === 'skipped';
+    // A carried step is done for good, like the server's stepStateOf (an old record may still say skipped).
+    const skipped = step.state === 'skipped' && !step.carried;
     let view: StepView;
     if (skipped) view = 'pending';
     else if (step.state === 'blocked') view = 'blocked';
@@ -201,7 +202,7 @@ export function stepRows(record: RunRecord, live: Live = new Map(), now = Date.n
     // A finished run closed its steps: what ran and was not blocked is done.
     if (record.state === 'done' && !skipped && view !== 'blocked' && states.length > 0) view = 'done';
     // Finished in an earlier run (계획 다시 열기 carried it over).
-    if (step.carried && !skipped) view = 'done';
+    if (step.carried) view = 'done';
     const paused = pause && view === 'active' ? pause.by : undefined;
     const waiting = (view === 'active' || view === 'review') && states.includes('waiting');
     const v = STEP_VIEWS[view];

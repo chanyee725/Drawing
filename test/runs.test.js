@@ -411,3 +411,17 @@ test('runs: a new run can carry finished steps over from an earlier one (E27 계
     assert.equal(next.totals.cost, 1);
   });
 });
+
+test('runs: a carried step without sessions stays done: it cannot be skipped, and a session attaching later keeps it done (E205)', async () => {
+  await withRecorder({}, async ({ store, recorder }) => {
+    await store.createFile('d');
+    const first = await recorder.startRun({ file: 'd', plan: PLAN });
+    const old = await recorder.endRun(first.id, 'stopped');
+    const next = await recorder.startRun({ file: 'd', plan: PLAN, carry: { from: first.id, steps: { impl: old.steps.impl } } });
+    assert.equal(next.steps.impl.sessions.length, 0);
+    assert.throws(() => recorder.setStepState(next.id, 'impl', 'skipped'), /earlier run/);
+    assert.equal(recorder.updateSession(next.id, 'impl', { sid: 's9', state: 'working' }), 'done');
+    const r = await recorder.read('d', next.id);
+    assert.equal(r.steps.impl.state, 'done');
+  });
+});
