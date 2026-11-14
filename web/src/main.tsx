@@ -19,20 +19,7 @@ if (import.meta.env.DEV) {
   if (id) void import('./run/fixture').then(async (f) => (await import('./run/runStore')).setRunSteps(id, q.has('runBlocked') ? f.FIXTURE_BLOCKED : f.FIXTURE_STEPS));
 }
 
-// Project mode (the server runs for another git project): only the run screen opens, never the editor.
-async function openedForProject(): Promise<boolean> {
-  if (isDispatch) return false;
-  try {
-    const info = await (await fetch('/api/info')).json();
-    if (info.mode !== 'project') return false;
-    location.replace('/dispatch');
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-if (!(await openedForProject()))
+// Project mode: the server answers every editor URL with a 302 to /dispatch, so nothing is fetched before the first render.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {isDispatch ? (

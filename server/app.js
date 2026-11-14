@@ -19,6 +19,26 @@ const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
  * setup() result by name, so later modules can use earlier ones; port is the listening port
  * (0 before listen).
  */
+// Project mode serves the run screen only. Document/file writes of the editor stay closed; the /dispatch UI never
+// calls them. Kept open: /api/pipeline/* (plan, start, stop, ...), PATCH /api/file/plan (agents' step edits), /api/sessions/*.
+const PROJECT_MODE_BLOCKED = [
+  ['PUT', /^\/api\/file$/],
+  ['POST', /^\/api\/file$/],
+  ['DELETE', /^\/api\/file$/],
+  ['POST', /^\/api\/folder$/],
+  ['DELETE', /^\/api\/folder$/],
+  ['POST', /^\/api\/move$/],
+  ['POST', /^\/api\/trash\/restore$/],
+  ['POST', /^\/api\/history$/],
+  ['POST', /^\/api\/workspace\/pr-tracking$/],
+];
+
+/** True for a path the SPA entry answers (index.html fallback): not /dispatch, not /api, not an asset. */
+export function isEditorEntry(pathname) {
+  if (/^\/(dispatch|api)(\/|$)/.test(pathname)) return false;
+  return pathname === '/index.html' || !/\.[A-Za-z0-9]+$/.test(pathname.split('/').pop());
+}
+
 export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList = modules } = {}) {
   const hub = createHub();
   let server = null;
@@ -58,12 +78,19 @@ export async function createApp(opts = {}, { publicDir = PUBLIC_DIR, moduleList 
         if (req.method !== 'GET' && req.method !== 'HEAD' && !writeAllowed(req.headers)) {
           return sendJson(res, 403, { error: 'forbidden' });
         }
+        if (ctx.projectMode && PROJECT_MODE_BLOCKED.some(([m, re]) => m === req.method && re.test(url.pathname))) {
+          return sendJson(res, 403, { error: 'project mode: documents are read-only here' });
+        }
         for (const r of routes) {
           if (r.method !== req.method) continue;
           const match = r.path instanceof RegExp ? url.pathname.match(r.path) : r.path === url.pathname ? [url.pathname] : null;
           if (match) return await r.handler(req, res, ctx, match, url);
         }
         return sendJson(res, 404, { error: 'not found' });
+      }
+      if (ctx.projectMode && (req.method === 'GET' || req.method === 'HEAD') && isEditorEntry(url.pathname)) {
+        res.writeHead(302, { location: '/dispatch', 'cache-control': 'no-store' });
+        return res.end();
       }
       if (req.method !== 'GET' && req.method !== 'HEAD') return sendJson(res, 405, { error: 'method not allowed' });
       return await serveStatic(req, res, url.pathname, publicDir);
