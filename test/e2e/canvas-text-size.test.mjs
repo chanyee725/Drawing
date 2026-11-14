@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { CLEAN_LINE_HEIGHT } from '../../web/src/canvas/cleanStyle.ts';
 import { TEXT_OFFSET } from '../../web/src/canvas/insert.ts';
 
 const ON = process.env.DRAW_E2E === '1' && process.env.CHROME && process.env.PLAYWRIGHT_CORE;
@@ -121,10 +122,11 @@ async function open(t, path, elements) {
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
   await page.goto(`${BASE}/#file=${path}`);
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
-  // Only the canvas view: wait until the canvas fills the space the document had, and keeps that size.
+  // Only the canvas view: wait until the canvas is drawn, fills the space the document had, and keeps that size.
   await page.getByRole('button', { name: '캔버스', exact: true }).click();
   await page.waitForFunction(
     () => {
+      if (!document.querySelector('.excalidraw canvas')) return false;
       const w = document.querySelector('.excalidraw')?.getBoundingClientRect().width ?? 0;
       const last = window.__canvasWidth;
       window.__canvasWidth = w;
@@ -192,8 +194,9 @@ test('new text is 13px, a saved text keeps its size, and a new label wraps insid
   const menu = [...s.values()].find((e) => e.type === 'text' && e.text === '텍스트');
   assert.ok(menu, 'the insert-menu text is saved');
   assert.equal(menu.fontSize, 13);
-  // It starts TEXT_OFFSET above the point, so its one line is centred on the point. (Its width depends on which
+  // Its line height is the clean one, so TEXT_OFFSET.y is half of its one line. (Its width depends on which
   // font draws Hangul on the machine, so the x offset is only an estimate and not checked here.)
+  assert.equal(menu.lineHeight, CLEAN_LINE_HEIGHT);
   assert.ok(Math.abs(TEXT_OFFSET.y - menu.height / 2) <= 0.5, `offset y ${TEXT_OFFSET.y}, half height ${menu.height / 2}`);
 
   const bound = [...s.values()].find((e) => e.type === 'text' && e.originalText === label);
