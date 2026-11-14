@@ -86,3 +86,35 @@ test('broken views are not remembered', () => {
   rememberView('a.dpx.json', { scrollX: 0, scrollY: 0, zoom: 0 });
   assert.equal(rememberedView('a.dpx.json'), null);
 });
+
+test('an empty file opened at the default view fits once an agent adds blocks to it (E494b)', () => {
+  // Nothing to fit: Excalidraw shows its own default view and reports it back once loaded.
+  assert.equal(openingView('a.dpx.json', null, 1440, 900), null);
+  rememberView('a.dpx.json', { scrollX: 720, scrollY: 450, zoom: 1 });
+  assert.equal(rememberedView('a.dpx.json'), null);
+  // An outside edit adds blocks at x=3000 and x=6000: the reload fits them.
+  const v = openingView('a.dpx.json', [3000, 0, 6900, 420], 1440, 900)!;
+  assert.ok(v.zoom < 1);
+  for (const x of [3000, 6900]) {
+    const p = onScreen(v, x, 0);
+    assert.ok(p.x >= 0 && p.x <= 1440, `x=${x} on screen at ${p.x}`);
+  }
+});
+
+test('the opening view is taken as such even when Excalidraw reports it back a hair off', () => {
+  const fit = openingView('a.dpx.json', [0, 0, 1900, 420], 1440, 900)!;
+  rememberView('a.dpx.json', { ...fit, scrollX: fit.scrollX + 1e-9 });
+  assert.equal(rememberedView('a.dpx.json'), null);
+});
+
+test('a view the user moved to after an empty open is kept', () => {
+  openingView('a.dpx.json', null, 1440, 900);
+  rememberView('a.dpx.json', { scrollX: 720, scrollY: 450, zoom: 1 });
+  const mine = { scrollX: 100, scrollY: 50, zoom: 0.5 };
+  rememberView('a.dpx.json', mine);
+  assert.deepEqual(openingView('a.dpx.json', [3000, 0, 6900, 420], 1440, 900), mine);
+  // Reopening at the kept view: the next report is the user's view, not a new opening.
+  const moved = { scrollX: 300, scrollY: 50, zoom: 0.5 };
+  rememberView('a.dpx.json', moved);
+  assert.deepEqual(rememberedView('a.dpx.json'), moved);
+});

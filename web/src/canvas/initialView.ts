@@ -2,6 +2,9 @@
 // shape and block, but never zooms in past 100%, so a small drawing is not blown up. Once the user pans or zooms,
 // the file keeps the view they left it at: a reload (another tab, an agent editing the file) or switching back to
 // the file does not move it. Until then a reload fits again, so a block an agent adds comes into view.
+// The first view Excalidraw reports after an open is the opening view (our fit, or its own default on an empty
+// canvas), never the user's (E494b). Any later move counts as the user's, programmatic ones too (focusing a block,
+// Excalidraw scrolling while a text is edited near the edge).
 // Views live in memory only, per workspace path.
 
 export type View = { scrollX: number; scrollY: number; zoom: number };
@@ -36,8 +39,9 @@ export function fitView(bounds: Bounds | null, width: number, height: number): V
 
 const same = (a: View, b: View) => a.scrollX === b.scrollX && a.scrollY === b.scrollY && a.zoom === b.zoom;
 
-// Path → the view it was last shown at, and whether that is still the view it was fitted to (the user has not moved it).
-const views = new Map<string, { view: View; fitted: boolean }>();
+// Path → the view it was last shown at, and whether that is still the view it opened at (the user has not moved
+// it). `opening`: opened without a kept view and Excalidraw has not reported the view yet.
+const views = new Map<string, { view: View | null; fitted: boolean; opening?: boolean }>();
 
 /** The view the user left `path` at in this tab; null if it was never opened or never moved from its fit. */
 export function rememberedView(path: string | undefined): View | null {
@@ -45,17 +49,15 @@ export function rememberedView(path: string | undefined): View | null {
   return v && !v.fitted ? v.view : null;
 }
 
-/** Note the view `path` was fitted to on open, so it is not taken for a view the user chose. */
-export function noteFitted(path: string | undefined, v: View): void {
-  if (path) views.set(path, { view: { ...v }, fitted: true });
-}
-
 /** Keep the current view of `path`, for its next open (reload, switching back). */
 export function rememberView(path: string | undefined, v: View): void {
   if (!path || ![v.scrollX, v.scrollY, v.zoom].every(Number.isFinite) || v.zoom <= 0) return;
   const old = views.get(path);
-  if (old && same(old.view, v)) return;
-  views.set(path, { view: { scrollX: v.scrollX, scrollY: v.scrollY, zoom: v.zoom }, fitted: false });
+  const view = { scrollX: v.scrollX, scrollY: v.scrollY, zoom: v.zoom };
+  // The first view after an open is the one it opened at, whatever Excalidraw made of it.
+  if (old?.opening) return void views.set(path, { view, fitted: true });
+  if (old?.view && same(old.view, v)) return;
+  views.set(path, { view, fitted: false });
 }
 
 /** Forget every remembered view (tests). */
@@ -64,13 +66,14 @@ export function forgetViews(): void {
 }
 
 /**
- * The opening view of `path`: the one the user left it at, else a fit of `bounds` (noted as fitted), else null
- * (Excalidraw then centres the content at 100%, as before).
+ * The opening view of `path`: the one the user left it at, else a fit of `bounds`, else null (Excalidraw then
+ * centres the content at 100%, as before). Unless it is the user's, the next view reported for `path` is taken
+ * as this opening view, not as a move.
  */
 export function openingView(path: string | undefined, bounds: Bounds | null, width: number, height: number): View | null {
   const kept = rememberedView(path);
   if (kept) return kept;
   const fit = fitView(bounds, width, height);
-  if (fit) noteFitted(path, fit);
+  if (path) views.set(path, { view: fit, fitted: true, opening: true });
   return fit;
 }
