@@ -24,7 +24,7 @@ const freePort = () =>
     s.on('error', fail);
   });
 
-test('settings dialog: PR/CI switch flips, persists, and names a broken settings file', { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 }, async (t) => {
+test('settings dialog: PR/CI switch flips, persists, names a broken settings file once, keeps focus and recovers', { skip: !ON && 'set DRAW_E2E=1, CHROME and PLAYWRIGHT_CORE to run', timeout: 180_000 }, async (t) => {
   const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_CORE, 'index.mjs')).href);
   const repo = mkdtempSync(join(tmpdir(), 'draw-prtoggle-'));
   const home = mkdtempSync(join(tmpdir(), 'draw-prtoggle-home-'));
@@ -50,7 +50,10 @@ test('settings dialog: PR/CI switch flips, persists, and names a broken settings
   let browser;
   t.after(async () => {
     await browser?.close();
+    // Wait for the server to exit so it cannot write into the scratch repo while it is being removed (ENOTEMPTY).
+    const exited = server.exitCode !== null ? Promise.resolve() : new Promise((r) => server.once('exit', r));
     server.kill();
+    await exited;
     fake.cleanup();
     rmSync(repo, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -82,17 +85,46 @@ test('settings dialog: PR/CI switch flips, persists, and names a broken settings
   await sw().click();
   await dialog.getByText('켜짐', { exact: true }).waitFor();
 
-  // 2. File breaks while the dialog is open: the toggle's 409 shows the cause, not the unsupported text.
+  // 2. File breaks while the dialog is open: the toggle's 409 shows the cause once (not in the status line too),
+  // the red line describes the switch, and the switch stays enabled with keyboard focus on it.
+  const BROKEN = '설정 파일을 읽을 수 없어요. 파일을 확인해 주세요.';
+  const describedBy = async () => {
+    const ids = (await sw().getAttribute('aria-describedby')) ?? '';
+    return page.evaluate((list) => list.split(/\s+/).filter(Boolean).map((id) => document.getElementById(id)?.textContent ?? '').join(' '), ids);
+  };
   writeFileSync(settingsFile, '{ not json');
-  await sw().click();
-  await dialog.getByText('설정 파일을 읽을 수 없어요. 파일을 확인해 주세요.').first().waitFor();
+  await sw().focus();
+  await page.keyboard.press('Space');
+  await dialog.getByText(BROKEN).waitFor();
+  assert.equal(await dialog.getByText(BROKEN).count(), 1, 'the 409 cause shows once');
+  assert.equal(await dialog.getByRole('status').filter({ hasText: BROKEN }).count(), 0);
   assert.equal(await dialog.getByText('이 서버에선 바꿀 수 없어요').count(), 0);
-  assert.equal(await sw().isDisabled(), true);
+  assert.equal(await describedBy(), BROKEN);
+  assert.equal(await sw().isDisabled(), false);
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch', 'focus stays on the switch');
 
-  // 3. Dialog opened with the file already broken (GET 409): same cause shown.
+  // 2b. Pressing again with the file still broken keeps the cause and focus; after fixing the file it recovers in place.
+  await page.keyboard.press('Space');
+  await dialog.getByText(BROKEN).waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch');
+  writeFileSync(settingsFile, JSON.stringify({ prStatus: true }));
+  await page.keyboard.press('Space');
+  await dialog.getByText('켜짐', { exact: true }).waitFor();
+  assert.equal(await sw().getAttribute('aria-checked'), 'true');
+  assert.equal(await dialog.getByText(BROKEN).count(), 0);
+  assert.equal(await sw().getAttribute('aria-describedby'), null);
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('role')), 'switch');
+  await page.keyboard.press('Space');
+  await dialog.getByText('꺼짐', { exact: true }).waitFor();
+  assert.equal(JSON.parse(readFileSync(settingsFile, 'utf8')).prStatus, false, 'toggling works again after recovery');
+
+  // 3. Dialog opened with the file already broken (GET 409): same cause shown once and linked; switch stays usable.
+  writeFileSync(settingsFile, '{ not json');
   await open();
-  await dialog.getByText('설정 파일을 읽을 수 없어요. 파일을 확인해 주세요.').first().waitFor();
+  await dialog.getByText(BROKEN).waitFor();
+  assert.equal(await dialog.getByText(BROKEN).count(), 1);
   assert.equal(await dialog.getByText('이 서버에선 바꿀 수 없어요').count(), 0);
-  assert.equal(await sw().isDisabled(), true);
+  assert.equal(await describedBy(), BROKEN);
+  assert.equal(await sw().isDisabled(), false);
   assert.deepEqual(errors, []);
 });
