@@ -3,6 +3,7 @@
 // limit guard is changed in 설정.
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
+import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { roleColor } from '../run/overlayModel';
 import { burnWarnText, fmtK, fmtRate, fmtUsd, pct, until } from './lib/format.ts';
@@ -105,6 +106,7 @@ function DailyPanel({ days }: { days: UsageDay[] }) {
 
 const th = 'pb-2 font-normal';
 const REFETCH_DELAY_MS = 2000;
+const REFETCH_MAX_WAIT_MS = 10_000;
 
 export function UsagePage() {
   const models = useDispatch(s => s.models);
@@ -113,20 +115,32 @@ export function UsagePage() {
   const [days, setDays] = useState<UsageDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Refetch only when the sessions' cost total moves (a finished turn adds cost to today), not on every session
-  // event, and wait a moment after a change so a burst of finished turns costs one request.
-  const costTotal = Math.round(sessions.reduce((a, s) => a + (s.cost ?? 0), 0) * 1e4);
+  // Refetch only when the sessions' cost or token totals move (a finished turn adds to today; Codex and agy report
+  // tokens but no cost), not on every session event. Wait a moment after a change so a burst of finished turns costs
+  // one request, but never longer than REFETCH_MAX_WAIT_MS while changes keep coming.
+  const usageKey = sessions.reduce((a, s) => a + Math.round((s.cost ?? 0) * 1e4) + s.usage.input + s.usage.output + s.usage.cacheRead + s.usage.cacheWrite, 0);
   const loaded = useRef(false);
+  const pendingSince = useRef<number | null>(null);
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     let alive = true;
+    let delay = 0;
+    if (loaded.current) {
+      pendingSince.current ??= Date.now();
+      delay = Math.max(0, Math.min(REFETCH_DELAY_MS, pendingSince.current + REFETCH_MAX_WAIT_MS - Date.now()));
+    }
     const timer = setTimeout(() => {
+      pendingSince.current = null;
       api<{ days: UsageDay[] }>('GET', '/api/usage').then(
         r => { if (alive) { loaded.current = true; setDays(r.days); setError(null); } },
         (e: Error) => alive && setError(e.message),
       );
-    }, loaded.current ? REFETCH_DELAY_MS : 0);
+    }, delay);
     return () => { alive = false; clearTimeout(timer); };
-  }, [costTotal]);
+  }, [usageKey, retry]);
+  // A failed first load tries again on the next session event (or the button below).
+  const firstLoadFailed = error !== null && days === null;
+  useEffect(() => { if (firstLoadFailed) setRetry(n => n + 1); }, [sessions]);
 
   const list = days ?? [];
   const agg = useMemo(() => aggregate((days ?? []).slice(-WEEK)), [days]);
@@ -140,7 +154,12 @@ export function UsagePage() {
   const top = topSessions(sessions);
   const sessionTotal = sessions.reduce((a, s) => a + (s.cost ?? 0), 0) || 1;
 
-  if (error && !days) return <p role="alert" className="p-6 text-sm text-destructive">사용량을 불러오지 못했어요: {error}</p>;
+  if (firstLoadFailed) return (
+    <div role="alert" className="flex items-center gap-3 p-6 text-sm text-destructive">
+      <p>사용량을 불러오지 못했어요: {error}</p>
+      <Button size="sm" variant="outline" onClick={() => setRetry(n => n + 1)}>다시 불러오기</Button>
+    </div>
+  );
   if (!days) return <p className="p-6 text-sm text-muted-foreground">불러오는 중이에요…</p>;
 
   return (
