@@ -7,10 +7,13 @@
 // to this API the first one does not fail, so they do not prove the old race by themselves.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, symlinkSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { acquireBreak, clearDeadBreak } from '../../server/lock.js';
+import { acquireBreak, claimLock, clearDeadBreak } from '../../server/lock.js';
+
+const fsp = createRequire(import.meta.url)('node:fs/promises');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const isDead = async (name) => name.startsWith('dead-');
@@ -265,6 +268,48 @@ test('acquireBreak: held() turns false once our break was cleared and taken by s
     assert.equal(await releaseB.held(), false);
     assert.equal(existsSync(brk), false);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #343: the held() check in removeIfUnchanged, driven through claimLock. Right after our rename into
+// `.break`, another server judges us dead, clears our owner file and takes the break (B) while the
+// stale lock is still in place. We must not delete it under B; claimLock retries and gets in only
+// after B lets go. Before #340 the stale lock was removed while B held the break.
+test('claimLock: a stale lock is left alone while our .break entry is gone, and claimLock retries', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-343-'));
+  const file = join(dir, 'x.lock');
+  const brk = `${file}.break`;
+  const stale = JSON.stringify({ pid: 2 ** 22 + 54321, port: null });
+  writeFileSync(file, stale);
+  const other = `${process.pid}-00000000-0000-4000-8000-000000000343`; // a live owner name, never judged dead
+  const realRename = fsp.rename;
+  let entries = 0;
+  let staleWhileBHeld = null;
+  let bLeft;
+  fsp.rename = async (from, to) => {
+    await realRename(from, to);
+    if (to !== brk || entries++ > 0) return;
+    // We just took the break. B clears our owner file and takes it over.
+    for (const name of readdirSync(brk)) rmSync(join(brk, name));
+    writeFileSync(join(brk, other), '');
+    bLeft = sleep(50).then(() => {
+      staleWhileBHeld = existsSync(file) && readFileSync(file, 'utf8') === stale;
+      rmSync(brk, { recursive: true, force: true });
+    });
+  };
+  syncBuiltinESMExports();
+  try {
+    const res = await claimLock(file, { isLive: async () => false });
+    await bLeft;
+    assert.equal(staleWhileBHeld, true, 'the stale lock stays while B holds the break');
+    assert.ok(entries >= 2, 'claimLock retried and took the break again');
+    assert.equal(res.ok, true);
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).pid, process.pid);
+    await res.lock.release();
+  } finally {
+    fsp.rename = realRename;
+    syncBuiltinESMExports();
     rmSync(dir, { recursive: true, force: true });
   }
 });

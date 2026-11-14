@@ -56,7 +56,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * under `<file>.break`, so two servers replacing the same stale lock cannot have the slower one
  * delete the lock the faster one just took. Right before the rm we check `.break` still names us
  * (#205): if we were cleared as dead meanwhile, someone else may be inside, so we delete nothing and
- * claimLock's next attempt starts over.
+ * claimLock's next attempt starts over. This narrows the race window, it does not close it: we can
+ * still be cleared between that check and the rm.
  */
 async function removeIfUnchanged(file, raw) {
   const release = await acquireBreak(`${file}.break`);
