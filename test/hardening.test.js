@@ -88,7 +88,7 @@ test('modules are closed in reverse setup order', async () => {
 });
 
 test('cli: one workspace dir, unknown flags and extra args are rejected', () => {
-  assert.deepEqual(parseArgs(['/p']), { workspaceDir: '/p' });
+  assert.deepEqual(parseArgs(['/p'], {}), { workspaceDir: '/p', projectMode: false });
   assert.throws(() => parseArgs(['/p', '--port', '1']), /Unknown option: --port/);
   assert.throws(() => parseArgs(['/p', '/q']), /Unexpected argument/);
   assert.throws(() => parseArgs([]), /Missing <workspace-dir>/);
