@@ -45,6 +45,11 @@ test('unsupported types show the not-yet placeholder', async () => {
   assert.match(svgOf(p.dataURL), /아직 그릴 수 없어요/);
 });
 
+test('the placeholder asks for true glyph advances like diagram pictures (E63 follow-up)', async () => {
+  const svg = svgOf((await renderBlock(block('bpmn2', 'x', 'bpmn'), 'dark')).dataURL);
+  assert.match(svg.slice(0, svg.indexOf('>')), /\stext-rendering="geometricPrecision"/);
+});
+
 test('a call with unchanged code returns the same pending result, even when the block only moved', async () => {
   const a = renderBlock(block('same1', GOOD), 'light');
   const b = renderBlock({ ...block('same1', GOOD), x: 500, y: 90, w: 300, h: 200 }, 'light');

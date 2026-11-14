@@ -4,6 +4,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
 import { cpSync, createReadStream, existsSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
+import { patchFontSizeSteps } from './src/canvas/sizeSteps.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const outDir = fileURLToPath(new URL('../public', import.meta.url));
@@ -29,6 +30,14 @@ function stripCdnFallback(code: string, id: string): string | null {
   return out;
 }
 
+/** Every rewrite of Excalidraw's bundle: the font fallback and the style panel's size steps (#292). */
+function patchExcalidraw(code: string, id: string): string | null {
+  if (!EXCALIDRAW_DIST_RE.test(id)) return null;
+  const local = stripCdnFallback(code, id);
+  const sized = patchFontSizeSteps(local ?? code);
+  return sized ?? local;
+}
+
 function excalidrawAssets(): Plugin {
   return {
     name: 'excalidraw-assets',
@@ -43,7 +52,7 @@ function excalidrawAssets(): Plugin {
       });
     },
     transform(code, id) {
-      const out = stripCdnFallback(code, id);
+      const out = patchExcalidraw(code, id);
       return out === null ? null : { code: out, map: null };
     },
     writeBundle() {
@@ -57,14 +66,14 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), excalidrawAssets()],
   publicDir: false,
   // The dev server pre-bundles Excalidraw (dist/dev/) outside the plugin pipeline above, so the
-  // same rewrite runs inside the dependency optimizer too.
+  // same rewrites run inside the dependency optimizer too.
   optimizeDeps: {
     rolldownOptions: {
       plugins: [
         {
           name: 'excalidraw-assets-deps',
           transform(code: string, id: string) {
-            const out = stripCdnFallback(code, id);
+            const out = patchExcalidraw(code, id);
             return out === null ? null : { code: out, map: null };
           },
         },

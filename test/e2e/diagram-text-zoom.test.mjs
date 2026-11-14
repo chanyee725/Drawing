@@ -19,6 +19,7 @@ const FIXTURES = ['architecture-web-service', 'flowchart-ticket-workflow', 'sequ
 const REPORT = 'direction right\nNeed identified [shape: oval, color: green]\nRaise a requisition\nNeed identified > Raise a requisition: The supplier ships';
 /** Picture variants the canvas shows when zoomed out (resolution.ts), and the reference: big enough that rounding is gone.
  *  4x, not 8x: the whole picture is drawn at this size (up to ~9.5k px wide at 8x), which can time out on a busy machine. */
+// Only 1x and 0.5x: below that, labels are a few device pixels tall and ink width no longer tracks letter spacing.
 const SMALL = [1, 0.5];
 const REFERENCE = 4;
 
