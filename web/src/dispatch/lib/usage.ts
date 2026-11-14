@@ -1,0 +1,90 @@
+// Usage screen numbers (E29): week totals, per-model and per-role sums, unusual days, top sessions, the always-on
+// order and the screen picked by the URL hash. Pure: node --test loads it directly. Inputs are the metadata the
+// server already keeps (daily cost and token counts, session cost); nothing here reads or keeps a transcript.
+import { recordState, type Entry } from '../../../../shared/dispatch/timeline.js';
+import type { Session, SessionState, Usage, UsageDay } from '../../../../shared/dispatch/types.ts';
+import { stateOf } from './format.ts';
+
+export const WEEK = 7;
+
+export type ModelSum = Usage & { cost: number };
+
+/** Per-model token and cost sums and per-role cost sums over `days`. */
+export function aggregate(days: readonly UsageDay[]): { byModel: Record<string, ModelSum>; byRole: Record<string, number> } {
+  const byModel: Record<string, ModelSum> = {};
+  const byRole: Record<string, number> = {};
+  for (const d of days) {
+    for (const [m, u] of Object.entries(d.models ?? {})) {
+      const t = (byModel[m] ??= { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0 });
+      t.input += u.input; t.output += u.output; t.cacheRead += u.cacheRead; t.cacheWrite += u.cacheWrite; t.cost += u.cost;
+    }
+    for (const [r, c] of Object.entries(d.roles ?? {})) byRole[r] = (byRole[r] ?? 0) + c;
+  }
+  return { byModel, byRole };
+}
+
+const sum = (ds: readonly UsageDay[]) => ds.reduce((a, d) => a + (d.cost || 0), 0);
+
+/** The four headline numbers: today, the last 7 days, the 7 before them, and everything the server sent (14 days). */
+export function totals(days: readonly UsageDay[]) {
+  return { today: days.at(-1)?.cost ?? 0, week: sum(days.slice(-WEEK)), prev: sum(days.slice(0, -WEEK)), all: sum(days) };
+}
+
+/** "그 전 7일보다 +20%" text, or the daily average when there is no earlier week to compare with. */
+export function weekHint(week: number, prev: number, fmt: (n: number) => string): string {
+  if (!prev) return `하루 평균 ${fmt(week / WEEK)}`;
+  const d = Math.round((week / prev - 1) * 100);
+  return `그 전 7일보다 ${d >= 0 ? '+' : ''}${d}%`;
+}
+
+/** Share of input tokens read from cache: cacheRead / (input + cacheRead + cacheWrite); null with no input. */
+export function cacheRate(byModel: Record<string, ModelSum>): number | null {
+  let r = 0, t = 0;
+  for (const u of Object.values(byModel)) { r += u.cacheRead; t += u.input + u.cacheRead + u.cacheWrite; }
+  return t ? r / t : null;
+}
+
+/**
+ * Days that cost at least twice the usual day. "Usual" is the median of the days that spent anything, and needs
+ * three of them: idle days would drag the median to zero. Returns that median and, per day, the multiple (one
+ * decimal) or null.
+ */
+export function outliers(totals: readonly number[]): { median: number | null; ratio: (number | null)[] } {
+  const spent = totals.filter(t => t > 0).sort((a, b) => a - b);
+  if (spent.length < 3) return { median: null, ratio: totals.map(() => null) };
+  const m = spent.length >> 1;
+  const median = spent.length % 2 ? spent[m] : (spent[m - 1] + spent[m]) / 2;
+  return { median, ratio: totals.map(t => (t >= 2 * median ? Math.round((t / median) * 10) / 10 : null)) };
+}
+
+/** Sum of the per-session hourly rates that are known, and how many sessions have one. */
+export function burnNow(sessions: readonly Pick<Session, 'burn'>[]): { perHour: number; rated: number } {
+  const rated = sessions.filter(s => s.burn?.perHour != null);
+  return { perHour: rated.reduce((a, s) => a + (s.burn?.perHour ?? 0), 0), rated: rated.length };
+}
+
+/** The `n` sessions that cost the most (sessions without a cost, like Codex or Gemini, are left out). */
+export function topSessions<T extends Pick<Session, 'cost'>>(sessions: readonly T[], n = 10): T[] {
+  return sessions.filter(s => s.cost != null).sort((a, b) => (b.cost ?? 0) - (a.cost ?? 0)).slice(0, n);
+}
+
+/** Always-on order: needs-a-person states first; inside a state by start time then id, so tiles only move on a state change. */
+const RANK: Record<SessionState, number> = { failed: 0, stuck: 1, waiting: 2, working: 3, resting: 4, done: 5 };
+export function alwaysOnOrder<T extends { id: string; startedAt: number }>(list: readonly T[], stateOf: (s: T) => SessionState): T[] {
+  return [...list].sort((a, b) => (RANK[stateOf(a)] ?? 9) - (RANK[stateOf(b)] ?? 9) || a.startedAt - b.startedAt || a.id.localeCompare(b.id));
+}
+
+/** Screens of /dispatch, picked by the URL hash so a wall display can open `#tv` directly and survive a reload. */
+export type View = 'sessions' | 'timeline' | 'usage' | 'tv';
+export function viewOf(hash: string): View {
+  const h = hash.replace(/^#/, '');
+  return h === 'timeline' || h === 'usage' || h === 'tv' ? h : 'sessions';
+}
+export const hashOf = (v: View) => (v === 'sessions' ? '' : `#${v}`);
+
+/** A timeline row's history: the server's entries plus the live state, if a session event moved it after the last fetch. */
+export function rowHistory(s: Pick<Session, 'status' | 'state' | 'stateSince'>, server: readonly Entry[] | undefined, now: number): Entry[] {
+  const h: Entry[] = server ? [...server] : [];
+  recordState(h, stateOf(s), Math.min(now, s.stateSince ?? now));
+  return h;
+}
