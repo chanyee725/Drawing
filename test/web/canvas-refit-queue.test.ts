@@ -18,13 +18,13 @@ function queue() {
 test('texts measured after the clean font loaded do not wait', () => {
   const { q, load } = queue();
   load();
-  q.measured(['a']);
+  q.wait(['a']);
   assert.equal(q.size, 0);
 });
 
 test('texts wait until the font loads, then are measured once', () => {
   const { q, load } = queue();
-  q.measured(['a']);
+  q.wait(['a']);
   assert.deepEqual(q.waiting(), ['a']);
   assert.equal(q.take([text('a')], measure), null, 'font not loaded: nothing happens');
   assert.deepEqual(q.waiting(), ['a'], 'and the text still waits');
@@ -41,7 +41,7 @@ test('the font loading before the texts are in the scene does not lose them (#30
   // Opening a file: the texts are measured before the font loads, the font loads (loadingdone) and the
   // canvas runs the queue while its scene is still empty; the texts enter the scene afterwards.
   const { q, load } = queue();
-  q.measured(['a', 'b']);
+  q.wait(['a', 'b']);
   load();
   assert.equal(q.take(null, measure), null, 'no canvas yet');
   assert.equal(q.take([], measure), null, 'an empty scene');
@@ -56,7 +56,7 @@ test('the font loading before the texts are in the scene does not lose them (#30
 
 test('a measured text keeps its version: the new size is saved with the next edit', () => {
   const { q, load } = queue();
-  q.measured(['a']);
+  q.wait(['a']);
   load();
   const out = q.take([text('a')], measure)!;
   assert.equal(out.elements[0].width, 80);
@@ -65,7 +65,7 @@ test('a measured text keeps its version: the new size is saved with the next edi
 
 test('a deleted text stops waiting', () => {
   const { q, load } = queue();
-  q.measured(['a']);
+  q.wait(['a']);
   load();
   const out = q.take([{ ...text('a'), isDeleted: true }], measure)!;
   assert.equal(out.changed, false);
@@ -74,7 +74,33 @@ test('a deleted text stops waiting', () => {
 
 test('clear drops every waiting text', () => {
   const { q } = queue();
-  q.measured(['a', 'b']);
+  q.wait(['a', 'b']);
   q.clear();
   assert.equal(q.size, 0);
+});
+
+test('a pasted text that waited is measured as a new version; an opened one keeps its version', () => {
+  const { q, load } = queue();
+  q.wait(['open']);
+  q.wait(['paste'], true);
+  load();
+  const bumped = (e: El, patch: Partial<FitEl>): El => ({ ...e, ...patch, version: e.version + 1 });
+  const out = q.take([text('open'), text('paste')], measure, bumped)!;
+  const [open, paste] = out.elements as El[];
+  assert.equal(open.width, 80);
+  assert.equal(open.version, 5, 'opening writes nothing');
+  assert.equal(paste.width, 80);
+  assert.equal(paste.version, 6, 'the paste is saved with its new size');
+});
+
+test('a text queued as opened and then pasted is bumped', () => {
+  const { q, load } = queue();
+  q.wait(['a'], true);
+  q.wait(['a']);
+  q.wait(['b']);
+  q.wait(['b'], true);
+  load();
+  const bumped = (e: El, patch: Partial<FitEl>): El => ({ ...e, ...patch, version: e.version + 1 });
+  const out = q.take([text('a'), text('b')], measure, bumped)!;
+  assert.deepEqual((out.elements as El[]).map((e) => e.version), [6, 6]);
 });

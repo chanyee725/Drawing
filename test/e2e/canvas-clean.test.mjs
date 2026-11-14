@@ -149,9 +149,9 @@ test('a handwriting text opens in the clean font with its width measured in that
   assert.deepEqual(errors, []);
 });
 
-test('a text measured before the clean font loads is measured again once it has (#305)', SKIP, async (t) => {
-  // Excalidraw's copy of the clean font is held back until the scene is on screen, so the text is first measured
-  // with a fallback font and must wait for the font (RefitQueue).
+test('a text that changed font before the clean font loads is measured once it has (#305)', SKIP, async (t) => {
+  // Excalidraw's copy of the clean font is held back until the scene is on screen, so the text must not be measured
+  // with a fallback font: it waits for the font (RefitQueue).
   let release;
   const held = new Promise((r) => (release = r));
   const str = 'Waits for the font';
@@ -178,6 +178,40 @@ test('a text measured before the clean font loads is measured again once it has 
   const want = await cleanWidth(str);
   assert.ok(Math.abs(want - before) >= 1, `the fallback font measures differently (${before} vs ${want}), or this test proves nothing`);
   assert.ok(Math.abs(late.width - want) < 1, `width ${late.width}, measured in the clean font ${want}`);
+  assert.deepEqual(errors, []);
+});
+
+test('opening a handwriting file alone writes nothing', SKIP, async (t) => {
+  const { saved, errors } = await open(t, 'quiet', [text('hand', 100, 100, 'Just looking', 5)]);
+  const s = await saved(); // past the autosave debounce, no edit
+  const hand = s.get('hand');
+  assert.equal(hand.version, 5, 'the saved version stays');
+  assert.equal(hand.width, 3, 'and so does the saved width');
+  assert.equal(hand.fontFamily, 5, 'and the saved font');
+  assert.deepEqual(errors, []);
+});
+
+test("a labelled rectangle grows to fit its label in the clean font, and its arrow follows", SKIP, async (t) => {
+  // A label saved one line tall in a box only 30 high: in the clean font at a narrow width it wraps to more lines.
+  const str = 'A label long enough to wrap in this box';
+  const box = { ...base('box', 'rectangle', 100, 100, 120, 30), boundElements: [{ id: 'label', type: 'text' }, { id: 'down', type: 'arrow' }] };
+  const label = text('label', 105, 105, str, 5, { width: 110, height: 20, containerId: 'box', textAlign: 'center', verticalAlign: 'middle', autoResize: true, index: 'a1' });
+  // An arrow from below into the bottom edge (gap 4).
+  const down = { ...base('down', 'arrow', 160, 400, 0, 266), index: 'a2', points: [[0, 0], [0, -266]], startBinding: null, endBinding: { elementId: 'box', focus: 0, gap: 4 }, startArrowhead: null, endArrowhead: 'arrow', elbowed: false, lastCommittedPoint: null };
+  const { saved, errors, edit } = await open(t, 'boxed', [box, label, down]);
+  await edit();
+  const s = await saved();
+  const b = s.get('box');
+  const l = s.get('label');
+  const a = s.get('down');
+  assert.equal(l.fontFamily, 9);
+  assert.ok(l.height > 25, `the label wraps: height ${l.height}`);
+  assert.equal(b.y, 100, 'the box keeps its top');
+  assert.equal(b.height, Math.ceil(l.height) + 10, 'and grows to fit the label');
+  assert.ok(Math.abs(l.y + l.height / 2 - (b.y + b.height / 2)) < 1, `the label is centred: ${l.y} + ${l.height} in ${b.y} + ${b.height}`);
+  const tip = a.y + a.points.at(-1)[1];
+  assert.ok(Math.abs(tip - (b.y + b.height + 4)) < 1, `the arrow ends at the new bottom edge: ${tip}`);
+  assert.equal(a.y, 400, 'and starts where it did');
   assert.deepEqual(errors, []);
 });
 
@@ -234,11 +268,13 @@ test('the style panel offers no sloppiness or handwriting fonts', SKIP, async (t
   await page.locator('.excalidraw [data-testid="font-family-show-fonts"]').click();
   const list = page.locator('.dropdown-menu.fonts');
   await list.waitFor({ timeout: 5000 });
-  // Excalidraw lists Excalifont always and Virgil only while the scene uses it.
+  // Excalidraw lists Excalifont always: it must still be there, and hidden.
   const excalifont = list.locator('.dropdown-menu-item[value="5"]');
   assert.equal(await excalifont.count(), 1, 'Excalidraw still lists Excalifont');
   assert.equal(await excalifont.isVisible(), false, 'and it is hidden');
-  assert.equal(await list.locator('.dropdown-menu-item[value="1"]').isVisible(), false, 'Virgil is not shown');
+  // Virgil is deprecated: Excalidraw lists it only while the scene uses it (or with showDeprecatedFonts), and the
+  // canvas turns every Virgil text clean. So it is not in the list at all; the index.css rule is a safeguard.
+  assert.equal(await list.locator('.dropdown-menu-item[value="1"]').count(), 0, 'Virgil is not listed');
   // Liberation Sans (9) is never listed (Excalidraw marks it server-side); the other clean fonts are.
   assert.equal(await list.locator('.dropdown-menu-item[value="6"]').isVisible(), true, 'Nunito is listed');
   assert.deepEqual(errors, []);

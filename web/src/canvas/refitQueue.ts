@@ -1,9 +1,11 @@
-// Texts that changed font (cleanStyle.ts) before Excalidraw's copy of the clean font had loaded were measured with
-// a fallback font. They wait here and are measured again once the font is in (E58, #305).
+// Texts that changed font (cleanStyle.ts) before Excalidraw's copy of the clean font had loaded would be measured
+// with a fallback font (and could grow their shape for good). They wait here and are measured once the font is in
+// (E58, #305).
 import { refitTexts, type FitEl } from './refit.ts';
 
 export class RefitQueue {
-  private ids = new Set<string>();
+  /** Waiting text id → whether its measured size is a new version (a paste, saved then) or not (opening). */
+  private ids = new Map<string, boolean>();
   private readonly fontLoaded: () => boolean;
 
   /** `fontLoaded` tells whether the clean font has loaded (injected, so tests need no browser). */
@@ -18,13 +20,16 @@ export class RefitQueue {
 
   /** The texts waiting, for tests. */
   waiting(): string[] {
-    return [...this.ids];
+    return [...this.ids.keys()];
   }
 
-  /** Texts just measured: those measured before the clean font loaded wait for it. */
-  measured(ids: Iterable<string>): void {
+  /**
+   * Texts that changed font wait for the clean font, unless it has loaded. `bump`: their measured size becomes a
+   * new version (a paste); otherwise versions stay (opening writes nothing). A text queued both ways is bumped.
+   */
+  wait(ids: Iterable<string>, bump = false): void {
     if (this.fontLoaded()) return;
-    for (const id of ids) this.ids.add(id);
+    for (const id of ids) this.ids.set(id, bump || !!this.ids.get(id));
   }
 
   /** Nothing waits any more (another file is shown). */
@@ -33,16 +38,28 @@ export class RefitQueue {
   }
 
   /**
-   * `scene` with the waiting texts measured again, or null when there is nothing to do yet: no scene, nothing
-   * waiting or the font not loaded. Versions stay as they are (as when opening): the new size is saved with the
-   * next edit. A text not in the scene yet keeps waiting: the font can load before the opened file's texts enter
-   * the scene, and the canvas runs the queue again on its next change (#305).
+   * `scene` with the waiting texts measured, or null when there is nothing to do yet: no scene, nothing waiting or
+   * the font not loaded. Texts queued without `bump` keep their versions (the new size is saved with the next edit);
+   * those queued with it go through `bumped`. A text not in the scene yet keeps waiting: the font can load before
+   * the opened file's texts enter the scene, and the canvas runs the queue again on its next change (#305).
    */
-  take<T extends FitEl>(scene: readonly T[] | null, measure: (els: T[]) => readonly T[]): { elements: readonly T[]; changed: boolean } | null {
+  take<T extends FitEl>(
+    scene: readonly T[] | null,
+    measure: (els: T[]) => readonly T[],
+    bumped?: (el: T, patch: Partial<FitEl>) => T,
+  ): { elements: readonly T[]; changed: boolean } | null {
     if (!scene || !this.ids.size || !this.fontLoaded()) return null;
-    const now = new Set<string>();
-    for (const e of scene) if (this.ids.delete(e.id)) now.add(e.id);
-    if (!now.size) return null;
-    return refitTexts(scene, now, measure);
+    const kept = new Set<string>();
+    const bump = new Set<string>();
+    for (const e of scene) {
+      const b = this.ids.get(e.id);
+      if (b === undefined) continue;
+      this.ids.delete(e.id);
+      (b ? bump : kept).add(e.id);
+    }
+    if (!kept.size && !bump.size) return null;
+    const first = kept.size ? refitTexts(scene, kept, measure) : { elements: scene, changed: false };
+    const second = bump.size ? refitTexts(first.elements, bump, measure, bumped) : { elements: first.elements, changed: false };
+    return { elements: second.elements, changed: first.changed || second.changed };
   }
 }

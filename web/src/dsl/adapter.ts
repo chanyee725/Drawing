@@ -2,6 +2,7 @@
 // Parsing uses shared/dsl (E2); the live preview uses shared/render (E3) via `renderPreview`.
 import { parse, type DiagramType as ParserType, type Diagram } from '../../../shared/dsl/index.ts';
 import { renderDiagram, sceneToSvg, type BlockLayout, type Scene } from '../../../shared/render/index.ts';
+import { GROUP_WRAP } from '../experiments.ts';
 import { reconcileForSave, reconcileLayout, type ReconcileReason } from '../../../shared/render/overrides.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
 
@@ -73,13 +74,13 @@ export async function renderPreview(type: string, code: string, theme: PreviewTh
   if (!pt) return null;
   try {
     if (!layout) {
-      const { svg, diagnostics, scene } = await renderDiagram(code, { type: pt, theme });
+      const { svg, diagnostics, scene } = await renderDiagram(code, { type: pt, theme, wrapGroups: GROUP_WRAP });
       return { svg, diagnostics, scene, theme };
     }
     // Drawing never changes the file: overrides the code no longer fits are left out here and pruned on save.
     const { ast, diagnostics } = parse(code, pt);
     const kept = ast.type === 'sequence' || ast.type === 'erd' ? { layout: undefined } : reconcileLayout(ast, layout);
-    const { svg, scene } = await renderDiagram(ast, { theme, layout: kept.layout });
+    const { svg, scene } = await renderDiagram(ast, { theme, layout: kept.layout, wrapGroups: GROUP_WRAP });
     return { svg, diagnostics, scene, theme, ...('reset' in kept && kept.reset ? { reset: kept.reset } : {}) };
   } catch {
     return null;

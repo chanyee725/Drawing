@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DARK_FILTER, applyDarkFilter, darkCanvasSeen, inDarkReachNear, preDarkFilter, preDarkFilterColor } from '../../shared/render/darkFilter.ts';
+import { DARK_CANVAS_BACKGROUND, DARK_FILTER, applyDarkFilter, darkCanvasSeen, inDarkReachNear, preDarkFilter, preDarkFilterColor } from '../../shared/render/darkFilter.ts';
 import { renderBlock } from '../../web/src/canvas/render.ts';
 import { THEMES, badgeColors } from '../../shared/render/theme.ts';
+import { sceneToSvg } from '../../shared/render/svg.ts';
+import type { Scene } from '../../shared/render/scene.ts';
 
 type Vec = [number, number, number];
 const rgbOf = (hex: string): Vec => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as Vec;
@@ -144,4 +146,42 @@ test('inDarkReachNear: in-reach colours come back as they are, out-of-reach ones
   assert.ok(hueGap(hue(red), hue('#d92d20')) <= 3, red);
   near(roundTrip(red), to255(rgbOf(red)), 1, 'red in reach');
   assert.equal(inDarkReachNear('#d92d20', () => false), null);
+});
+
+test('#296: an uncoloured participant box on the dark canvas shows the canvas colour, border and label still read', async () => {
+  assert.equal(DARK_CANVAS_BACKGROUND, '#121212');
+  const b = { id: 'darkseq1', type: 'sequence', code: 'Alice > Bob: hello\nBob > Alice: ok\n', x: 0, y: 0, w: 0, h: 0 };
+  const head = /<g data-role="column"[^>]*><rect [^>]*fill="(#[0-9a-f]{6})" stroke="(#[0-9a-f]{6})"/g;
+  const canvas = await renderBlock(b, 'dark-canvas');
+  const boxes = [...canvas.svg.matchAll(head)];
+  assert.equal(boxes.length, 4, 'two heads and two feet');
+  const t = THEMES.dark;
+  for (const [, fill, stroke] of boxes) {
+    assert.equal(seen(fill!), DARK_CANVAS_BACKGROUND, 'the box fill is the canvas');
+    near(to255(rgbOf(seen(stroke!))), to255(rgbOf(t.sequence!.columnStroke)), 1, 'border');
+    assert.ok(contrast(seen(stroke!), DARK_CANVAS_BACKGROUND) >= 3, 'border reads on the canvas');
+  }
+  const label = /<g data-role="column"[\s\S]*?<text [^>]*fill="(#[0-9a-f]{6})"[^>]*>(?:<tspan[^>]*>)Alice/.exec(canvas.svg);
+  assert.ok(label, 'participant label drawn');
+  assert.ok(contrast(seen(label[1]!), DARK_CANVAS_BACKGROUND) >= 4.5, 'label reads on the box');
+  // The dark export draws its own background, so its boxes keep the theme background (unchanged).
+  const dark = await renderBlock(b, 'dark');
+  for (const [, fill] of dark.svg.matchAll(head)) assert.equal(fill, t.background);
+});
+
+test('#296: muted text on a flat participant box is judged against the fill the box is drawn with', () => {
+  const pastel = { mode: 'pastel' as const };
+  const scene = (onRole?: 'column'): Scene => ({
+    type: 'sequence',
+    width: 100,
+    height: 40,
+    items: [{ kind: 'text', x: 50, y: 10, lines: ['note'], size: 14, lineHeight: 20, anchor: 'middle', weight: 400, font: 'clean', tone: 'muted', on: pastel, onRole }],
+  });
+  const ink = (svg: string) => /<text [^>]*fill="(#[0-9a-f]{6})"/.exec(svg)?.[1];
+  const t = THEMES.dark;
+  // On a mid grey surface the muted grey falls under 4.5:1 and is lifted; on the usual fill it reads as is.
+  const surface = '#6b6b6b';
+  assert.equal(ink(sceneToSvg(scene(), { theme: 'dark', surface })), t.muted);
+  assert.notEqual(ink(sceneToSvg(scene('column'), { theme: 'dark', surface })), t.muted);
+  assert.equal(ink(sceneToSvg(scene('column'), { theme: 'dark' })), t.muted);
 });

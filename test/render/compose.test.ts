@@ -254,9 +254,32 @@ function reference(): number {
   return sum;
 }
 
-// Compose + SVG of the diagram below is about 0.17x the reference alone and up to 0.4x with the CPUs
-// oversubscribed 2x; 0.6 leaves room for noise and catches a ~3.5x slowdown (the old budget was 16 ms, ~6x).
+// Main-thread CPU clock: process.threadCpuUsage (added in Node 23.9, missing on older 22.x). process.cpuUsage also counts V8's
+// background threads (GC helpers, concurrent marking, JIT), whose work from one call spills into the next and
+// let a 3x slower compose pass (#320 review). Older Node falls back to the process-wide clock.
+const cpuClock: (prev?: NodeJS.CpuUsage) => NodeJS.CpuUsage =
+  typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage.bind(process) : process.cpuUsage.bind(process);
+
+/**
+ * CPU time of `fn` in ms. Unlike wall time it does not count the time this thread waits for a core, which is
+ * what made the wall-clock ratio jump past the budget when the machine runs several sessions (load 80 on 32 cores).
+ */
+function cpuMs(fn: () => unknown): number {
+  const t0 = cpuClock();
+  fn();
+  const d = cpuClock(t0);
+  return (d.user + d.system) / 1000;
+}
+
+// The thread CPU clock ticks in about 1 ms steps and one compose + SVG takes a few ms, so each sample runs it
+// COMPOSE_REPS times and divides, to keep one tick well under the budget's margin.
+const COMPOSE_REPS = 4;
+
+// Main-thread CPU-time ratio of one compose + SVG of the diagram below to the reference (Node 24, 32 cores):
+// 0.34-0.43 idle and with 48 busy loops; a 2x slower compose 0.62-0.84, a 3x slower one 0.87-1.13.
+// A round over budget is measured again (at most 3 rounds): a burst of load can spoil one round, not all three.
 const MAX_RATIO = 0.6;
+const ROUNDS = 3;
 
 test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference workload`, async () => {
   const lines: string[] = [];
@@ -273,20 +296,24 @@ test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference 
     items[`N2_${i}`] = { cx: c.x + 37, cy: c.y - 55, parent: 'G2' };
   }
   const layout = layoutOf(items);
+  const compose = () => sceneToSvg(composeGraph(d, base, layout));
   for (let i = 0; i < 3; i++) {
-    sceneToSvg(composeGraph(d, base, layout)); // warm-up (JIT)
+    compose(); // warm-up (JIT)
     reference();
   }
-  let comp = Infinity;
-  let ref = Infinity;
-  for (let i = 0; i < 9; i++) {
-    let t0 = performance.now();
-    reference();
-    ref = Math.min(ref, performance.now() - t0);
-    t0 = performance.now();
-    sceneToSvg(composeGraph(d, base, layout));
-    comp = Math.min(comp, performance.now() - t0);
+  const seen: string[] = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    let comp = Infinity;
+    let ref = Infinity;
+    for (let i = 0; i < 9; i++) {
+      ref = Math.min(ref, cpuMs(reference));
+      comp = Math.min(comp, cpuMs(() => {
+        for (let k = 0; k < COMPOSE_REPS; k++) compose();
+      }) / COMPOSE_REPS);
+    }
+    const ratio = comp / ref;
+    seen.push(`${ratio.toFixed(2)}x (compose ${comp.toFixed(1)} ms CPU, reference ${ref.toFixed(1)} ms CPU)`);
+    if (ratio < MAX_RATIO) return;
   }
-  const ratio = comp / ref;
-  assert.ok(ratio < MAX_RATIO, `compose ${comp.toFixed(1)} ms = ${ratio.toFixed(2)}x reference ${ref.toFixed(1)} ms`);
+  assert.fail(`compose + SVG over ${MAX_RATIO}x the reference in all ${ROUNDS} rounds: ${seen.join('; ')}`);
 });

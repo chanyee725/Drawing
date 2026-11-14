@@ -77,6 +77,9 @@ export function mergeResult(prev, next) {
 }
 
 export function stepStateOf(step) {
+  // Finished in an earlier run (계획 다시 열기, E27): its sessions may still report (the session that did it goes idle,
+  // or a later run's events relink it through its old task), but the step stays done.
+  if (step.carried) return 'done';
   const states = step.sessions.map((s) => s.state).filter(Boolean);
   if (states.length === 0) return step.state;
   for (const st of SEVERITY) if (states.includes(st)) return st;

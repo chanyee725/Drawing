@@ -6,10 +6,10 @@
 import { round } from './common.ts';
 import { iconFor } from './icons.ts';
 import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
-import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
+import type { Paint, Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, isWideChar, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, graphemes, isWideCluster, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -22,6 +22,11 @@ export interface SvgOptions {
    * host puts over the picture. Not applied to the label mask, which is luminance, not colour.
    */
   mapColor?: (color: string) => string;
+  /**
+   * The colour the picture is seen on when `background` is off (the host canvas, before `mapColor`). Boxes whose
+   * fill is meant to be the background (flat sequence participants) take it. Default: the theme background.
+   */
+  surface?: string;
 }
 
 /** What every painter below needs: the theme, its colours and the colour rewrite. */
@@ -33,6 +38,8 @@ interface Ctx {
   edge: string;
   /** Colour of a label that sits on a line: the line colour, except where the theme gives sequences their own. */
   label: string;
+  /** What the picture is seen on (SvgOptions.surface). */
+  surface: string;
 }
 
 const esc = (s: string): string =>
@@ -114,18 +121,24 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
   }
 }
 
-function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
+/**
+ * Sequence participant boxes without a colour are flat where the theme says so (dark, §2.4): filled with what the
+ * picture is seen on, so only the border marks them. Undefined when the theme or the paint keeps the usual look.
+ */
+function flatColumn(paint: Paint, { t, surface }: Ctx): { fill: string; stroke: string } | undefined {
+  if (!t.sequence || paint.color || paint.mode !== 'pastel') return undefined;
+  return { fill: surface, stroke: t.sequence.columnStroke };
+}
+
+function boxMarkup(b: SceneBox, ctx: Ctx): string {
+  const { theme, t, c } = ctx;
   const soft = b.role === 'group' || b.role === 'frame' || b.role === 'legend';
-  // Sequence participant boxes are flat where the theme says so (dark, §2.4): no shadow, background fill.
-  const flat = b.role === 'column' ? t.sequence : undefined;
-  const shadow = b.shadow && !flat;
+  // Participant boxes have no offset shadow where the theme makes them flat, whatever their paint.
+  const shadow = b.shadow && !(b.role === 'column' && t.sequence);
   const p = resolvePaint(b.paint, theme, soft, shadow);
-  let fill = p.fill;
-  let stroke = p.stroke;
-  if (flat && !b.paint.color && b.paint.mode === 'pastel') {
-    fill = t.background;
-    stroke = flat.columnStroke;
-  }
+  const flat = b.role === 'column' ? flatColumn(b.paint, ctx) : undefined;
+  let fill = flat?.fill ?? p.fill;
+  let stroke = flat?.stroke ?? p.stroke;
   if (b.role === 'frame') fill = 'none';
   if (b.role === 'legend') {
     fill = t.fill;
@@ -151,13 +164,16 @@ function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number 
   return { x: x0 - 1, y: tx.y - 3, w: w + 2, h: h + 2 };
 }
 
-function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
+function textMarkup(tx: SceneText, ctx: Ctx): string {
+  const { theme, t, c, label } = ctx;
   if (tx.lines.length === 0) return '';
   let fill = tx.tone === 'muted' ? t.muted : t.text;
   if (tx.on) {
     const p = resolvePaint(tx.on, theme);
     // Muted text (a node subtitle) stays grey on a pale fill, darkened just enough to read; bold fills use their contrast colour.
-    fill = tx.tone === 'muted' && tx.on.mode !== 'bold' ? readableMuted(t.muted, t.text, p.fill === 'none' ? t.background : p.fill) : p.text;
+    // Judged against the fill the box is drawn with, so a flat participant box counts as the surface it shows.
+    const under = (tx.onRole === 'column' ? flatColumn(tx.on, ctx)?.fill : undefined) ?? (p.fill === 'none' ? ctx.surface : p.fill);
+    fill = tx.tone === 'muted' && tx.on.mode !== 'bold' ? readableMuted(t.muted, t.text, under) : p.text;
   }
   if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
   // Edge labels take the line colour (sequence messages in dark: the text colour) and have no background: the
@@ -182,6 +198,10 @@ function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
  * The adjust on the <text> scales the whole font size by the primary mono face's ratio, so a narrow mono (0.5em,
  * x1.2) would also blow the Hangul fallback up past the 1em the layout measured (text.ts). The wide run keeps the
  * plain size and draws at its own width, at most about 1em.
+ *
+ * Runs are cut between grapheme clusters, never inside one: a ZWJ emoji whose parts include a BMP symbol (🏃‍♂️,
+ * 🧑‍⚕️, ❤️‍🔥) stays in one span, or it would draw as two glyphs. Wide clusters are the ones text.ts measures at 1em
+ * (isWideCluster), so keycaps, VS16 emoji and flags are unscaled too.
  */
 function monoRuns(line: string): string {
   let out = '';
@@ -191,23 +211,16 @@ function monoRuns(line: string): string {
     if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
     run = '';
   };
-  for (const ch of line) {
-    const code = ch.codePointAt(0) ?? 0;
-    // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
-    const w: boolean = wide && isJoiner(code) ? true : isWideChar(code);
+  for (const segment of graphemes(line)) {
+    const w = isWideCluster(segment);
     if (w !== wide) {
       flush();
       wide = w;
     }
-    run += ch;
+    run += segment;
   }
   flush();
   return out;
-}
-
-/** ZWJ, variation selector 16, keycap and tag characters: they belong to the emoji before them. */
-function isJoiner(code: number): boolean {
-  return code === 0x200d || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */
@@ -392,7 +405,7 @@ export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
   const edge = scene.type === 'flowchart' ? t.flowEdge : t.edge;
-  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge, label: (scene.type === 'sequence' ? t.sequence?.label : undefined) ?? edge };
+  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge, label: (scene.type === 'sequence' ? t.sequence?.label : undefined) ?? edge, surface: options.surface ?? t.background };
   // Edge labels cut the lines under them (§2.1): one luminance mask, white everywhere, black under each label.
   const holes = scene.items.flatMap((it) => (it.kind === 'text' && it.plate && it.lines.length > 0 ? [labelHole(it)] : []));
   let defs = '';
