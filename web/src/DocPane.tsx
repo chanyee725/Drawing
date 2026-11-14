@@ -240,7 +240,16 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
   ];
 
   const outlineMenu = (
-    <div className="doc-outline-wrap">
+    <div
+      className="doc-outline-wrap"
+      onKeyDown={(e) => {
+        // Esc closes the open outline and puts focus back on its button.
+        if (e.key !== 'Escape' || !outlineOpen) return;
+        e.stopPropagation();
+        setOutlineOpen(false);
+        e.currentTarget.querySelector<HTMLElement>('.doc-outline-btn')?.focus();
+      }}
+    >
       <Button variant="ghost" size="icon-sm" className="doc-outline-btn" aria-label="목차" title="목차" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
         <List aria-hidden />
       </Button>
