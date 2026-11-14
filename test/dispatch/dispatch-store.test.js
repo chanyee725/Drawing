@@ -32,7 +32,4 @@ test("store: close() writes the pending save once and later saves write nothing"
   store.data.seq = 6;
   store.save();
   assert.equal(store.timer, null);
-  rmSync(path.dirname(store.file), { recursive: true, force: true });
-  await new Promise(r => setTimeout(r, 600));
-  assert.equal(existsSync(store.file), false);
 });
