@@ -372,6 +372,19 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     assert.notEqual(next.steps.api.sessions[0].cost, 7.5);
     assert.equal(next.steps.ui.state, 'pending');
 
+    // The lead reopens that old, closed task (same id, same carried step) and closes it again in this run: the mate
+    // still does not link to the carried step, so nothing new lands there (E206).
+    const oldApi = d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api');
+    assert.equal((await call('POST', '/api/tasks', { lead: lead.id, id: oldApi.id, stage: 'impl' })).status, 200);
+    d.hub.emit('session', { ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5 });
+    assert.equal(d.store.data.pipelines[path].links[mate.id], undefined);
+    assert.equal((await call('POST', '/api/tasks', { lead: lead.id, id: oldApi.id, commit: head, stage: 'done' })).status, 200);
+    await until(() => d.hub.tasks.find((x) => x.id === oldApi.id)?.stage === 'done', 10_000);
+    d.hub.emit('session', { ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5 });
+    assert.equal(d.store.data.pipelines[path].links[mate.id], undefined);
+    const still = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.deepEqual(still.steps.api.sessions, next.steps.api.sessions);
+
     // The lead reuses that mate for new work: its session links to the new step, and its cost and tokens land there,
     // not on the carried step.
     const carriedApi = next.steps.api.sessions[0];
