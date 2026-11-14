@@ -1,19 +1,21 @@
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NOTE, REMIND_MS, expandHome, findServer, looksLikeWrite, projectRoot, readPort, run, shellSkeleton } from "../plugin/hooks/main-delegates.mjs";
+import { NOTE, REMIND_MS, expandHome, findServer, lockLive, looksLikeWrite, projectRoot, readPort, run, shellSkeleton } from "../plugin/hooks/main-delegates.mjs";
 
 // Temp git project with a fake Drawing server (a loopback http server answering /api/info) whose port is kept in
 // <project>/.dispatch/server.port, as plugin/scripts/start.sh does (issue #367).
 const servers = [];
+const hits = new Map(); // port -> number of /api/info requests the fake server saw
 after(() => { for (const s of servers) s.close(); });
 function serve(info = { workspace: "pipelines", mode: "project" }, status = 200) {
   return new Promise(ok => {
     const s = createServer((req, res) => {
+      hits.set(s.address().port, (hits.get(s.address().port) ?? 0) + 1);
       if (req.url !== "/api/info") { res.statusCode = 404; return res.end(); }
       res.statusCode = status;
       res.setHeader("content-type", "application/json");
@@ -22,14 +24,21 @@ function serve(info = { workspace: "pipelines", mode: "project" }, status = 200)
   });
 }
 
-async function setup(portFile = "serve") {
+// lock: "live" (our pid on the port), "none", or an object written as the lock file.
+async function setup(portFile = "serve", lock = "live") {
   const home = mkdtempSync(join(tmpdir(), "dmd-home-"));
   const proj = join(home, "proj");
   mkdirSync(join(proj, "src"), { recursive: true });
   execFileSync("git", ["init", "-q", proj]);
   if (portFile !== null) {
     mkdirSync(join(proj, ".dispatch"));
-    writeFileSync(join(proj, ".dispatch", "server.port"), portFile === "serve" ? `${await serve()}\n` : portFile);
+    const port = portFile === "serve" ? await serve() : portFile;
+    writeFileSync(join(proj, ".dispatch", "server.port"), portFile === "serve" ? `${port}\n` : port);
+    if (lock !== "none") {
+      mkdirSync(join(proj, "pipelines", ".drawing"), { recursive: true });
+      const body = lock === "live" ? { pid: process.pid, port: Number(port) } : lock;
+      writeFileSync(join(proj, "pipelines", ".drawing", "server.lock"), typeof body === "string" ? body : JSON.stringify(body));
+    }
   }
   const marks = mkdtempSync(join(tmpdir(), "dmd-marks-"));
   return { home, proj, marks };
@@ -66,6 +75,58 @@ test("invalid port file -> null, no probe", async () => {
     assert.equal(readPort(proj), null, JSON.stringify(bad));
     assert.equal(await run({}, input(proj), marks, home), null, JSON.stringify(bad));
   }
+  // A valid-looking port is never probed when the file is invalid; a fake server would count the hit.
+  const port = await serve();
+  const { home, proj, marks } = await setup(`${port} `.replace(" ", "x"));
+  assert.equal(await run({}, input(proj), marks, home), null);
+  assert.equal(hits.get(port) ?? 0, 0);
+});
+
+test("stale server.port: port held by another project's server -> no notice, no probe", async () => {
+  const other = await serve(); // another project's live project-mode server
+  const gone = (await setup(String(other), { pid: process.pid, port: other + 1 })); // lock names another port
+  assert.equal(await run({}, input(gone.proj), gone.marks, gone.home), null, "lock port differs");
+  const none = await setup(String(other), "none");
+  assert.equal(await run({}, input(none.proj), none.marks, none.home), null, "no lock");
+  const dead = await setup(String(other), { pid: 2 ** 22 + 12345, port: other }); // pid not running
+  assert.equal(lockLive(dead.proj, other), false);
+  assert.equal(await run({}, input(dead.proj), dead.marks, dead.home), null, "dead pid");
+  for (const bad of ["not json", { port: other }, { pid: "x", port: other }, { pid: -1, port: other }, { pid: 0, port: other }]) {
+    const t = await setup(String(other), bad);
+    assert.equal(await run({}, input(t.proj), t.marks, t.home), null, JSON.stringify(bad));
+  }
+  assert.equal(hits.get(other) ?? 0, 0, "lock fails before any probe");
+  assert.deepEqual(readdirSync(gone.marks), []);
+  // Same server with a matching live lock does give the note.
+  const ok = await setup(String(other));
+  assert.ok(await run({}, input(ok.proj), ok.marks, ok.home));
+});
+
+test("subprocess: hook reads the event from stdin", async () => {
+  const hook = new URL("../plugin/hooks/main-delegates.mjs", import.meta.url).pathname;
+  const env = { ...process.env };
+  for (const k of ["DISPATCH_SESSION", "DISPATCH_PARENT", "DISPATCH_SELF"]) delete env[k];
+  // Async spawn: the fake server lives in this process, so the event loop must stay free to answer the hook.
+  const spawnHook = (stdin, e) => new Promise(done => {
+    const c = execFile(process.execPath, [hook], { env: e, encoding: "utf8", timeout: 10000 }, (err, stdout) => done({ status: err ? (err.code ?? 1) : 0, stdout }));
+    c.stdin.end(stdin);
+  });
+  const feed = (proj, sid) => spawnHook(JSON.stringify({ session_id: sid, cwd: proj, tool_name: "Edit", tool_input: { file_path: join(proj, "src", "a.js") } }), env);
+  const { proj } = await setup();
+  const sid = `sub-${process.pid}-${Date.now()}`;
+  const r = await feed(proj, sid);
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, NOTE);
+  rmSync(join(tmpdir(), `dispatch-main-${sid}`), { force: true });
+  // Stale lock -> silent exit 0.
+  const stale = await setup(undefined, { pid: 2 ** 22 + 12345, port: 1 });
+  const r2 = await feed(stale.proj, `${sid}-b`);
+  assert.equal(r2.status, 0);
+  assert.equal(r2.stdout, "");
+  // Garbage on stdin -> silent exit 0.
+  const r3 = await spawnHook("not json", env);
+  assert.equal(r3.status, 0);
+  assert.equal(r3.stdout, "");
 });
 
 test("port file names a server that is not ours or not responding -> null", async () => {
