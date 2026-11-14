@@ -28,6 +28,10 @@ export const HISTORY_INTERVAL_MS = 5 * 60 * 1000;
 export const HISTORY_MAX = 50;
 const SNAPSHOT_ID = /^\d{13}$/;
 const BORN_FILE = 'born';
+// Pipeline milestones a version stands for (E28): `labels.json` in the history dir maps a snapshot id to its labels.
+// It moves with the history dir (move, trash); the history list shows them ("계획 초안", "승인", "완료").
+const LABELS_FILE = 'labels.json';
+export const VERSION_LABELS = ['draft', 'approved', 'done'];
 // Deleted files keep their version history (and last content) in `.drawing/trash/<id>/` for 30 days.
 export const TRASH_DIR = ['.drawing', 'trash'];
 export const TRASH_DAYS = 30;
@@ -226,18 +230,62 @@ export function createStore(
     }
   }
 
+  async function readLabels(dir) {
+    try {
+      if (!(await plainFile(join(dir, LABELS_FILE)))) return {};
+      const raw = JSON.parse(await readFile(join(dir, LABELS_FILE), 'utf8'));
+      const out = {};
+      for (const [id, ls] of Object.entries(raw ?? {})) {
+        if (!SNAPSHOT_ID.test(id) || !Array.isArray(ls)) continue;
+        const ok = [...new Set(ls.filter((l) => VERSION_LABELS.includes(l)))];
+        if (ok.length) out[id] = ok;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
   async function history(rel) {
     rel = checkedFileRel(rel);
     await wrapPath(rel);
     const dir = await historyDirOf(rel);
+    const labels = await readLabels(dir);
     const versions = [];
     for (const id of (await snapshotIds(dir)).reverse()) {
       try {
         const st = await lstat(join(dir, `${id}.json`));
-        if (st.isFile()) versions.push({ id, time: Number(id), bytes: st.size });
+        if (st.isFile()) versions.push({ id, time: Number(id), bytes: st.size, ...(labels[id] && { labels: labels[id] }) });
       } catch {}
     }
     return { path: rel, versions };
+  }
+
+  /**
+   * Keep the file as it is on disk now as a version and mark it with a pipeline milestone (`draft`, `approved`,
+   * `done`). Best effort like all history: returns the snapshot id, or null when it could not be kept.
+   */
+  async function labelVersion(rel, label) {
+    if (!VERSION_LABELS.includes(label)) throw new StoreError(400, 'invalid version label');
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    return serial(async () => {
+      try {
+        const { text } = await loadStored(abs);
+        const id = await snapshot(rel, text, { force: true });
+        if (!id) return null;
+        const dir = await historyDirOf(rel);
+        const kept = new Set(await snapshotIds(dir));
+        const labels = Object.fromEntries(Object.entries(await readLabels(dir)).filter(([k]) => kept.has(k)));
+        labels[id] = [...new Set([...(labels[id] ?? []), label])];
+        const tmp = join(dir, `.${LABELS_FILE}.${randomBytes(6).toString('hex')}.tmp`);
+        await writeFile(tmp, JSON.stringify(labels) + '\n', { mode: 0o644 });
+        await rename(tmp, join(dir, LABELS_FILE));
+        return id;
+      } catch {
+        return null;
+      }
+    });
   }
 
   async function historyVersion(rel, id) {
@@ -733,6 +781,31 @@ export function createStore(
     });
   }
 
+  /**
+   * The server's own document edit (E28: the 완료 summary block): `edit(document)` returns the new document, applied
+   * to what is on disk now under the save lock. Open tabs see a newer revision like any outside change.
+   */
+  async function editDocumentAt(rel, edit) {
+    rel = checkedFileRel(rel);
+    const abs = await wrapPath(rel);
+    return serial(async () => {
+      const { file: current, text: before } = await syncExternal(rel, await loadStored(abs), abs);
+      if (current.version > FORMAT_VERSION) throw new StoreError(422, '더 새 버전에서 만든 파일이라 저장하지 않았어요');
+      let next;
+      try {
+        next = { ...normalizeContent({ ...current, document: edit(current.document) }), revision: current.revision + 1 };
+      } catch (err) {
+        if (err instanceof ValidationError) throw new StoreError(400, err.message);
+        throw err;
+      }
+      const text = serialize(next);
+      await snapshotQuietly(rel, before);
+      await atomicWrite(abs, text);
+      known.set(rel, { hash: sha(text), revision: next.revision });
+      return { path: rel, revision: next.revision };
+    });
+  }
+
   async function createFolder(rel) {
     parseOrThrow(rel);
     checkFolderNames(rel.split('/'));
@@ -1109,5 +1182,5 @@ export function createStore(
     return queue;
   }
 
-  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, startWatching, close, runs: runsApi };
+  return { root: fsr.root, tree, createdAt, createFile, readFile: readFileAt, writeFile: writeFileAt, patchPlan: patchPlanAt, editDocument: editDocumentAt, createFolder, move, removeFile, removeFolder, trash, restoreTrash, history, historyVersion, historySnapshotNow, labelVersion, startWatching, close, runs: runsApi };
 }

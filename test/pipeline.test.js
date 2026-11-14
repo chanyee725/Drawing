@@ -333,12 +333,14 @@ test('the limit guard pauses a running plan and resumes it after the reset; 이�
 test('계획 다시 열기 ends the stopped run and the next 시작하기 carries the finished steps over', { timeout: 60_000 }, async () => {
   const t = await start();
   try {
-    const { call, d, lead } = t;
+    const { call, d, lead, root } = t;
     const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     assert.equal((await call('POST', '/api/pipeline/reopen', { path })).status, 409); // running: stop first
     const mate = (await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: lead.id })).body.sessions[0];
-    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, stage: 'done' });
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, commit: head, stage: 'done' });
     await until(() => d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
+    await until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api')?.mergeCheck?.ok === true, 10_000);
     assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
 
     const re = await call('POST', '/api/pipeline/reopen', { path });
@@ -364,6 +366,148 @@ test('계획 다시 열기 ends the stopped run and the next 시작하기 carrie
     assert.equal(next.steps.ui.state, 'pending');
     assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api/);
     assert.equal(d.store.data.pipelines[path].carry, undefined);
+
+    // The rest closes: the run ends done and the carried step keeps how the earlier run merged it.
+    for (const [step, title] of [['ui', '로그인 화면'], ['review', '리뷰']]) {
+      await call('POST', '/api/tasks', { lead: lead.id, title, step, commit: head, stage: 'done' });
+    }
+    await until(async () => (await statusOf(call, path)).state === 'done', 10_000);
+    const fin = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(fin.state, 'done');
+    assert.equal(fin.steps.api.result?.commit, head);
+    await until(() => JSON.parse(readFileSync(join(t.ws, path), 'utf8')).document.content[0]?.attrs?.id === 'run-summary', 10_000);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('계획 다시 열기 twice keeps what the first run finished and how it merged (E28)', { timeout: 90_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead, root } = t;
+    const { path, runId: a } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const merged = (step) => until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === step && x.commit)?.mergeCheck?.ok === true, 10_000);
+    const runOf = async (id) => (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${id}`)).body;
+    const reopenAndStart = async () => {
+      assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+      const re = await call('POST', '/api/pipeline/reopen', { path });
+      assert.equal(re.status, 200, JSON.stringify(re.body));
+      const go = await call('POST', '/api/pipeline/start', { path, revision: re.body.draftRevision ?? re.body.revision });
+      assert.equal(go.status, 200, JSON.stringify(go.body));
+      return go.body.runId;
+    };
+
+    // Run A merges api.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', commit: head, stage: 'done' });
+    await merged('api');
+    const b = await reopenAndStart();
+    assert.equal((await runOf(b)).steps.api.carried, a);
+
+    // Run B merges ui and closes api again without a commit: the earlier merge stays.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', commit: head, stage: 'done' });
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API 다시', step: 'api', stage: 'done' });
+    await merged('ui');
+    const c = await reopenAndStart();
+    assert.match(told(d, lead.id), /이미 끝난 단계: api, ui/);
+    assert.match(told(d, lead.id), /지난 실행에서 끝난 단계\(다시 하지 마라\): api, ui/);
+    const runC = await runOf(c);
+    for (const id of ['api', 'ui']) {
+      assert.equal(runC.steps[id].state, 'done', id);
+      assert.equal(runC.steps[id].carried, b, id);
+      assert.deepEqual(runC.steps[id].result, { commit: head, base: 'develop' }, id);
+    }
+    assert.equal(runC.steps.review.state, 'pending');
+
+    // Run C closes review: both carried steps count as merged in the record.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '리뷰', step: 'review', commit: head, stage: 'done' });
+    await until(async () => (await statusOf(call, path)).state === 'done', 10_000);
+    const fin = await runOf(c);
+    assert.equal(fin.steps.api.result.commit, head);
+    assert.equal(fin.steps.ui.result.commit, head);
+    assert.equal(fin.steps.api.state, 'done');
+  } finally {
+    await t.stop();
+  }
+});
+
+test('완료: closing every step ends the run done, writes the summary block once and labels the versions (E28)', { timeout: 60_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead, ws, root } = t;
+    const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const mate = (await call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: lead.id })).body.sessions[0];
+    // api merged at a commit on develop, ui closed without a commit (abandoned), review still open.
+    assert.equal((await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', owner: mate.name, commit: head, stage: 'done' })).status, 200);
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', stage: 'done' });
+    await call('POST', '/api/tasks', { lead: lead.id, title: '리뷰', step: 'review', stage: 'review' });
+    assert.equal((await statusOf(call, path)).state, 'running');
+    const review = d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'review');
+    await call('POST', '/api/tasks', { lead: lead.id, id: review.id, commit: head, stage: 'done' });
+    await until(async () => (await statusOf(call, path)).state === 'done', 10_000);
+    const st = await statusOf(call, path);
+    assert.ok(st.doneAt > 0);
+    assert.deepEqual(st.blockers, []);
+
+    const rec = (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${runId}`)).body;
+    assert.equal(rec.state, 'done');
+    assert.equal(rec.steps.api.result.commit, head);
+    assert.equal(rec.steps.api.result.base, 'develop');
+    assert.deepEqual(rec.steps.ui.result, { abandoned: true });
+    assert.equal(rec.steps.ui.state, 'skipped');
+
+    // The summary block is first in the document, written once.
+    await until(() => JSON.parse(readFileSync(join(ws, path), 'utf8')).document.content[0]?.attrs?.id === 'run-summary', 10_000);
+    const file = JSON.parse(readFileSync(join(ws, path), 'utf8'));
+    const text = JSON.stringify(file.document);
+    assert.match(text, /✓ 완료/);
+    assert.match(text, /그만둠/);
+    assert.match(text, new RegExp(`develop ${head.slice(0, 7)}`));
+    assert.equal(file.document.content.filter((n) => n.attrs?.id === 'run-summary').length, 1);
+    // Metadata only: no session transcript text reaches the file.
+    assert.doesNotMatch(text, /plan it/);
+
+    // History: draft, approved and done versions are labelled.
+    await until(async () => {
+      const h = (await call('GET', `/api/history?path=${encodeURIComponent(path)}`)).body;
+      return h.versions.some((v) => v.labels?.includes('done'));
+    }, 10_000);
+    const labels = (await call('GET', `/api/history?path=${encodeURIComponent(path)}`)).body.versions.flatMap((v) => v.labels ?? []);
+    for (const l of ['draft', 'approved', 'done']) assert.ok(labels.includes(l), `label ${l}`);
+
+    // A done plan does not run or change again.
+    assert.equal((await call('POST', '/api/pipeline/start', { path, revision: file.revision })).status, 409);
+    assert.equal((await call('POST', '/api/pipeline/plan', { lead: lead.id, path, goal: 'again', steps: STEPS })).status, 409);
+
+    // 복제해서 새 계획: a fresh draft next to it, same plan, no summary, owned by the same lead.
+    const dup = await call('POST', '/api/pipeline/duplicate', { path });
+    assert.equal(dup.status, 200, JSON.stringify(dup.body));
+    assert.notEqual(dup.body.path, path);
+    assert.match(dup.body.path, /^pipelines\/.*복사.*\.dpx\.json$/);
+    assert.equal(dup.body.lead, lead.id);
+    const copy = JSON.parse(readFileSync(join(ws, dup.body.path), 'utf8'));
+    assert.deepEqual(copy.plan, file.plan);
+    assert.equal(copy.document.content.filter((n) => n.attrs?.id === 'run-summary').length, 0);
+    const cst = await statusOf(call, dup.body.path);
+    assert.equal(cst.state, 'plan');
+    assert.deepEqual(cst.blockers, []);
+
+    // The copy runs on its own: the first run's closed tasks (same lead, same step ids) do not finish it.
+    const st2 = await call('POST', '/api/pipeline/start', { path: dup.body.path, revision: dup.body.revision });
+    assert.equal(st2.status, 200, JSON.stringify(st2.body));
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API 2', step: 'api', stage: 'impl' });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal((await statusOf(call, dup.body.path)).state, 'running');
+    for (const [title, step] of [['서버 API 2', 'api'], ['로그인 화면 2', 'ui'], ['리뷰 2', 'review']]) {
+      await call('POST', '/api/tasks', { lead: lead.id, title, step, stage: 'done' });
+    }
+    await until(async () => (await statusOf(call, dup.body.path)).state === 'done', 10_000);
+    const rec2 = (await call('GET', `/api/runs/run?path=${encodeURIComponent(dup.body.path)}&id=${st2.body.runId}`)).body;
+    for (const id of ['api', 'ui', 'review']) assert.deepEqual(rec2.steps[id].result, { abandoned: true }, id);
+    assert.doesNotMatch(JSON.stringify(rec2), new RegExp(head));
+    assert.equal((await call('POST', '/api/pipeline/duplicate', { path: 'nope.dpx.json' })).status, 404);
+    assert.equal((await call('POST', '/api/pipeline/duplicate', {})).status, 400);
   } finally {
     await t.stop();
   }

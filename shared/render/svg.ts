@@ -9,7 +9,7 @@ import { BADGE_FONT_SIZE, BADGE_FONT_WEIGHT } from './badge.ts';
 import type { Point, Scene, SceneBadge, SceneBox, SceneEdge, SceneIcon, SceneItem, SceneLine, SceneText } from './scene.ts';
 import { DRAWING_SANS_400_WOFF2_BASE64, DRAWING_SANS_600_WOFF2_BASE64 } from './font-clean.ts';
 import { SHANTELL_SANS_WOFF2_BASE64 } from './font-rough.ts';
-import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, linesWidth } from './text.ts';
+import { CLEAN_FONT_NAME, FONT_FAMILY, PLATE_PAD, isWideChar, linesWidth } from './text.ts';
 import { THEMES, badgeColors, readableMuted, resolvePaint, strokeOf, strongTextOf } from './theme.ts';
 import type { Theme, ThemeColors } from './theme.ts';
 
@@ -31,6 +31,8 @@ interface Ctx {
   c: (color: string) => string;
   /** Default connector colour for this diagram type (labels take it too). */
   edge: string;
+  /** Colour of a label that sits on a line: the line colour, except where the theme gives sequences their own. */
+  label: string;
 }
 
 const esc = (s: string): string =>
@@ -114,9 +116,16 @@ function shapeMarkup(b: SceneBox, attrs: string): string {
 
 function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const soft = b.role === 'group' || b.role === 'frame' || b.role === 'legend';
-  const p = resolvePaint(b.paint, theme, soft, b.shadow);
+  // Sequence participant boxes are flat where the theme says so (dark, §2.4): no shadow, background fill.
+  const flat = b.role === 'column' ? t.sequence : undefined;
+  const shadow = b.shadow && !flat;
+  const p = resolvePaint(b.paint, theme, soft, shadow);
   let fill = p.fill;
   let stroke = p.stroke;
+  if (flat && !b.paint.color && b.paint.mode === 'pastel') {
+    fill = t.background;
+    stroke = flat.columnStroke;
+  }
   if (b.role === 'frame') fill = 'none';
   if (b.role === 'legend') {
     fill = t.fill;
@@ -127,7 +136,7 @@ function boxMarkup(b: SceneBox, { theme, t, c }: Ctx): string {
   const dash = b.dashed ? DASH : '';
   const out: string[] = [];
   // A solid copy of the shape moved (+4, +4), no blur; the opaque body on top hides all but the outside rim.
-  if (b.shadow) out.push(shapeMarkup({ ...b, x: b.x + 4, y: b.y + 4 }, ` fill="${c(t.shadow)}" stroke="none"`));
+  if (shadow) out.push(shapeMarkup({ ...b, x: b.x + 4, y: b.y + 4 }, ` fill="${c(t.shadow)}" stroke="none"`));
   const f = fill === 'none' ? 'none' : c(fill);
   out.push(shapeMarkup(b, ` fill="${f}" stroke="${c(stroke)}" stroke-width="${width}" stroke-linejoin="round"${dash}`));
   const id = b.id !== undefined ? ` data-id="${esc(b.id)}"` : '';
@@ -142,7 +151,7 @@ function labelHole(tx: SceneText): { x: number; y: number; w: number; h: number 
   return { x: x0 - 1, y: tx.y - 3, w: w + 2, h: h + 2 };
 }
 
-function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
+function textMarkup(tx: SceneText, { theme, t, c, label }: Ctx): string {
   if (tx.lines.length === 0) return '';
   let fill = tx.tone === 'muted' ? t.muted : t.text;
   if (tx.on) {
@@ -151,11 +160,13 @@ function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
     fill = tx.tone === 'muted' && tx.on.mode !== 'bold' ? readableMuted(t.muted, t.text, p.fill === 'none' ? t.background : p.fill) : p.text;
   }
   if (tx.tone === 'group') fill = strongTextOf(tx.on?.color, theme);
-  // Edge labels take the line colour and have no background: the line is cut under them instead (labelHole).
-  if (tx.plate) fill = edge;
+  // Edge labels take the line colour (sequence messages in dark: the text colour) and have no background: the
+  // line is cut under them instead (labelHole).
+  if (tx.plate) fill = label;
   if (tx.color) fill = strokeOf(tx.color, theme);
+  const content = tx.font === 'mono' ? monoRuns : esc;
   const spans = tx.lines
-    .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${esc(line)}</tspan>`)
+    .map((line, i) => `<tspan x="${n(tx.x)}" y="${n(tx.y + i * tx.lineHeight + (tx.lineHeight - tx.size) / 2 + tx.size * 0.8)}">${content(line)}</tspan>`)
     .join('');
   const weight = tx.weight === 600 ? ' font-weight="600"' : '';
   // No mono face is embedded, so whichever monospace the viewer has is scaled to the 0.6em advance the layout
@@ -164,6 +175,39 @@ function textMarkup(tx: SceneText, { theme, t, c, edge }: Ctx): string {
   const adjust = tx.font === 'mono' ? ' style="font-size-adjust:ch-width 0.6"' : '';
   const family = tx.font === 'clean' ? '' : ` font-family="${esc(FONT_FAMILY[tx.font])}"${adjust}`;
   return `<text font-size="${tx.size}"${weight}${family} fill="${c(fill)}" text-anchor="${tx.anchor}" xml:space="preserve">${spans}</text>`;
+}
+
+/**
+ * Mono text content with each run of wide characters (Hangul, CJK, emoji) in its own `font-size-adjust:none` span.
+ * The adjust on the <text> scales the whole font size by the primary mono face's ratio, so a narrow mono (0.5em,
+ * x1.2) would also blow the Hangul fallback up past the 1em the layout measured (text.ts). The wide run keeps the
+ * plain size and draws at its own width, at most about 1em.
+ */
+function monoRuns(line: string): string {
+  let out = '';
+  let run = '';
+  let wide = false;
+  const flush = (): void => {
+    if (run) out += wide ? `<tspan style="font-size-adjust:none">${esc(run)}</tspan>` : esc(run);
+    run = '';
+  };
+  for (const ch of line) {
+    const code = ch.codePointAt(0) ?? 0;
+    // Joiners and modifiers stay in the wide run, or a ZWJ emoji would split into two glyphs.
+    const w: boolean = wide && isJoiner(code) ? true : isWideChar(code);
+    if (w !== wide) {
+      flush();
+      wide = w;
+    }
+    run += ch;
+  }
+  flush();
+  return out;
+}
+
+/** ZWJ, variation selector 16, keycap and tag characters: they belong to the emoji before them. */
+function isJoiner(code: number): boolean {
+  return code === 0x200d || code === 0xfe0f || code === 0x20e3 || (code >= 0xe0020 && code <= 0xe007f);
 }
 
 /** WCAG contrast ratio between two #rrggbb colours. */
@@ -292,9 +336,9 @@ function edgeMarkup(e: SceneEdge, { theme, c, edge }: Ctx, mask: string): string
   return `<g data-edge="${esc(e.id)}"${mask}${soft}><path d="${d}" fill="none" stroke="${color}" stroke-width="${EDGE_W}" stroke-linecap="butt" stroke-linejoin="miter"${dash}/>${sm.markup}${em.markup}</g>`;
 }
 
-function lineMarkup(l: SceneLine, { t, c }: Ctx): string {
+function lineMarkup(l: SceneLine, { t, c }: Ctx, mask: string): string {
   const dash = l.dashed ? DASH : '';
-  return `<polyline points="${pts(l.points)}" fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
+  return `<polyline points="${pts(l.points)}"${l.cut ? mask : ''} fill="none" stroke="${c(l.tone === 'muted' ? t.edgeSoft : t.text)}" stroke-width="${n(l.width ?? SOFT_W)}"${dash}/>`;
 }
 
 /** A solid pill with its text centred (shared/render/badge.ts); dark fills stay in the dark filter's reach (§2.3). */
@@ -318,7 +362,7 @@ function itemMarkup(it: SceneItem, ctx: Ctx, mask: string): string {
     case 'edge':
       return edgeMarkup(it, ctx, mask);
     case 'line':
-      return lineMarkup(it, ctx);
+      return lineMarkup(it, ctx, mask);
     case 'badge':
       return badgeMarkup(it, ctx);
   }
@@ -347,7 +391,8 @@ const CLEAN_BOLD_TEXT = /<text\b(?![^>]*\sfont-family=)[^>]*\sfont-weight="600"/
 export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
   const theme = options.theme ?? 'light';
   const t = THEMES[theme];
-  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge: scene.type === 'flowchart' ? t.flowEdge : t.edge };
+  const edge = scene.type === 'flowchart' ? t.flowEdge : t.edge;
+  const ctx: Ctx = { theme, t, c: options.mapColor ?? ((x) => x), edge, label: (scene.type === 'sequence' ? t.sequence?.label : undefined) ?? edge };
   // Edge labels cut the lines under them (§2.1): one luminance mask, white everywhere, black under each label.
   const holes = scene.items.flatMap((it) => (it.kind === 'text' && it.plate && it.lines.length > 0 ? [labelHole(it)] : []));
   let defs = '';
@@ -369,8 +414,10 @@ export function sceneToSvg(scene: Scene, options: SvgOptions = {}): string {
     CLEAN_BOLD_TEXT.test(body) ? CLEAN_BOLD_FONT_FACE : '',
   ].join('');
   const style = faces ? `<style>${faces}</style>` : '';
+  // `geometricPrecision`: glyphs keep their true advances at any size. Without it a picture drawn small (the canvas
+  // zoomed out) has each advance rounded to a whole pixel, which opens gaps inside words ("identi fied") (E63).
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${scene.width}" height="${scene.height}" viewBox="0 0 ${scene.width} ${scene.height}" ` +
-    `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`
+    `font-family="${esc(FONT_FAMILY.clean)}" letter-spacing="-0.01em" text-rendering="geometricPrecision" data-diagram="${scene.type}" data-theme="${theme}">${style}${defs}${bg}${body}</svg>`
   );
 }

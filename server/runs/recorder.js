@@ -13,6 +13,8 @@ import {
   RUN_STATES,
   STEP_STATES_WITHOUT_SESSIONS,
   TIMELINE_MAX,
+  pickResult,
+  mergeResult,
   pickSession,
   serializeRecord,
   stepStateOf,
@@ -142,7 +144,8 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
       for (const [id, old] of Object.entries(carry.steps ?? {})) {
         if (!record.steps[id] || !old || typeof old !== 'object') continue;
         const sessions = (Array.isArray(old.sessions) ? old.sessions : []).map(pickSession).filter((s) => s.sid);
-        record.steps[id] = { state: 'done', startedAt: old.startedAt ?? null, endedAt: old.endedAt ?? t, sessions, carried: carry.from };
+        const result = pickResult(old.result);
+        record.steps[id] = { state: 'done', startedAt: old.startedAt ?? null, endedAt: old.endedAt ?? t, sessions, carried: carry.from, ...(result && { result }) };
       }
       record.totals = totalsOf(record);
     }
@@ -328,11 +331,27 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return endRun(runId, state);
   }
 
-  /** Finish a run (done / failed / stopped): written at once and dropped from memory. */
-  async function endRun(runId, state = 'done') {
+  /**
+   * Finish a run (done / failed / stopped): written at once and dropped from memory. `results` ({ [stepId]:
+   * { commit?, base?, abandoned? } }) says how the board closed each step (E28): merged at a commit, or abandoned
+   * (그만둠). An abandoned step without sessions becomes `skipped`.
+   */
+  async function endRun(runId, state = 'done', { results = null } = {}) {
     const run = get(runId);
     if (!RUN_STATES.includes(state) || state === 'running' || state === 'paused') throw new StoreError(400, 'invalid run state');
     flushEvents(runId);
+    for (const [id, r] of Object.entries(results ?? {})) {
+      const step = run.record.steps[id];
+      const result = mergeResult(step?.result, pickResult(r));
+      if (!step || !result) continue;
+      step.result = result;
+      // A step carried over from an earlier run stays done: it finished there.
+      if (result.abandoned && !step.carried && step.sessions.length === 0 && step.state !== 'skipped') {
+        step.state = 'skipped';
+        step.endedAt = now();
+        run.record.timeline.push([step.endedAt, id, 'skipped']);
+      }
+    }
     run.record.state = state;
     run.record.endedAt = now();
     run.record.totals = totalsOf(run.record);

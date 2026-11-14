@@ -9,10 +9,17 @@ export const CLEAN_FONT_FAMILY = 9;
 /** Excalidraw's handwriting fonts: Virgil (1) and Excalifont (5). */
 const HAND_FONTS: ReadonlySet<unknown> = new Set([1, 5]);
 
+/** Size of new free-form text: the size of node text in diagram blocks. Texts already saved keep their own size. */
+export const CLEAN_FONT_SIZE = 13;
+
+/** Excalidraw's line height for Liberation Sans (its FONT_METADATA): a 13px line is 14.95 high. */
+export const CLEAN_LINE_HEIGHT = 1.15;
+
 /** Starting tool settings for a fresh canvas (`initialData.appState`). */
 export const CLEAN_APP_STATE = {
   currentItemRoughness: 0,
   currentItemFontFamily: CLEAN_FONT_FAMILY,
+  currentItemFontSize: CLEAN_FONT_SIZE,
   currentItemStrokeWidth: 1,
   currentItemRoundness: 'round' as const,
   currentItemFillStyle: 'solid' as const,
@@ -28,7 +35,7 @@ export function cleanSkeleton(sk: Record<string, unknown>): Record<string, unkno
   const base = { roughness: 0, strokeWidth: 1 };
   switch (sk.type) {
     case 'text':
-      return { ...base, fontFamily: CLEAN_FONT_FAMILY, ...sk };
+      return { ...base, fontFamily: CLEAN_FONT_FAMILY, fontSize: CLEAN_FONT_SIZE, ...sk };
     case 'rectangle':
       return { ...base, roundness: { type: 3 }, ...sk };
     case 'diamond':

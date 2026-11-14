@@ -4,7 +4,7 @@
 export type PipelineStatus = {
   path: string;
   revision: number;
-  state: 'plan' | 'running' | 'paused' | null;
+  state: 'plan' | 'running' | 'paused' | 'done' | null;
   /** While paused (E27): why, when, and when the limit window clears. */
   pause?: { by: 'limit' | 'stop'; at: number; resetAt?: number } | null;
   lead: string | null;
@@ -12,6 +12,8 @@ export type PipelineStatus = {
   approvedRevision: number | null;
   approvedAt: number | null;
   runId: string | null;
+  /** When the run ended done (E28); a done plan is a record, run it again by 복제해서 새 계획. */
+  doneAt?: number | null;
   /** Why it cannot start now; empty when it can. */
   blockers: string[];
   /** What the person changed since the lead's last write_plan. */

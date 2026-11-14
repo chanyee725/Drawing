@@ -2,7 +2,7 @@
 // Restoring is a normal save of that version's content over the current file (App does it).
 import { X } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api, ApiError, type HistoryEntry, type HistoryVersion } from './api';
+import { api, ApiError, type HistoryEntry, type HistoryVersion, type VersionLabel } from './api';
 import { documentToMarkdown } from './export/markdown';
 import { Button } from './components/ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './components/ui/dialog';
@@ -15,6 +15,11 @@ type Props = {
   /** Resolves with an error message, or null once the version is restored. */
   onRestore: (id: string) => Promise<string | null>;
 };
+
+// Pipeline milestones (E28), in run order.
+const LABEL_TEXT: Record<VersionLabel, string> = { draft: '계획 초안', approved: '승인', done: '완료' };
+export const versionLabels = (ls: readonly string[] | undefined): string[] =>
+  (Object.keys(LABEL_TEXT) as VersionLabel[]).filter((l) => ls?.includes(l)).map((l) => LABEL_TEXT[l]);
 
 const when = (t: number) => new Date(t).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' });
 // Server messages are English; show Korean copy by status, never the raw message.
@@ -154,9 +159,14 @@ export function HistoryDialog({ path, dark, onClose, onRestore }: Props) {
                   variant="ghost"
                   aria-pressed={picked === v.id}
                   onClick={() => setPicked(v.id)}
-                  className={cn('h-(--h-row) w-full justify-start px-2.5 tabular-nums', picked === v.id && 'bg-muted font-semibold text-foreground')}
+                  className={cn('h-auto min-h-(--h-row) w-full flex-wrap justify-start gap-x-1.5 gap-y-0.5 px-2.5 py-1 tabular-nums', picked === v.id && 'bg-muted font-semibold text-foreground')}
                 >
-                  {when(v.time)}
+                  <span>{when(v.time)}</span>
+                  {versionLabels(v.labels).map((l) => (
+                    <span key={l} className="rounded-sm border px-1 text-xs font-normal text-muted-foreground">
+                      {l}
+                    </span>
+                  ))}
                 </Button>
               </li>
             ))}
