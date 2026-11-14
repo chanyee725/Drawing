@@ -233,10 +233,10 @@ test('compose: sequence and ERD ignore layout', async () => {
 });
 
 /**
- * Fixed pure-JS workload (objects, Map, sort), timed right before each compose in the same process.
- * Other sessions and parallel test files slow both by about the same factor, so the ratio of the two
- * minimums stays put under load while a real slowdown of compose + SVG still moves it (same method as
- * the 100-node layout test in render.test.ts).
+ * Fixed pure-JS workload (objects, Map, sort, typed arrays), timed right before each compose in the same process.
+ * It allocates like compose does (typed-array grids next to small objects), so GC and cache pressure from other
+ * processes slow both by about the same factor, and a real slowdown of compose + SVG still moves the ratio (same
+ * method as the 100-node layout test in render.test.ts).
  */
 function reference(): number {
   let sum = 0;
@@ -250,13 +250,30 @@ function reference(): number {
     }
     a.sort((p, q) => p.x - q.x || p.y[0]! - q.y[0]!);
     for (const o of a) sum += m.get(o.id)!.y[1]! & 7;
+    const grid = new Uint8Array(160 * 120 * 4);
+    for (let i = r; i < grid.length; i += 7) grid[i] = i & 255;
+    sum += grid[grid.length - 1 - r]!;
   }
   return sum;
 }
 
-// Compose + SVG of the diagram below is about 0.17x the reference alone and up to 0.4x with the CPUs
-// oversubscribed 2x; 0.6 leaves room for noise and catches a ~3.5x slowdown (the old budget was 16 ms, ~6x).
-const MAX_RATIO = 0.6;
+/**
+ * CPU time of `fn` in ms. Unlike wall time it does not count the time this process waits for a core, which is
+ * what made the wall-clock ratio jump past the budget when the machine runs several sessions (load 80 on 32 cores).
+ */
+function cpuMs(fn: () => unknown): number {
+  const t0 = process.cpuUsage();
+  fn();
+  const d = process.cpuUsage(t0);
+  return (d.user + d.system) / 1000;
+}
+
+// CPU-time ratio of compose + SVG of the diagram below to the reference, at the machine's usual load (~30-50 on 32
+// cores): about 0.55 (0.4 before the slower textWidth of #300, see #311); with 40 extra busy loops 0.5-0.65 and once
+// 0.81, which the next round measured at 0.53. A 3x slower compose measured 0.83-1.5 in every round and failed.
+// A round over budget is measured again (at most 3 rounds): a burst of load can spoil one round, not all three.
+const MAX_RATIO = 0.8;
+const ROUNDS = 3;
 
 test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference workload`, async () => {
   const lines: string[] = [];
@@ -273,20 +290,22 @@ test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference 
     items[`N2_${i}`] = { cx: c.x + 37, cy: c.y - 55, parent: 'G2' };
   }
   const layout = layoutOf(items);
+  const compose = () => sceneToSvg(composeGraph(d, base, layout));
   for (let i = 0; i < 3; i++) {
-    sceneToSvg(composeGraph(d, base, layout)); // warm-up (JIT)
+    compose(); // warm-up (JIT)
     reference();
   }
-  let comp = Infinity;
-  let ref = Infinity;
-  for (let i = 0; i < 9; i++) {
-    let t0 = performance.now();
-    reference();
-    ref = Math.min(ref, performance.now() - t0);
-    t0 = performance.now();
-    sceneToSvg(composeGraph(d, base, layout));
-    comp = Math.min(comp, performance.now() - t0);
+  const seen: string[] = [];
+  for (let round = 0; round < ROUNDS; round++) {
+    let comp = Infinity;
+    let ref = Infinity;
+    for (let i = 0; i < 9; i++) {
+      ref = Math.min(ref, cpuMs(reference));
+      comp = Math.min(comp, cpuMs(compose));
+    }
+    const ratio = comp / ref;
+    seen.push(`${ratio.toFixed(2)}x (compose ${comp.toFixed(1)} ms, reference ${ref.toFixed(1)} ms)`);
+    if (ratio < MAX_RATIO) return;
   }
-  const ratio = comp / ref;
-  assert.ok(ratio < MAX_RATIO, `compose ${comp.toFixed(1)} ms = ${ratio.toFixed(2)}x reference ${ref.toFixed(1)} ms`);
+  assert.fail(`compose + SVG over ${MAX_RATIO}x the reference in all ${ROUNDS} rounds: ${seen.join('; ')}`);
 });
