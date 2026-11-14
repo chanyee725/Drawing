@@ -145,7 +145,7 @@ export function UsagePage() {
   if (firstLoadFailed) return (
     <div role="alert" className="flex items-center gap-3 p-6 text-sm text-destructive">
       <p>사용량을 불러오지 못했어요: {error}</p>
-      <Button size="sm" variant="outline" aria-disabled={loading || undefined} className="aria-disabled:opacity-50" onClick={() => refetcher.reload()}>다시 불러오기</Button>
+      <Button size="sm" variant="outline" aria-disabled={loading || undefined} onClick={() => refetcher.reload()}>다시 불러오기</Button>
     </div>
   );
   if (!days) return <p className="p-6 text-sm text-muted-foreground">불러오는 중이에요…</p>;
