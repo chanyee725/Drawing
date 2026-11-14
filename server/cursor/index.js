@@ -5,7 +5,7 @@
 // Attribution: a session's recent tool calls (masked, clipped input text from the Dispatch hub) that mention the
 // changed file's path. Read-only tools do not count. The newest such mention within ATTRIBUTE_MS wins.
 import { AGENT_COLORS } from '../dispatch/colors.js';
-import { changedCentre, mentionsFile, shapesOf } from './model.js';
+import { changedCentre, changedKeys, mentionsFile, shapesOf } from './model.js';
 
 const ATTRIBUTE_MS = 60_000;
 const RECENT_PER_SESSION = 20;
@@ -70,24 +70,37 @@ export async function setup(ctx) {
     if (entry.text.includes('.dpx.json')) baseline(entry.text).catch(() => {});
   };
 
+  // Every live session with a recent edit-tool mention of `rel` (its newest one). Several sessions can edit one
+  // file at once (two agents, two blocks of one diagram): choosing among them waits for the diff, see `pick`.
   function whoEdited(rel, now) {
-    let best = null;
+    const out = [];
     for (const [id, list] of recent) {
       const s = hub.get(id);
       if (!s) continue;
       for (let i = list.length - 1; i >= 0; i--) {
         const { entry, at } = list[i];
         if (now - at > ATTRIBUTE_MS) break;
-        if (mentionsFile(entry, rel)) {
-          if (!best || at > best.at) best = { s, at };
-          break;
-        }
+        if (mentionsFile(entry, rel)) { out.push({ s, entry, at }); break; }
       }
     }
-    return best?.s ?? null;
+    return out;
   }
 
-  async function place(rel, s, wait) {
+  const used = new WeakSet(); // tool entries already credited with a change
+  // One change, several candidate sessions: the one whose tool call names a changed block or element wins; else the
+  // oldest call that has not been credited yet (each agent's call precedes its own change); else the newest.
+  function pick(cands, before, after) {
+    if (cands.length < 2) return cands[0] ?? null;
+    const ids = changedKeys(before, after).map((k) => k.slice(k.indexOf(':') + 1));
+    const newest = (l) => l.reduce((a, c) => (c.at > a.at ? c : a));
+    const named = cands.filter((c) => ids.some((id) => id && c.entry.text.includes(id)));
+    if (named.length) return newest(named);
+    const fresh = cands.filter((c) => !used.has(c.entry));
+    if (fresh.length) return fresh.reduce((a, c) => (c.at < a.at ? c : a));
+    return newest(cands);
+  }
+
+  async function place(rel, cands, wait) {
     await wait; // a tool-time read still in flight when the change came: let it land in `pre` first
     let after;
     try { after = await read(rel); } catch { return; }
@@ -95,11 +108,15 @@ export async function setup(ctx) {
     const earlier = pre.get(rel);
     remember(seen, rel, after);
     pre.delete(rel);
-    if (!s) return;
+    if (!cands.length) return;
     // From the reported version when there is one. Otherwise from the tool-time read, unless that shows no change
     // (it raced the edit and read the new version) or there is none (a new file): then from an empty canvas, so a
     // first edit or a new diagram still gets a place.
-    const at = before ? changedCentre(before, after) : (earlier && changedCentre(earlier, after)) ?? changedCentre(EMPTY, after);
+    const base = before ?? (earlier && changedCentre(earlier, after) ? earlier : EMPTY);
+    const at = changedCentre(base, after);
+    const chosen = pick(cands, base, after);
+    used.add(chosen.entry);
+    const s = chosen.s;
     shown.add(s.id);
     // Without a place (nothing with a place changed) the cursor stays where it was.
     const color = AGENT_COLORS.includes(s.color) ? { color: s.color } : {};
@@ -108,8 +125,8 @@ export async function setup(ctx) {
 
   // Changes of one file are handled in order: each diffs against the version the one before it left in `seen`.
   const onChange = (rel) => {
-    const s = whoEdited(rel, Date.now());
-    const run = (queue.get(rel) ?? Promise.resolve()).then(() => place(rel, s, pending.get(rel)));
+    const cands = whoEdited(rel, Date.now());
+    const run = (queue.get(rel) ?? Promise.resolve()).then(() => place(rel, cands, pending.get(rel)));
     const tail = run.catch(() => {});
     queue.set(rel, tail);
     tail.then(() => { if (queue.get(rel) === tail) queue.delete(rel); });

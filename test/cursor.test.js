@@ -168,3 +168,39 @@ test('cursor module: quick changes to one file are diffed in order (#249)', asyn
   assert.deepEqual(r.sent.map((s) => [s.data.x, s.data.y]), [[1050, 25], [50, 1025]]);
   m.close();
 });
+
+test('cursor module: two agents editing two blocks of one file each get their own cursor (#375)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  const rel = 'flow.dpx.json';
+  r.files.set(rel, file([], [block('top', 0, 0), block('bot', 0, 500)]));
+  r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
+  r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
+  const tool = (id, text) => r.hub.emit('message', { id, entry: { kind: 'tool', name: 'Bash', text } });
+  tool('c', `curl -X PUT 'http://127.0.0.1:1/api/file?path=${rel}'`);
+  tool('a', `curl -X PUT 'http://127.0.0.1:1/api/file?path=${rel}'`); // Ash's call is the newest
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500)]));
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500, 'p > q')]));
+  const cur = r.sent.filter((e) => e.event === 'cursor').map((e) => e.data);
+  assert.deepEqual(cur.map((d) => d.sid), ['c', 'a']);
+  assert.equal(cur[0].y, 50);
+  assert.equal(cur[1].y, 550);
+  await m.close();
+});
+
+test('cursor module: a tool call naming the block wins over call order (#375)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  const rel = 'flow.dpx.json';
+  r.files.set(rel, file([], [block('top', 0, 0), block('bot', 0, 500)]));
+  r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
+  r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
+  r.hub.emit('message', { id: 'c', entry: { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}","new_string":"\\"id\\":\\"bot\\""}` } });
+  r.hub.emit('message', { id: 'a', entry: { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}","new_string":"\\"id\\":\\"top\\""}` } });
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0), block('bot', 0, 500, 'p > q')]));
+  const cur = r.sent.filter((e) => e.event === 'cursor').map((e) => e.data);
+  assert.deepEqual(cur.map((d) => d.sid), ['c']);
+  await m.close();
+});
