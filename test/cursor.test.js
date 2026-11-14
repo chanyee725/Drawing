@@ -204,3 +204,61 @@ test('cursor module: a tool call naming the block wins over call order (#375)', 
   assert.deepEqual(cur.map((d) => d.sid), ['c']);
   await m.close();
 });
+
+test('cursor module: whole-file curl PUT bodies name every block, so call order decides (#390)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  const rel = 'flow.dpx.json';
+  r.files.set(rel, file([], [block('top', 0, 0), block('bot', 0, 500)]));
+  r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
+  r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
+  const put = (id, blocks) => r.hub.emit('message', { id, entry: { kind: 'tool', name: 'Bash', text: JSON.stringify({
+    command: `curl -X PUT 'http://127.0.0.1:1/api/file?path=${rel}' -H 'x-drawing: 1' -d '${JSON.stringify({ blocks })}'`,
+  }) } });
+  put('c', [block('top', 0, 0, 'x > y'), block('bot', 0, 500)]);
+  put('a', [block('top', 0, 0, 'x > y'), block('bot', 0, 500, 'p > q')]); // Ash's call is the newest
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500)]));
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500, 'p > q')]));
+  const cur = r.sent.filter((e) => e.event === 'cursor').map((e) => e.data);
+  assert.deepEqual(cur.map((d) => d.sid), ['c', 'a']);
+  assert.deepEqual(cur.map((d) => d.y), [50, 550]);
+  await m.close();
+});
+
+test('cursor module: a call that left no edit does not take the next one (#390)', async (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const r = rig();
+  const m = await setup(r.ctx);
+  const rel = 'flow.dpx.json';
+  r.files.set(rel, file([], [block('top', 0, 0), block('bot', 0, 500)]));
+  r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
+  r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
+  const say = (id, entry) => r.hub.emit('message', { id, entry });
+  // Cora reads the file through the API and is done with it.
+  say('c', { kind: 'tool', name: 'Bash', text: JSON.stringify({ command: `curl -s 'http://127.0.0.1:1/api/file?path=${rel}' | jq .blocks` }) });
+  now += 200;
+  say('c', { kind: 'tool_result', text: '[]', error: false });
+  await r.tick();
+  now += 10_000;
+  // Ash edits the file 10s later: the cursor is Ash's, not Cora's older uncredited call.
+  say('a', { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}"}` });
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500)]));
+  // Cora tries an Edit that fails; Ash edits again right after.
+  say('c', { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}"}` });
+  say('c', { kind: 'tool_result', text: 'old_string not found', error: true });
+  say('a', { kind: 'tool_result', text: 'ok', error: false });
+  say('a', { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}"}` });
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('bot', 0, 500, 'p > q')]));
+  const cur = r.sent.filter((e) => e.event === 'cursor').map((e) => e.data);
+  assert.deepEqual(cur.map((d) => d.sid), ['a', 'a']);
+  // A change nobody's open call can explain (all finished long ago) shows no cursor.
+  say('a', { kind: 'tool_result', text: 'ok', error: false });
+  now += 10_000;
+  await r.change(rel, file([], [block('top', 0, 0), block('bot', 0, 500)]));
+  assert.equal(r.sent.filter((e) => e.event === 'cursor').length, 2);
+  await m.close();
+});
