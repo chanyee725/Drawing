@@ -1,14 +1,14 @@
 // 사용량 screen (E29): usage limits, cost and token numbers for this project, from the metadata the server keeps
 // (GET /api/usage: 14 days of daily cost, token counts per model and cost per role and session). Read-only: the
 // limit guard is changed in 설정.
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { TriangleAlert } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { cn } from '../lib/utils';
 import { roleColor } from '../run/overlayModel';
 import { burnWarnText, fmtK, fmtRate, fmtUsd, pct, until } from './lib/format.ts';
 import {
-  WEEK, aggregate, burnNow, cacheRate, outliers, refetchDelay, topSessions, totals, usageKey, weekHint, type RefetchClock,
+  WEEK, aggregate, burnNow, cacheRate, createUsageRefetcher, outliers, topSessions, totals, usageKey, weekHint,
 } from './lib/usage.ts';
 import { Meter } from './parts';
 import { api, useDispatch } from './store';
@@ -117,33 +117,18 @@ export function UsagePage() {
   const [loading, setLoading] = useState(false);
 
   // Refetch only when the sessions' cost or token totals move (a finished turn adds to today), not on every session
-  // event; refetchDelay spaces the requests out, also while a failed first load keeps retrying.
+  // event; the refetcher spaces the requests out, also while a failed first load keeps retrying, and never drops a
+  // request that is already out.
   const key = usageKey(sessions);
-  const clock = useRef<RefetchClock>({ loaded: false, pendingSince: null, lastTry: null });
-  const [retry, setRetry] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    const c = clock.current;
-    if (c.loaded) c.pendingSince ??= Date.now();
-    const timer = setTimeout(() => {
-      c.pendingSince = null;
-      c.lastTry = Date.now();
-      setLoading(true);
-      api<{ days: UsageDay[] }>('GET', '/api/usage').then(
-        r => { if (alive) { c.loaded = true; setDays(r.days); setError(null); } },
-        (e: Error) => alive && setError(e.message),
-      ).finally(() => alive && setLoading(false));
-    }, refetchDelay(c, Date.now()));
-    return () => { alive = false; clearTimeout(timer); };
-  }, [key, retry]);
-  // A failed first load tries again on the next session event (spaced out by refetchDelay) or with the button below.
+  const [refetcher] = useState(() => createUsageRefetcher(
+    () => api<{ days: UsageDay[] }>('GET', '/api/usage').then(r => r.days),
+    { result: d => { setDays(d); setError(null); }, error: setError, loading: setLoading },
+  ));
+  useEffect(() => { refetcher.start(); return () => refetcher.stop(); }, [refetcher]);
+  useEffect(() => { refetcher.change(); }, [refetcher, key]);
+  // A failed first load tries again on the next session event (spaced out) or with the button below.
   const firstLoadFailed = error !== null && days === null;
-  useEffect(() => { if (firstLoadFailed) setRetry(n => n + 1); }, [sessions]);
-  const reload = () => {
-    if (loading) return;
-    clock.current.lastTry = null;
-    setRetry(n => n + 1);
-  };
+  useEffect(() => { if (firstLoadFailed) refetcher.change(); }, [refetcher, sessions]);
 
   const list = days ?? [];
   const agg = useMemo(() => aggregate((days ?? []).slice(-WEEK)), [days]);
@@ -160,7 +145,7 @@ export function UsagePage() {
   if (firstLoadFailed) return (
     <div role="alert" className="flex items-center gap-3 p-6 text-sm text-destructive">
       <p>사용량을 불러오지 못했어요: {error}</p>
-      <Button size="sm" variant="outline" aria-disabled={loading || undefined} className="aria-disabled:opacity-50" onClick={reload}>다시 불러오기</Button>
+      <Button size="sm" variant="outline" aria-disabled={loading || undefined} onClick={() => refetcher.reload()}>다시 불러오기</Button>
     </div>
   );
   if (!days) return <p className="p-6 text-sm text-muted-foreground">불러오는 중이에요…</p>;

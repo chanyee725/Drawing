@@ -206,6 +206,41 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
     assert.equal(await alert.count(), 0);
     await failing.close();
 
+    // Session events keep coming: each POST runs one more fake turn (state pushes, cost and token changes).
+    const sessionId = sessions[0].id;
+    const churn = async (ms) => {
+      const end = Date.now() + ms;
+      while (Date.now() < end) {
+        await fetch(`${BASE}/api/sessions/${sessionId}/message`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-drawing': '1' }, body: '{"text":"say ok"}' }).catch(() => {});
+        await new Promise((r) => setTimeout(r, 250));
+      }
+    };
+
+    // #334: while the first load keeps failing, session events retry at most once per 2 s.
+    at('retries stay 2 s apart while the first load fails');
+    const retrying = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    retrying.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
+    const tries = [];
+    await retrying.route('**/api/usage', (r) => { tries.push(Date.now()); return r.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"테스트 실패"}' }); });
+    await retrying.goto(`${BASE}/dispatch#usage`);
+    await retrying.getByRole('alert').filter({ hasText: '사용량을 불러오지 못했어요' }).waitFor();
+    await churn(6500);
+    assert.ok(tries.length >= 3, `session events should retry the failed load (tries: ${tries.length})`);
+    for (let i = 1; i < tries.length; i++) assert.ok(tries[i] - tries[i - 1] >= 1900, `tries ${i - 1} and ${i} are ${tries[i] - tries[i - 1]} ms apart`);
+
+    // #334: a slow answer that is out while session events come in is still applied, not dropped and asked again.
+    at('a slow answer survives session events');
+    await retrying.unroute('**/api/usage');
+    const slow = [];
+    await retrying.route('**/api/usage', async (r) => { slow.push(Date.now()); await new Promise((ok) => setTimeout(ok, 1500)); await r.continue(); });
+    await retrying.waitForTimeout(2100); // past the 2 s spacing, so the next event sends a request at once
+    const churning = churn(4000);
+    await retrying.getByText('캐시 적중률').waitFor({ timeout: 3800 });
+    assert.equal(slow.length, 1, `one slow request should be enough (requests: ${slow.length})`);
+    assert.equal(await retrying.getByRole('alert').filter({ hasText: '사용량을 불러오지 못했어요' }).count(), 0);
+    await churning;
+    await retrying.close();
+
     assert.deepEqual(errors, []);
   } catch (e) {
     const shot = join(tmpdir(), `dispatch-usage-fail-${Date.now()}.png`);
