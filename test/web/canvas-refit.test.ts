@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { containerHeightFor, refitTexts, type FitEl } from '../../web/src/canvas/refit.ts';
+import { containerHeightFor, labelY, refitTexts, type FitEl } from '../../web/src/canvas/refit.ts';
 
 const el = (id: string, type: string, extra: Partial<FitEl> = {}): FitEl => ({ id, type, x: 0, y: 0, width: 10, height: 10, ...extra });
 
@@ -51,7 +51,80 @@ test('a label that still fits leaves its shape alone and stays centred', () => {
   const label = el('t', 'text', { containerId: 'box', verticalAlign: 'middle', y: 30, height: 40 });
   const out = refitTexts([box, label], new Set(['t']), measureAs(50, 20));
   assert.equal(out.elements[0], box);
-  assert.equal(out.elements[1]!.y, 40);
+  assert.ok(Math.abs(out.elements[1]!.y - 40) < 0.5, 'centred, as Excalidraw places it');
+  assert.equal(out.elements[1]!.y, labelY(box, 100, 20, 'middle'));
+});
+
+test('a bottom label stays at the bottom of its grown shape, a top label at the top', () => {
+  const box = el('box', 'rectangle', { y: 100, height: 30 });
+  const low = refitTexts([box, el('t', 'text', { containerId: 'box', verticalAlign: 'bottom', y: 105 })], new Set(['t']), measureAs(100, 50));
+  assert.equal(low.elements[0]!.height, 60);
+  assert.equal(low.elements[1]!.y, 100 + 60 - 5 - 50, 'bottom edge minus padding minus the label');
+  const high = refitTexts([box, el('t', 'text', { containerId: 'box', verticalAlign: 'top', y: 105 })], new Set(['t']), measureAs(100, 50));
+  assert.equal(high.elements[1]!.y, 105);
+});
+
+test('label positions match Excalidraw for ellipses and diamonds', () => {
+  // computeBoundTextPosition: top offset by padding plus the inset of the shape, room from getBoundTextMaxHeight.
+  const top = 5 + 50 * (1 - Math.sqrt(2) / 2);
+  assert.equal(labelY({ type: 'ellipse', y: 0 }, 100, 20, 'top'), top);
+  assert.equal(labelY({ type: 'ellipse', y: 0 }, 100, 20, 'bottom'), top + 61 - 20);
+  assert.equal(labelY({ type: 'diamond', y: 10 }, 100, 20, 'middle'), 10 + 5 + 25 + 40 / 2 - 10);
+});
+
+/** An arrow from (x, y) through `pts` (absolute), as Excalidraw keeps it: points relative to the first. */
+const arrow = (id: string, pts: [number, number][], extra: Partial<FitEl> = {}): FitEl => ({
+  ...el(id, 'arrow'),
+  x: pts[0][0],
+  y: pts[0][1],
+  points: pts.map(([x, y]) => [x - pts[0][0], y - pts[0][1]] as const),
+  ...extra,
+});
+const abs = (a: FitEl) => a.points!.map(([x, y]) => [a.x + x, a.y + y]);
+
+test('arrows bound to a shape that grows follow its edges', () => {
+  const box = el('box', 'rectangle', { x: 0, y: 100, width: 120, height: 30 });
+  const label = el('t', 'text', { containerId: 'box', verticalAlign: 'middle', y: 105, height: 20 });
+  // Into the bottom edge (gap 4), into the right side half-way down, out of the top edge.
+  const below = arrow('below', [[60, 300], [60, 134]], { endBinding: { elementId: 'box' } });
+  const side = arrow('side', [[300, 115], [124, 115]], { endBinding: { elementId: 'box' } });
+  const above = arrow('above', [[60, 96], [60, 0]], { startBinding: { elementId: 'box' } });
+  const free = arrow('free', [[0, 0], [10, 10]]);
+  const out = refitTexts([box, label, below, side, above, free], new Set(['t']), measureAs(100, 50));
+  const [b, , lo, si, ab, fr] = out.elements;
+  assert.equal(b.height, 60);
+  assert.deepEqual(abs(lo), [[60, 300], [60, 164]], 'the bottom end moves down by the growth, the gap stays');
+  assert.equal(lo.height, 136);
+  assert.deepEqual(abs(si), [[300, 115], [124, 130]], 'a side end keeps its place along the side');
+  assert.equal(ab, above, 'an end above the shape stays');
+  assert.equal(fr, free, 'an unbound arrow stays');
+});
+
+test('an elbow arrow keeps its fixed point and its right angles', () => {
+  const box = el('box', 'rectangle', { x: 0, y: 100, width: 120, height: 30 });
+  const label = el('t', 'text', { containerId: 'box', verticalAlign: 'middle', y: 105, height: 20 });
+  // Into the right side half-way down (fixed point 0.5): a straight arrow gets a step.
+  const side = arrow('side', [[300, 115], [124, 115]], { elbowed: true, endBinding: { elementId: 'box', fixedPoint: [1.03, 0.5] } });
+  // Out of the right side, then down: the first leg moves with its end.
+  const bent = arrow('bent', [[124, 115], [200, 115], [200, 300]], { elbowed: true, startBinding: { elementId: 'box', fixedPoint: [1.03, 0.5] } });
+  const out = refitTexts([box, label, side, bent], new Set(['t']), measureAs(100, 50));
+  const [, , si, be] = out.elements;
+  assert.deepEqual(abs(si), [[300, 115], [212, 115], [212, 130], [124, 130]]);
+  assert.deepEqual(abs(be), [[124, 130], [200, 130], [200, 300]]);
+  for (const a of [si, be]) {
+    const p = abs(a);
+    for (let i = 1; i < p.length; i++) assert.ok(p[i][0] === p[i - 1][0] || p[i][1] === p[i - 1][1], `${a.id}: segment ${i} is square`);
+  }
+});
+
+test('arrows change through the given builder, and only when their shape grew', () => {
+  const box = el('box', 'rectangle', { x: 0, y: 100, width: 120, height: 100 });
+  const label = el('t', 'text', { containerId: 'box', verticalAlign: 'middle', y: 140, height: 20 });
+  const below = arrow('below', [[60, 300], [60, 204]], { endBinding: { elementId: 'box' } });
+  const fits = refitTexts([box, label, below], new Set(['t']), measureAs(100, 20));
+  assert.equal(fits.elements[2], below, 'the label fits: the shape and its arrows stay');
+  const grows = refitTexts([{ ...box, height: 30 }, label, below], new Set(['t']), measureAs(100, 50), (e, p) => ({ ...e, ...p, bumped: true }) as FitEl);
+  assert.equal((grows.elements[2] as FitEl & { bumped?: boolean }).bumped, true);
 });
 
 test('shape heights for a label match Excalidraw', () => {
