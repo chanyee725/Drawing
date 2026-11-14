@@ -120,10 +120,17 @@ export async function setup(ctx) {
         if (!step) {
           // Only tasks of this run: open ones, or ones closed after its 시작하기. A task an earlier run closed (a step
           // 계획 다시 열기 carried over) must not pull the session that did it into this run, or new work it gets
-          // lands on the carried step.
+          // lands on the carried step. The same goes for that old task reopened (same id, same step): a carried step
+          // stays done, so it never takes a session.
           const since = e.approvedAt ?? 0;
           const task = hub.tasks.find(
-            (t) => t.lead === s.parent && t.step && t.owner === s.name && e.steps?.includes(t.step) && (t.stage !== 'done' || (t.stageAt ?? 0) >= since),
+            (t) =>
+              t.lead === s.parent &&
+              t.step &&
+              t.owner === s.name &&
+              e.steps?.includes(t.step) &&
+              (t.stage !== 'done' || (t.stageAt ?? 0) >= since) &&
+              !recorder.isCarried(e.runId, t.step),
           );
           if (!task) continue;
           step = links[s.id] = task.step;

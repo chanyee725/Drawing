@@ -285,6 +285,9 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return run ? Object.keys(run.record.steps) : null;
   };
 
+  /** Whether a step of a running run was carried over from an earlier stopped run (false when not running here). */
+  const isCarried = (runId, stepId) => Boolean(active.get(runId)?.record.steps[stepId]?.carried);
+
   /**
    * Pause a running run (E27): `by` is 'limit' (usage-limit guard, with the window's `resetAt`) or 'stop' (멈추기).
    * The run stays in memory, so its sessions keep reporting; it is written at once so the tree shows it paused.
@@ -441,5 +444,5 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return [...out].sort();
   }
 
-  return { startRun, pauseRun, resumeRun, endPaused, updateSession, setStepState, noteStep, stepsOf, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
+  return { startRun, pauseRun, resumeRun, endPaused, updateSession, setStepState, noteStep, stepsOf, isCarried, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
 }
