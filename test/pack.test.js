@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -127,6 +127,42 @@ cp "${bundle}" "$dir/"
     assert.match(out, /drawing-3\.1\.4/);
     assert.match(readFileSync(join(home, 'd/current/plugin/.claude-plugin/plugin.json'), 'utf8'), /"version": "3.1.4"/);
     assert.ok(readFileSync(join(home, 'd/current/server/index.js'), 'utf8'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('dispatch-update: warns in Korean when DRAWING_HOME holds an old install, stays quiet otherwise', () => {
+  const root = fakeRoot({ version: '3.1.4' });
+  const work = mkdtempSync(join(tmpdir(), 'upd-'));
+  try {
+    const bundle = packBundle({ root, out: join(work, 'rel') });
+    const bin = join(work, 'bin');
+    mkdirSync(bin);
+    writeFileSync(join(bin, 'gh'), `#!/bin/sh
+if [ "$2" = view ]; then echo v3.1.4; exit 0; fi
+while [ $# -gt 0 ]; do [ "$1" = --dir ] && dir="$2"; shift; done
+cp "${bundle}" "$dir/"
+`, { mode: 0o755 });
+    const home = join(work, 'home');
+    const legacy = join(work, 'legacy');
+    mkdirSync(join(legacy, 'drawing-1.0.0'), { recursive: true });
+    symlinkSync(join(legacy, 'drawing-1.0.0'), join(legacy, 'current'));
+    const script = new URL('../plugin/skills/dispatch-update/scripts/update.sh', import.meta.url).pathname;
+    const run = (env) => spawnSync('bash', [script, '--no-restart'], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_INSTALL_BASE: '', DRAWING_HOME: '', ...env },
+    });
+    mkdirSync(home);
+    const warned = run({ DRAWING_HOME: legacy });
+    assert.equal(warned.status, 0, warned.stderr);
+    assert.match(warned.stderr, /DRAWING_HOME/);
+    assert.match(warned.stderr, /설치돼 있어요/);
+    assert.ok(existsSync(join(home, '.dispatch/drawing/current/server/index.js')));
+    // Explicit install base: no warning. Plain checkout in DRAWING_HOME (no `current`): no warning.
+    assert.doesNotMatch(run({ DRAWING_HOME: legacy, DRAWING_INSTALL_BASE: join(work, 'b') }).stderr, /설치돼 있어요/);
+    assert.doesNotMatch(run({ DRAWING_HOME: join(legacy, 'drawing-1.0.0') }).stderr, /설치돼 있어요/);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(work, { recursive: true, force: true });
