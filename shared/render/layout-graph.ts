@@ -1014,6 +1014,7 @@ export async function graphBase(d: GraphDiagram, options: GraphLayoutOptions = {
   );
   for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
   if (options.wrapGroups && (d.direction === 'right' || d.direction === 'down') && rowCross.size === 0 && !splitsIntoRows(d.children)) {
+    const wrapEdges = baseEdges.map((be) => ({ from: be.edge.from, to: be.edge.to, points: be.points }));
     const wrapped = wrapTopLevel({
       rects,
       top: d.children.map((c) => c.id),
@@ -1026,12 +1027,14 @@ export async function graphBase(d: GraphDiagram, options: GraphLayoutOptions = {
         const h = Math.max(g.label.h, g.iconSize);
         return vertical ? { x: r.x + 11, y: r.y + 14, w: h, h: w } : { x: r.x + 14, y: r.y + 11, w, h };
       },
-      edges: baseEdges,
+      edges: wrapEdges,
       vertical,
     });
     // A route between two rows is drawn as found, whatever the connector style: a straight line would cut through the rows.
-    if (wrapped) baseEdges.forEach((be, i) => { if (wrapped.rerouted.has(i)) be.forcedElbow = true; });
-    for (const be of baseEdges) be.points = be.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+    baseEdges.forEach((be, i) => {
+      be.points = wrapEdges[i]!.points.map((p) => ({ x: round(p.x), y: round(p.y) }));
+      if (wrapped?.rerouted.has(i)) be.forcedElbow = true;
+    });
   }
   routeAcross(d, nodes, parent, rects, baseEdges.filter((be) => rowCross.has(be.edge.id)), baseEdges, rowCross, (g) => groups.get(g)!.header);
   // Spec §1.8 step 6: even ports, straight lines first, at most two bends, shared buses.

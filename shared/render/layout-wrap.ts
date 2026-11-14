@@ -52,6 +52,7 @@ interface Unit {
   hasGroup: boolean;
 }
 
+const whole = (r: Rect): Rect => ({ x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) });
 const flipRect = (r: Rect): void => {
   [r.x, r.y, r.w, r.h] = [r.y, r.x, r.h, r.w];
 };
@@ -59,14 +60,15 @@ const flipPoint = (p: Point): Point => ({ x: p.y, y: p.x });
 
 /**
  * Rows for `units` (already in flow order) under a width limit: a row takes units until the next one would
- * pass the limit. A row only breaks between two units that both hold a group.
+ * pass the limit. A row only breaks in front of a unit that holds a group: a loose node stays on the row of
+ * what comes before it.
  */
 function fill(units: readonly Unit[], limit: number): Unit[][] {
   const rows: Unit[][] = [];
   let row: Unit[] = [];
   for (const u of units) {
     const last = row[row.length - 1];
-    if (last && u.hasGroup && last.hasGroup && u.x1 - row[0]!.x0 > limit + 0.5) {
+    if (last && u.hasGroup && u.x1 - row[0]!.x0 > limit + 0.5) {
       rows.push(row);
       row = [];
     }
@@ -183,7 +185,7 @@ function wrapRight(input: WrapInput): WrapResult | undefined {
   // Inside a top-level group a new route only runs across the rows, never along them: it leaves its group
   // by the shortest way and does its long run in the gap between rows.
   const bands = tops.filter((id) => input.isGroup(id)).map((id) => rects.get(id)!);
-  const channels = { ys: gaps.flatMap((g) => TRACKS.map((t) => g + t)) };
+  const channels = { ys: gaps.flatMap((g) => TRACKS.map((t) => Math.round(g + t))) };
 
   const rerouted = new Set<number>();
   const crossing: number[] = [];
@@ -199,18 +201,23 @@ function wrapRight(input: WrapInput): WrapResult | undefined {
   const lines = edges.filter((_, i) => !crossing.includes(i)).map((e) => e.points);
   for (const i of crossing) {
     const e = edges[i]!;
-    const a = rects.get(e.from)!;
-    const b = rects.get(e.to)!;
+    // Whole pixels: the router's grid is in half pixels, and a port on a fractional side can land inside its own box.
+    const a = whole(rects.get(e.from)!);
+    const b = whole(rects.get(e.to)!);
     const own = new Set([...chain(e.from), ...chain(e.to)]);
     const blocks: Rect[] = [];
     for (const [id, r] of rects) {
-      if (!own.has(id)) blocks.push(r);
+      if (!own.has(id)) blocks.push(whole(r));
       else if (input.isGroup(id) && id !== e.from && id !== e.to) {
         const title = input.titleOf(id, r);
-        if (title) blocks.push(title);
+        if (title) blocks.push(whole(title));
       }
     }
+    // Keep the flow's reading order at both ends: never out of the start's back side or into the end's far side.
+    const back: Rect = { x: a.x - ROUTE_GAP - 1, y: a.y, w: 1, h: a.h };
+    const far: Rect = { x: b.x + b.w + ROUTE_GAP, y: b.y, w: 1, h: b.h };
     const route =
+      routeAround(a, b, [...blocks, back, far], bands, bounds, lines, channels) ??
       routeAround(a, b, blocks, bands, bounds, lines, channels) ??
       routeAround(a, b, blocks, [], bounds, lines, channels) ??
       elbow(a, b);
