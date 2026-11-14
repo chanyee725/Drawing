@@ -19,6 +19,7 @@ const EMPTY = new Map();
 
 // Whether `text` names `id` as a whole token, so a short id ("a") does not match inside other words.
 const namesId = (text, id) => {
+  if (!id) return false;
   for (let i = text.indexOf(id); i !== -1; i = text.indexOf(id, i + 1)) {
     if (!/[\w-]/.test(text[i - 1] ?? '') && !/[\w-]/.test(text[i + id.length] ?? '')) return true;
   }
@@ -118,7 +119,7 @@ export async function setup(ctx) {
     const changed = new Set(changedKeys(before, after));
     const idOf = (k) => k.slice(k.indexOf(':') + 1);
     const hit = [...changed].map(idOf).filter(Boolean);
-    const miss = [...new Set([...before.keys(), ...after.keys()])].filter((k) => !changed.has(k)).map(idOf);
+    const miss = [...new Set([...before.keys(), ...after.keys()])].filter((k) => !changed.has(k)).map(idOf).filter(Boolean);
     const newest = (l) => l.reduce((a, c) => (c.at > a.at ? c : a));
     const named = cands.filter((c) => hit.some((id) => namesId(c.entry.text, id)) && !miss.some((id) => namesId(c.entry.text, id)));
     if (named.length) return newest(named);

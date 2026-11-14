@@ -226,6 +226,23 @@ test('cursor module: whole-file curl PUT bodies name every block, so call order 
   await m.close();
 });
 
+test('cursor module: a block with an empty id does not hang attribution (#395)', async () => {
+  const r = rig();
+  const m = await setup(r.ctx);
+  const rel = 'flow.dpx.json';
+  r.files.set(rel, file([], [block('top', 0, 0), block('', 0, 500)]));
+  r.hub.sessions.a = { id: 'a', name: 'Ash', role: 'impl', status: 'running' };
+  r.hub.sessions.c = { id: 'c', name: 'Cora', role: 'impl', status: 'running' };
+  // Cora's call is raw Codex-style text naming the changed block; Ash's names nothing.
+  r.hub.emit('message', { id: 'a', entry: { kind: 'tool', name: 'Edit', text: `{"file_path":"/w/${rel}"}` } });
+  r.hub.emit('message', { id: 'c', entry: { kind: 'tool', name: 'apply_patch', text: `*** Update File: ${rel}\n"id": "top"` } });
+  await r.tick();
+  await r.change(rel, file([], [block('top', 0, 0, 'x > y'), block('', 0, 500)]));
+  const cur = r.sent.filter((e) => e.event === 'cursor').map((e) => e.data);
+  assert.deepEqual(cur.map((d) => d.sid), ['c']);
+  await m.close();
+});
+
 test('cursor module: a call that left no edit does not take the next one (#390)', async (t) => {
   let now = 1_000_000;
   t.mock.method(Date, 'now', () => now);
