@@ -113,6 +113,15 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
   // A finished fake turn leaves the session resting; its bar is drawn solid so it stays visible on the track.
   const resting = row.locator('[data-span="resting"] > span');
   if (await resting.count()) assert.equal(await resting.first().evaluate((e) => getComputedStyle(e).opacity), '1');
+  // The 실패한 순간 legend mark uses the failure colour token in both themes (a missing token renders it transparent).
+  const legend = page.locator('[data-legend="failed"]');
+  const themeAtStart = await page.evaluate(() => document.documentElement.dataset.theme ?? null);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((th) => (document.documentElement.dataset.theme = th), theme);
+    const bg = await legend.evaluate((e) => getComputedStyle(e).backgroundColor);
+    assert.ok(!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(bg) && !/\/ 0\)$/.test(bg), `legend mark is transparent in ${theme}: ${bg}`);
+  }
+  await page.evaluate((th) => (th ? (document.documentElement.dataset.theme = th) : delete document.documentElement.dataset.theme), themeAtStart);
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline.png') });
 
   // 상시 화면: dark, a tile per session, Esc goes back to the board.

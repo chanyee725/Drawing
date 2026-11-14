@@ -71,7 +71,7 @@ function Row({ s, history, now, windowMs, onOpen }: { s: Session; history: Entry
           </span>
         ))}
         {fails.map(t => (
-          <span key={t} title={`실패 · ${hhmm(t)}`} className="absolute inset-y-0 w-[3px] -translate-x-1/2 bg-bad ring-1 ring-card" style={{ left: x(t) }} />
+          <span key={t} title={`실패 · ${hhmm(t)}`} className="absolute inset-y-0 w-[3px] -translate-x-1/2 bg-destructive ring-1 ring-card" style={{ left: x(t) }} />
         ))}
       </span>
     </button>
@@ -129,7 +129,7 @@ export function SessionTimeline({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">최근 2시간</span>
         {LEGEND.map(st => <span key={st} className="inline-flex items-center gap-1.5"><Swatch state={st} />{STATE[st].label}</span>)}
-        <span className="inline-flex items-center gap-1.5"><span aria-hidden className="inline-block h-3 w-[3px] bg-bad" />실패한 순간</span>
+        <span className="inline-flex items-center gap-1.5"><span aria-hidden data-legend="failed" className="inline-block h-3 w-[3px] bg-destructive" />실패한 순간</span>
       </div>
       <div className="flex flex-col gap-5">
         {lanes.map(role => {
