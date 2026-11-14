@@ -185,3 +185,35 @@ test('#296: muted text on a flat participant box is judged against the fill the 
   assert.notEqual(ink(sceneToSvg(scene('column'), { theme: 'dark', surface })), t.muted);
   assert.equal(ink(sceneToSvg(scene('column'), { theme: 'dark' })), t.muted);
 });
+
+test('#319: participant labels laid out by the sequence layout are judged against the box they sit on', async () => {
+  const { parseSequenceDiagram } = await import('../../shared/dsl/index.ts');
+  const { layoutSequence } = await import('../../shared/render/layout-sequence.ts');
+  const { ast } = parseSequenceDiagram('Alice [icon: user]\nCarol [color: blue]\nAlice > Bob: hello\nBob > Carol: ok\n');
+  const scene = await layoutSequence(ast!);
+  const boxes = scene.items.filter((i) => i.kind === 'box' && i.role === 'column');
+  assert.equal(boxes.length, 6, 'three heads and three feet');
+  // Each head box is followed by its label, which must carry the box paint and say it sits on a participant box,
+  // so the renderer judges it against the flat fill and not the pastel one.
+  for (const box of boxes) {
+    if (box.kind !== 'box') continue;
+    const label = scene.items.find((i) => i.kind === 'text' && i.y > box.y && i.y < box.y + box.h && Math.abs(i.x - (box.x + box.w / 2)) <= box.w / 2);
+    assert.ok(label && label.kind === 'text', `label inside ${box.id ?? 'foot'}`);
+    assert.equal(label.onRole, 'column', `label of ${box.id ?? 'foot'} is marked as on a participant box`);
+    assert.deepEqual(label.on, box.paint, `label of ${box.id ?? 'foot'} carries the box paint`);
+  }
+  // Rendered dark on the canvas: every label reads against the fill its box is actually drawn with.
+  // The canvas call (renderBlock 'dark-canvas') and the dark export; canvas colours are compared as seen through the filter.
+  const renders = [
+    { svg: sceneToSvg(scene, { theme: 'dark', mapColor: preDarkFilterColor, surface: DARK_CANVAS_BACKGROUND }), look: seen },
+    { svg: sceneToSvg(scene, { theme: 'dark' }), look: (hex: string) => hex },
+  ];
+  for (const { svg, look } of renders) {
+    const pairs = [...svg.matchAll(/<g data-role="column"[^>]*><rect [^>]*fill="(#[0-9a-f]{6})"[\s\S]*?<text [^>]*fill="(#[0-9a-f]{6})"/g)];
+    assert.equal(pairs.length, 6, 'every box has its label');
+    for (const [, fill, ink] of pairs) {
+      const ratio = contrast(look(ink!), look(fill!));
+      assert.ok(ratio >= 4.5, `label ${look(ink!)} on ${look(fill!)}: ${ratio.toFixed(2)}`);
+    }
+  }
+});
