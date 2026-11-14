@@ -41,14 +41,16 @@ ours() {
     try { process.kill(lock.pid, 0); } catch (e) { if (e.code !== "EPERM") process.exit(1); }
     const req = http.get({ host: "127.0.0.1", port: Number(port), path: "/api/info", timeout: 1500 }, (res) => {
       let b = ""; res.on("data", (c) => (b += c));
-      res.on("end", () => { try { const i = JSON.parse(b); process.exit(i.mode === "project" && i.workspace === "pipelines" ? 0 : 1); } catch { process.exit(1); } });
+      res.on("end", () => { try { const i = JSON.parse(b); if (i.mode === "project" && i.workspace === "pipelines") { if (!want) console.log(lock.pid); process.exit(0); } process.exit(1); } catch { process.exit(1); } });
     });
     req.on("error", () => process.exit(1)); req.on("timeout", () => req.destroy());
   ' "$1" "$lockfile" "${2:-}"
 }
 
 port=$(tr -dc '0-9' < "$portfile" 2>/dev/null || true)
-if [ -n "$port" ] && ours "$port"; then
+if [ -n "$port" ] && reused=$(ours "$port"); then
+  # Reusing: rewrite server.pid with the lock's pid so stop.sh/update.sh still find it.
+  [ -n "$reused" ] && echo "$reused" > "$state/server.pid"
   echo "http://127.0.0.1:$port/dispatch"
   exit 0
 fi
@@ -70,7 +72,7 @@ pid=$!
 echo "$pid" > "$state/server.pid"
 
 for _ in $(seq 1 100); do
-  ours "$port" "$pid" && { echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
+  ours "$port" "$pid" >/dev/null && { echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done
