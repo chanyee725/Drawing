@@ -3,7 +3,8 @@
 #   start.sh <project>
 # Workspace = <project>/pipelines (created when missing). The port is kept in
 # <project>/.dispatch/server.port (its pid in server.pid, which stop.sh reads); a server that already
-# answers there is reused. Port order: remembered live server, else $DRAW_PORT, else $DISPATCH_PORT (team.sh and
+# answers there is reused only when <project>/pipelines/.drawing/server.lock names it (live pid, same
+# port), so another project's server on a recycled port is never mistaken for ours. Port order: remembered live server, else $DRAW_PORT, else $DISPATCH_PORT (team.sh and
 # restart.sh pass it; handed to the server as DRAW_PORT). No ~/.dispatch/servers registry is written, else a free port. Prints nothing but the URL on success.
 # The server binds 127.0.0.1 only. Prints the URL on stdout; nothing else is written outside the project.
 set -euo pipefail
@@ -23,21 +24,31 @@ state=$project/.dispatch
 portfile=$state/server.port
 mkdir -p "$workspace" "$state"
 
-# Prints the folder name when a Drawing server in project mode answers on $1, else nothing.
-probe() {
+lockfile=$workspace/.drawing/server.lock
+
+# Succeeds only when OUR server answers on $1: /api/info says project mode on "pipelines" (every
+# project-mode server says that), and our workspace lock names a live pid listening on that same port.
+# With $2, the lock's pid must also be that pid (the server we just started).
+ours() {
   node -e '
     const http = require("node:http");
-    const port = process.argv[1];
-    const req = http.get({ host: "127.0.0.1", port, path: "/api/info", timeout: 1500 }, (res) => {
+    const fs = require("node:fs");
+    const [port, lockfile, want] = process.argv.slice(1);
+    let lock;
+    try { lock = JSON.parse(fs.readFileSync(lockfile, "utf8")); } catch { process.exit(1); }
+    if (!lock || String(lock.port) !== port || !Number.isInteger(lock.pid) || lock.pid <= 0) process.exit(1);
+    if (want && String(lock.pid) !== want) process.exit(1);
+    try { process.kill(lock.pid, 0); } catch (e) { if (e.code !== "EPERM") process.exit(1); }
+    const req = http.get({ host: "127.0.0.1", port: Number(port), path: "/api/info", timeout: 1500 }, (res) => {
       let b = ""; res.on("data", (c) => (b += c));
-      res.on("end", () => { try { const i = JSON.parse(b); if (i.mode === "project") process.stdout.write(String(i.workspace)); } catch {} });
+      res.on("end", () => { try { const i = JSON.parse(b); process.exit(i.mode === "project" && i.workspace === "pipelines" ? 0 : 1); } catch { process.exit(1); } });
     });
-    req.on("error", () => {}); req.on("timeout", () => req.destroy());
-  ' "$1"
+    req.on("error", () => process.exit(1)); req.on("timeout", () => req.destroy());
+  ' "$1" "$lockfile" "${2:-}"
 }
 
 port=$(tr -dc '0-9' < "$portfile" 2>/dev/null || true)
-if [ -n "$port" ] && [ "$(probe "$port")" = "pipelines" ]; then
+if [ -n "$port" ] && ours "$port"; then
   echo "http://127.0.0.1:$port/dispatch"
   exit 0
 fi
@@ -59,7 +70,7 @@ pid=$!
 echo "$pid" > "$state/server.pid"
 
 for _ in $(seq 1 100); do
-  [ "$(probe "$port")" = "pipelines" ] && { echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
+  ours "$port" "$pid" && { echo "$port" > "$portfile"; echo "http://127.0.0.1:$port/dispatch"; exit 0; }
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done

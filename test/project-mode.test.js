@@ -131,6 +131,69 @@ test('start.sh: DRAW_PORT wins over DISPATCH_PORT', async () => {
   }
 });
 
+test("start.sh does not reuse another project's server that took the remembered port", async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e30a-'));
+  const home = join(dir, 'home');
+  execFileSync('mkdir', ['-p', home]);
+  const makeProject = (name) => {
+    const project = join(dir, name);
+    execFileSync('mkdir', ['-p', project]);
+    const git = (...a) => execFileSync('git', ['-C', project, ...a], { encoding: 'utf8' });
+    git('init', '-q', '-b', 'develop');
+    git('config', 'user.name', 'test');
+    git('config', 'user.email', 'test@example.invalid');
+    writeFileSync(join(project, 'README.md'), 'scratch\n');
+    git('add', '.');
+    git('commit', '-qm', 'init');
+    return project;
+  };
+  const a = makeProject('a');
+  const b = makeProject('b');
+  const fakeCli = new URL('./fixtures/fake-cli', import.meta.url).pathname;
+  const env = (port = '') => ({ ...process.env, HOME: home, PATH: `${fakeCli}:${process.env.PATH}`, DISPATCH_PORT: '', DRAW_PORT: port });
+  const start = (project, port) => spawnSync('bash', [START, project], { env: env(port), encoding: 'utf8' });
+  const lockPid = (project) => JSON.parse(readFileSync(join(project, 'pipelines', '.drawing', 'server.lock'), 'utf8')).pid;
+  const pids = new Set();
+  try {
+    const first = start(a);
+    assert.equal(first.status, 0, first.stderr);
+    const port = readFileSync(join(a, '.dispatch', 'server.port'), 'utf8').trim();
+    // Kill A hard: its lock stays behind, naming the port with a dead pid.
+    const pidA = Number(readFileSync(join(a, '.dispatch', 'server.pid'), 'utf8'));
+    process.kill(pidA, 'SIGKILL');
+    for (let i = 0; i < 50; i++) {
+      try { process.kill(pidA, 0); } catch { break; }
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // B takes A's old port.
+    const other = start(b, port);
+    assert.equal(other.status, 0, other.stderr);
+    assert.equal(other.stdout.trim(), `http://127.0.0.1:${port}/dispatch`);
+    pids.add(lockPid(b));
+    // A again: B answers on the remembered port as project mode on "pipelines", but it is not ours.
+    const again = start(a);
+    assert.equal(again.status, 0, again.stderr);
+    pids.add(lockPid(a));
+    assert.notEqual(again.stdout.trim(), `http://127.0.0.1:${port}/dispatch`, "reused another project's server");
+    const newPort = readFileSync(join(a, '.dispatch', 'server.port'), 'utf8').trim();
+    assert.notEqual(newPort, port);
+    assert.equal(again.stdout.trim(), `http://127.0.0.1:${newPort}/dispatch`);
+    const lockA = JSON.parse(readFileSync(join(a, 'pipelines', '.drawing', 'server.lock'), 'utf8'));
+    assert.equal(String(lockA.port), newPort);
+    assert.equal(lockA.pid, Number(readFileSync(join(a, '.dispatch', 'server.pid'), 'utf8')));
+    // And A's own live server is still reused.
+    const reuse = start(a);
+    assert.equal(reuse.status, 0, reuse.stderr);
+    assert.equal(reuse.stdout.trim(), again.stdout.trim());
+  } finally {
+    for (const pid of pids) {
+      try { process.kill(pid, 'SIGTERM'); } catch {}
+    }
+    await new Promise((r) => setTimeout(r, 300));
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('start.sh refuses a folder that is not a git project top', () => {
   const dir = mkdtempSync(join(tmpdir(), 'drawing-e30a-'));
   try {
