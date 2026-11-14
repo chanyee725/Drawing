@@ -77,8 +77,11 @@ function withoutCleanFont(dir) {
   return { FONTCONFIG_FILE: file };
 }
 
-/** Server on a free port against a scratch workspace, a file `path` with `elements`, and a headless page on its canvas. */
-async function open(t, path, elements) {
+/**
+ * Server on a free port against a scratch workspace, a file `path` with `elements`, and a headless page on its canvas.
+ * `before(page)` runs before the page loads (to hold requests).
+ */
+async function open(t, path, elements, before) {
   const { chromium } = await import(pathToFileURL(join(process.env.PLAYWRIGHT_CORE, 'index.mjs')).href);
   const ws = mkdtempSync(join(tmpdir(), 'draw-clean-'));
   const port = await freePort();
@@ -110,6 +113,7 @@ async function open(t, path, elements) {
   const page = await (await browser.newContext({ viewport: { width: 1400, height: 900 } })).newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e.stack).slice(0, 400)));
+  await before?.(page);
   await page.goto(`${BASE}/#file=${path}`);
   await page.waitForSelector('.excalidraw canvas', { timeout: 30000 });
   await page.getByRole('button', { name: '캔버스', exact: true }).click();
@@ -142,6 +146,38 @@ test('a handwriting text opens in the clean font with its width measured in that
   assert.equal(hand.fontFamily, 9);
   const want = await cleanWidth(str);
   assert.ok(Math.abs(hand.width - want) < 1, `width ${hand.width}, measured in the clean font ${want}`);
+  assert.deepEqual(errors, []);
+});
+
+test('a text that changed font before the clean font loads is measured once it has (#305)', SKIP, async (t) => {
+  // Excalidraw's copy of the clean font is held back until the scene is on screen, so the text must not be measured
+  // with a fallback font: it waits for the font (RefitQueue).
+  let release;
+  const held = new Promise((r) => (release = r));
+  const str = 'Waits for the font';
+  const { page, saved, errors, cleanWidth, edit } = await open(t, 'wait', [text('late', 100, 100, str, 5)], (p) =>
+    p.route('**/LiberationSans-Regular.woff2', async (route) => {
+      await held;
+      await route.continue();
+    }),
+  );
+  const loaded = () => page.evaluate(() => [...document.fonts].some((f) => f.family.replace(/["']/g, '') === 'Liberation Sans' && f.status === 'loaded'));
+  assert.equal(await loaded(), false, 'the clean font is still held back');
+  const before = await page.evaluate(() => {
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = '20px Liberation Sans';
+    return ctx.measureText('Waits for the font').width;
+  });
+  release();
+  for (let i = 0; i < 50 && !(await loaded()); i++) await page.waitForTimeout(100);
+  assert.equal(await loaded(), true, 'the clean font loaded once released');
+  await page.waitForTimeout(300);
+  await edit();
+  const late = (await saved()).get('late');
+  assert.equal(late.fontFamily, 9);
+  const want = await cleanWidth(str);
+  assert.ok(Math.abs(want - before) >= 1, `the fallback font measures differently (${before} vs ${want}), or this test proves nothing`);
+  assert.ok(Math.abs(late.width - want) < 1, `width ${late.width}, measured in the clean font ${want}`);
   assert.deepEqual(errors, []);
 });
 

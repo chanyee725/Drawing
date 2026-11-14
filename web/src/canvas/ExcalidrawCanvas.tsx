@@ -27,6 +27,7 @@ import { openLayoutSession, sessionKey, type LayoutSession } from './layoutSessi
 import { bindArrows, frameFor, sceneToFreeform } from './freeform';
 import { CLEAN_APP_STATE, cleanElements } from './cleanStyle';
 import { refitTexts, type FitEl } from './refit';
+import { RefitQueue } from './refitQueue';
 import './clean.css';
 import { hitHandle, imageReason, layoutFrame, layoutHandles, toLayout, type LayoutFrame } from './layoutEdit';
 
@@ -137,13 +138,15 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   const seenLayouts = useRef(new Map<string, string>());
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   apiRef.current = api;
-  // Texts that changed font before the clean font had loaded: measured once it has. True: a new version (a paste,
-  // saved then); false: versions stay (opening writes nothing).
-  const refitLater = useRef(new Map<string, boolean>());
-  /** The texts in `ids` measured now if the clean font is in, else queued for refitPending. */
+  // Texts that changed font before the clean font had loaded: measured once it has. One queue per mount
+  // (CanvasPane remounts on file switch), cleared on unmount too.
+  const [refitLater] = useState(() => new RefitQueue(cleanFontLoaded));
+  useEffect(() => () => refitLater.clear(), [refitLater]);
+  /** The texts in `ids` measured now if the clean font is in, else queued for refitPending. `bump`: a new version
+   * (a paste, saved then); otherwise versions stay (opening writes nothing). */
   const refitNowOrLater = (els: readonly ExcalidrawElement[], ids: readonly string[], bump: boolean) => {
     if (cleanFontLoaded()) return refit(els, ids, bump ? bumped : undefined).elements;
-    for (const id of ids) refitLater.current.set(id, bump || !!refitLater.current.get(id));
+    refitLater.wait(ids, bump);
     return els;
   };
   const focusRef = useRef(focus);
@@ -320,19 +323,13 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
   useEffect(tryFocus, [api, focus, tryFocus]);
 
   // Excalidraw loads the clean font after the scene is set: texts that changed font before that are measured once it
-  // is in. Versions stay as they are, as when opening; the new size is saved with the next edit.
+  // is in. Opened texts keep their versions (the new size is saved with the next edit); pasted ones are bumped.
+  // Texts not in the scene yet keep waiting, and handleChange runs the queue again once they are (#305).
   const refitPending = useCallback(() => {
     const xapi = apiRef.current;
-    if (!xapi || !refitLater.current.size || !cleanFontLoaded()) return;
-    const els = xapi.getSceneElementsIncludingDeleted();
-    const here = new Set(els.map((e) => e.id));
-    // Texts not in the scene yet (it is still being set) wait for the next font event.
-    const ids = [...refitLater.current].filter(([id]) => here.has(id));
-    for (const [id] of ids) refitLater.current.delete(id);
-    const kept = refit(els, ids.filter(([, b]) => !b).map(([id]) => id));
-    const out = refit(kept.elements, ids.filter(([, b]) => b).map(([id]) => id), bumped);
-    if (kept.changed || out.changed) xapi.updateScene({ elements: out.elements, captureUpdate: CaptureUpdateAction.NEVER });
-  }, []);
+    const out = refitLater.take(xapi ? (xapi.getSceneElementsIncludingDeleted() as unknown as readonly FitEl[]) : null, measureTexts, bumped);
+    if (xapi && out?.changed) xapi.updateScene({ elements: out.elements as unknown as ExcalidrawElement[], captureUpdate: CaptureUpdateAction.NEVER });
+  }, [refitLater]);
   useEffect(() => {
     document.fonts.addEventListener('loadingdone', refitPending);
     refitPending();
@@ -518,6 +515,14 @@ export default function ExcalidrawCanvas({ canvas, blocks, focus, dark, onChange
     }
     let elements = sceneEls;
     let cur = blocksRef.current;
+    // Texts that waited for the clean font while the scene was still empty are measured once they are in (#305).
+    if (refitLater.size && apiRef.current) {
+      const late = refitLater.take(elements as unknown as readonly FitEl[], measureTexts, bumped);
+      if (late?.changed) {
+        elements = late.elements as unknown as readonly ExcalidrawElement[];
+        apiRef.current.updateScene({ elements, captureUpdate: CaptureUpdateAction.NEVER });
+      }
+    }
     // Hand-drawn shapes that come in by paste, the library or copied styles are made clean on the spot.
     const tidy = cleanElements(elements, (e, patch) => newElementWith(e, patch as Partial<ExcalidrawElement>));
     if (tidy.changed && apiRef.current) {
