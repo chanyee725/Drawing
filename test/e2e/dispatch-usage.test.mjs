@@ -229,7 +229,7 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
     for (let i = 1; i < tries.length; i++) assert.ok(tries[i] - tries[i - 1] >= 1900, `tries ${i - 1} and ${i} are ${tries[i] - tries[i - 1]} ms apart`);
 
     // #334: a slow answer that is out while session events come in is still applied, not dropped and asked again.
-    // No wall-clock waits: the first request is held until session events have reached the page, and any later
+    // No wall-clock waits: the first request is held until the server has counted the session events, and any later
     // request is never answered, so the page can only show the numbers if the held answer was applied.
     at('a slow answer survives session events');
     await retrying.unroute('**/api/usage');
