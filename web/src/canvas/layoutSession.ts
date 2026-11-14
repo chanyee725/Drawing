@@ -1,6 +1,7 @@
 // The render side of layout edit mode (design §3.1, §5.3): ELK runs once per code, then every drag frame only composes.
 // Draws exactly what `renderBlock` draws for the same code and layout, so the overlay matches the block image.
 import { composeGraph, graphBase, sceneToSvg, type BlockLayout, type GraphBase, type LayoutBasis, type Scene } from '../../../shared/render/index.ts';
+import { GROUP_WRAP } from '../experiments.ts';
 import type { GraphDiagram } from '../../../shared/dsl/index.ts';
 import { basisOf, reconcileLayout } from '../../../shared/render/overrides.ts';
 import { BLOCK_LAYOUT_VERSION } from '../../../shared/render/block-layout.ts';
@@ -49,7 +50,7 @@ export async function openLayoutSession(b: { type: string; code: string; layout?
   let p = bases.get(key);
   if (!p) {
     const ast = analyzeDiagram(b.type, b.code).ast as GraphDiagram;
-    p = graphBase(ast).then((base) => ({ ast, base }));
+    p = graphBase(ast, { wrapGroups: GROUP_WRAP }).then((base) => ({ ast, base }));
     bases.set(key, p);
     p.catch(() => bases.delete(key));
     if (bases.size > 8) bases.delete(bases.keys().next().value!);
