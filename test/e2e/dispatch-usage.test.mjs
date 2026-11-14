@@ -97,6 +97,10 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
   await page.locator('[data-limit="5시간"]').getByText('42%').waitFor();
   await page.locator(`[data-session="${name}"]`).waitFor();
   assert.ok(await page.getByRole('columnheader', { name: '모델' }).first().isVisible());
+  // Cost shares are neutral bars: the only session holds 100% of the cost, which must not read as a limit warning.
+  const shares = page.locator('[aria-label$="비용 비율"]');
+  assert.ok(await shares.count() >= 1, 'at least one cost share bar');
+  for (const tone of await shares.evaluateAll((els) => els.map((e) => e.getAttribute('data-tone')))) assert.equal(tone, 'neutral');
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-usage.png'), fullPage: true });
 
   // 타임라인
@@ -106,6 +110,9 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
   await row.waitFor();
   assert.match(await row.getAttribute('aria-label'), new RegExp(`^${name}, 지금 `));
   assert.ok(await row.locator('[data-span]').count() >= 1, 'at least one state span');
+  // A finished fake turn leaves the session resting; its bar is drawn solid so it stays visible on the track.
+  const resting = row.locator('[data-span="resting"] > span');
+  if (await resting.count()) assert.equal(await resting.first().evaluate((e) => getComputedStyle(e).opacity), '1');
   if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline.png') });
 
   // 상시 화면: dark, a tile per session, Esc goes back to the board.
