@@ -34,6 +34,7 @@ export const NOTE_MAX = 200;
 export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000, eventGapMs = 500, keep = RUNS_KEEP, keepDays = RUNS_KEEP_DAYS } = {}) {
   const active = new Map(); // runId -> { record, loc: { path, trashId? }, writeTimer, dirty }
   const pending = new Map(); // `${runId}\0${sid}` -> { last, timer, patch, step }
+  const carriedOnDisk = new Map(); // runId -> Set of carried step ids (or the read in flight), for runs not in memory
 
   const unsubscribe = runs.onChange((e) => {
     for (const run of active.values()) {
@@ -285,8 +286,42 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return run ? Object.keys(run.record.steps) : null;
   };
 
-  /** Whether a step of a running run was carried over from an earlier stopped run (false when not running here). */
-  const isCarried = (runId, stepId) => Boolean(active.get(runId)?.record.steps[stepId]?.carried);
+  /**
+   * Whether a step of a run was carried over from an earlier stopped run. For a run not in memory (a paused run
+   * after a server restart) the answer comes from its record once readCarried() has read it; null until then.
+   */
+  const isCarried = (runId, stepId) => {
+    const live = active.get(runId);
+    if (live) return Boolean(live.record.steps[stepId]?.carried);
+    const known = carriedOnDisk.get(runId);
+    return known instanceof Set ? known.has(stepId) : null;
+  };
+
+  /**
+   * Read which steps of a run not in memory were carried over, from its record (step ids only). Resolves true
+   * once isCarried() can answer for it; false when the record cannot be read (isCarried stays null).
+   */
+  function readCarried(file, runId) {
+    if (active.has(runId) || carriedOnDisk.get(runId) instanceof Set) return Promise.resolve(true);
+    let p = carriedOnDisk.get(runId);
+    if (!p) {
+      p = (async () => {
+        try {
+          if (typeof runId !== 'string' || !RUN_ID.test(runId)) return false;
+          const r = await readRecord(join(await runs.dirOf(runs.fileRel(file)), `${runId}.json`));
+          if (!r) return false;
+          carriedOnDisk.set(runId, new Set(Object.keys(r.steps ?? {}).filter((id) => r.steps[id]?.carried)));
+          return true;
+        } catch {
+          return false;
+        } finally {
+          if (!(carriedOnDisk.get(runId) instanceof Set)) carriedOnDisk.delete(runId);
+        }
+      })();
+      carriedOnDisk.set(runId, p);
+    }
+    return p;
+  }
 
   /**
    * Pause a running run (E27): `by` is 'limit' (usage-limit guard, with the window's `resetAt`) or 'stop' (멈추기).
@@ -316,6 +351,7 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     const run = { record, loc: { path: rel }, writeTimer: null, dirty: false };
     record.file = rel;
     active.set(runId, run);
+    carriedOnDisk.delete(runId);
     return run;
   }
 
@@ -444,5 +480,5 @@ export function createRecorder({ runs, hub, now = Date.now, writeDelayMs = 1000,
     return [...out].sort();
   }
 
-  return { startRun, pauseRun, resumeRun, endPaused, updateSession, setStepState, noteStep, stepsOf, isCarried, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
+  return { startRun, pauseRun, resumeRun, endPaused, updateSession, setStepState, noteStep, stepsOf, isCarried, readCarried, endRun, list, read, markOf, runningFiles, close, get active() { return [...active.keys()]; } };
 }

@@ -497,6 +497,55 @@ test('계획 다시 열기, then a server restart: the next 시작하기 still c
   }
 });
 
+test('a paused run with a carried step, then a server restart: its reopened old task links nothing and costs nothing there (E206d)', { timeout: 90_000 }, async () => {
+  let t = await start();
+  try {
+    const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', t.root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const mate = (await t.call('POST', '/api/sessions', { items: [{ role: 'impl', task: 'api' }], worktree: false, parent: t.lead.id })).body.sessions[0];
+    await t.call('POST', '/api/tasks', { lead: t.lead.id, title: '서버 API', step: 'api', owner: mate.name, commit: head, stage: 'done' });
+    await until(() => t.d.store.data.pipelines[path].links[mate.id] === 'api', 10_000);
+    await until(() => t.d.hub.tasks.find((x) => x.lead === t.lead.id && x.step === 'api')?.mergeCheck?.ok === true, 10_000);
+    await until(() => ['idle', 'done'].includes(t.d.hub.get(mate.id).status), 10_000);
+    assert.equal((await t.call('POST', '/api/pipeline/stop', { path })).status, 200);
+    const re = await t.call('POST', '/api/pipeline/reopen', { path });
+    assert.equal(re.status, 200, JSON.stringify(re.body));
+    const go = await t.call('POST', '/api/pipeline/start', { path, revision: re.body.draftRevision ?? re.body.revision });
+    assert.equal(go.status, 200, JSON.stringify(go.body));
+    const runOf = async () => (await t.call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    const before = await runOf();
+    assert.equal(before.steps.api.carried, runId);
+    assert.equal((await t.call('POST', '/api/pipeline/stop', { path })).status, 200);
+
+    // Restart: the paused run is on disk only. The lead reopens the old api task before 이어서 하기.
+    await t.stop();
+    t = await start(t);
+    const { call, d, lead } = t;
+    assert.equal((await statusOf(call, path)).state, 'paused');
+    const oldApi = d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api');
+    assert.ok(oldApi);
+    assert.equal((await call('POST', '/api/tasks', { lead: lead.id, id: oldApi.id, stage: 'impl' })).status, 200);
+    const sess = () => ({ ...d.hub.publicSession(d.hub.get(mate.id)), cost: 7.5, usage: { input: 1234, output: 56 } });
+    d.hub.emit('session', sess());
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(d.store.data.pipelines[path].links?.[mate.id], undefined);
+
+    // 이어서 하기: the session reports again; nothing lands on the carried step.
+    assert.equal((await call('POST', '/api/pipeline/resume', { path })).status, 200);
+    d.hub.emit('session', sess());
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(d.store.data.pipelines[path].links?.[mate.id], undefined);
+    // New work on a step this run did not carry still links that session.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '로그인 화면', step: 'ui', owner: mate.name, stage: 'impl' });
+    await until(() => d.store.data.pipelines[path].links?.[mate.id] === 'ui', 10_000);
+    const after = await runOf();
+    assert.deepEqual(after.steps.api.sessions, before.steps.api.sessions);
+    assert.equal(after.steps.api.state, 'done');
+  } finally {
+    await t.stop();
+  }
+});
+
 test('a carried step closed again with a new commit keeps the new commit (E28)', { timeout: 90_000 }, async () => {
   const t = await start();
   try {

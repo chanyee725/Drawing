@@ -114,10 +114,16 @@ export async function setup(ctx) {
     // Session metadata goes to the run record of its lead's running plan, under the step its task names.
     const follow = (s) => {
       if (!s?.parent) return;
-      for (const [, e] of leadEntries(s.parent, ['running', 'paused'])) {
+      for (const [path, e] of leadEntries(s.parent, ['running', 'paused'])) {
         const links = (e.links ||= {});
         let step = links[s.id];
         if (!step) {
+          // A paused run a server restart dropped from memory: which steps it carried over is on disk. Read that
+          // first and look again, so a link is never saved to a carried step meanwhile.
+          if (e.runId && recorder.isCarried(e.runId, '') === null) {
+            void recorder.readCarried(path, e.runId).then((ok) => ok && follow(s));
+            continue;
+          }
           // Only tasks of this run: open ones, or ones closed after its 시작하기. A task an earlier run closed (a step
           // 계획 다시 열기 carried over) must not pull the session that did it into this run, or new work it gets
           // lands on the carried step. The same goes for that old task reopened (same id, same step): a carried step
