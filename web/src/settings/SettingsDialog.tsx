@@ -306,13 +306,24 @@ function RunPanel() {
       setNote(e instanceof Error ? e.message : '저장하지 못했어요.');
     }
   };
+  const prErrId = useId();
+  const prBroken = typeof pr === 'object' && pr !== null;
+  // A 409 (unreadable settings file) shows its cause once, in the red line the switch points at, and leaves the
+  // switch enabled so focus stays put; pressing it again re-reads the file, so fixing it recovers without reopening.
   const togglePr = async (on: boolean) => {
     try {
+      if (prBroken) {
+        setPr((await api.prTracking()).on);
+        setNote('다시 불러왔어요.');
+        return;
+      }
       setPr((await api.setPrTracking(on)).on);
       setNote('저장했어요.');
     } catch (e) {
-      if (e instanceof ApiError && e.status === 409) setPr({ broken: e.message });
-      setNote(e instanceof Error ? e.message : '저장하지 못했어요.');
+      if (e instanceof ApiError && e.status === 409) {
+        setPr({ broken: e.message });
+        setNote(null);
+      } else setNote(e instanceof Error ? e.message : '저장하지 못했어요.');
     }
   };
 
@@ -346,10 +357,17 @@ function RunPanel() {
       )}
       <Group title="PR·CI 추적" hint="이 워크스페이스에서 gh로 PR과 CI 상태를 확인해요.">
         <label className="flex min-h-8 items-center gap-3 text-sm max-md:min-h-11">
-          <Switch checked={pr === true} disabled={pr === null || pr === 'unsupported' || typeof pr === 'object'} onCheckedChange={(on) => void togglePr(on)} />
-          {pr === 'unsupported' ? '이 서버에선 바꿀 수 없어요' : typeof pr === 'object' && pr ? '바꿀 수 없어요' : pr ? '켜짐' : '꺼짐'}
+          <Switch
+            checked={pr === true}
+            disabled={pr === null || pr === 'unsupported'}
+            aria-describedby={prBroken ? prErrId : undefined}
+            onCheckedChange={(on) => void togglePr(on)}
+          />
+          {pr === 'unsupported' ? '이 서버에선 바꿀 수 없어요' : prBroken ? '고친 뒤 눌러서 다시 확인해요' : pr ? '켜짐' : '꺼짐'}
         </label>
-        {typeof pr === 'object' && pr && <p className="text-xs text-destructive">{pr.broken}</p>}
+        <p id={prErrId} aria-live="polite" className="text-xs text-destructive empty:hidden">
+          {prBroken ? pr.broken : null}
+        </p>
       </Group>
       <p role="status" className="text-xs text-muted-foreground">
         {note}
