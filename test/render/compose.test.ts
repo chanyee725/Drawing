@@ -233,10 +233,10 @@ test('compose: sequence and ERD ignore layout', async () => {
 });
 
 /**
- * Fixed pure-JS workload (objects, Map, sort, typed arrays), timed right before each compose in the same process.
- * It allocates like compose does (typed-array grids next to small objects), so GC and cache pressure from other
- * processes slow both by about the same factor, and a real slowdown of compose + SVG still moves the ratio (same
- * method as the 100-node layout test in render.test.ts).
+ * Fixed pure-JS workload (objects, Map, sort), timed right before each compose in the same process.
+ * Other sessions and parallel test files slow both by about the same factor, so the ratio of the two
+ * minimums stays put under load while a real slowdown of compose + SVG still moves it (same method as
+ * the 100-node layout test in render.test.ts).
  */
 function reference(): number {
   let sum = 0;
@@ -250,29 +250,35 @@ function reference(): number {
     }
     a.sort((p, q) => p.x - q.x || p.y[0]! - q.y[0]!);
     for (const o of a) sum += m.get(o.id)!.y[1]! & 7;
-    const grid = new Uint8Array(160 * 120 * 4);
-    for (let i = r; i < grid.length; i += 7) grid[i] = i & 255;
-    sum += grid[grid.length - 1 - r]!;
   }
   return sum;
 }
 
+// Main-thread CPU clock: process.threadCpuUsage (added in Node 23.9, missing on older 22.x). process.cpuUsage also counts V8's
+// background threads (GC helpers, concurrent marking, JIT), whose work from one call spills into the next and
+// let a 3x slower compose pass (#320 review). Older Node falls back to the process-wide clock.
+const cpuClock: (prev?: NodeJS.CpuUsage) => NodeJS.CpuUsage =
+  typeof process.threadCpuUsage === 'function' ? process.threadCpuUsage.bind(process) : process.cpuUsage.bind(process);
+
 /**
- * CPU time of `fn` in ms. Unlike wall time it does not count the time this process waits for a core, which is
+ * CPU time of `fn` in ms. Unlike wall time it does not count the time this thread waits for a core, which is
  * what made the wall-clock ratio jump past the budget when the machine runs several sessions (load 80 on 32 cores).
  */
 function cpuMs(fn: () => unknown): number {
-  const t0 = process.cpuUsage();
+  const t0 = cpuClock();
   fn();
-  const d = process.cpuUsage(t0);
+  const d = cpuClock(t0);
   return (d.user + d.system) / 1000;
 }
 
-// CPU-time ratio of compose + SVG of the diagram below to the reference, at the machine's usual load (~30-50 on 32
-// cores): about 0.55 (0.4 before the slower textWidth of #300, see #311); with 40 extra busy loops 0.5-0.65 and once
-// 0.81, which the next round measured at 0.53. A 3x slower compose measured 0.83-1.5 in every round and failed.
+// The thread CPU clock ticks in about 1 ms steps and one compose + SVG takes a few ms, so each sample runs it
+// COMPOSE_REPS times and divides, to keep one tick well under the budget's margin.
+const COMPOSE_REPS = 4;
+
+// Main-thread CPU-time ratio of one compose + SVG of the diagram below to the reference (Node 24, 32 cores):
+// 0.34-0.43 idle and with 48 busy loops; a 2x slower compose 0.62-0.84, a 3x slower one 0.87-1.13.
 // A round over budget is measured again (at most 3 rounds): a burst of load can spoil one round, not all three.
-const MAX_RATIO = 0.8;
+const MAX_RATIO = 0.6;
 const ROUNDS = 3;
 
 test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference workload`, async () => {
@@ -301,10 +307,12 @@ test(`performance: 100-node compose + SVG under ${MAX_RATIO}x a fixed reference 
     let ref = Infinity;
     for (let i = 0; i < 9; i++) {
       ref = Math.min(ref, cpuMs(reference));
-      comp = Math.min(comp, cpuMs(compose));
+      comp = Math.min(comp, cpuMs(() => {
+        for (let k = 0; k < COMPOSE_REPS; k++) compose();
+      }) / COMPOSE_REPS);
     }
     const ratio = comp / ref;
-    seen.push(`${ratio.toFixed(2)}x (compose ${comp.toFixed(1)} ms, reference ${ref.toFixed(1)} ms)`);
+    seen.push(`${ratio.toFixed(2)}x (compose ${comp.toFixed(1)} ms CPU, reference ${ref.toFixed(1)} ms CPU)`);
     if (ratio < MAX_RATIO) return;
   }
   assert.fail(`compose + SVG over ${MAX_RATIO}x the reference in all ${ROUNDS} rounds: ${seen.join('; ')}`);
