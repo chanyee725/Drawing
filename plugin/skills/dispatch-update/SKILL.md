@@ -1,17 +1,17 @@
 ---
 name: dispatch-update
-description: Update Dispatch on this machine to the latest commit — pull the Dispatch clone, relink its skills (dispatch, dispatch-team, …) for Claude Code and Codex, and restart every running Dispatch server so all projects use the new code. Use when the user says "디스패치 업데이트", "dispatch update", "최신으로 맞춰", or Dispatch behaves differently on another machine than expected.
+description: Update Drawing (the Dispatch plugin) on this machine to the latest GitHub release — download the release bundle with gh, unpack it, and restart every running Drawing server so all projects use the new code. Use when the user says "디스패치 업데이트", "dispatch update", "최신으로 맞춰", or Drawing behaves differently on another machine than expected.
 ---
 
 # Dispatch update
 
-`<skill-dir>` is the directory containing this file; its script resolves symlinks back to the Dispatch clone.
+`<skill-dir>` is the directory containing this file. Do every step yourself; the user only asks.
 
-Do every step yourself; the user only asks.
+1. Run `<skill-dir>/scripts/update.sh`. It needs `gh` logged in and reads releases of `chanyee725/Drawing`: it downloads `drawing-<ver>.tgz` (server + built web + plugin), unpacks it into `~/.dispatch/drawing/<ver>/`, points `~/.dispatch/drawing/current` at it, and restarts each running server on its own port.
+   - `--tag v1.2.3` picks a release instead of the latest. `--no-restart` skips the restart (use it when the user is in the middle of a team run and wants to restart later).
+   - If `gh` is missing or not logged in, tell the user to run `! gh auth login` in their own terminal.
+2. Report the version it unpacked and which servers were restarted (project and port). Restarted servers resume any turn that was cut off.
+3. Skills and hooks update through Claude Code. When the script prints the `/plugin ...` lines, tell the user to run them (they are Claude Code commands, you cannot run them): `/plugin marketplace update dispatch` then `/plugin update dispatch@dispatch`, or the `marketplace add` + `install` pair on a first install from the bundle.
+4. If a server did not come back, read `<project>/.dispatch/server.log` and report the error.
 
-1. Find the clone (`clone="$(cd "$(dirname "$(readlink -f <skill-dir>/scripts/update.sh)")/.." && pwd)"`), run `git -C "$clone" pull --ff-only` so the script itself is current, then run `"$clone/scripts/update.sh"`.
-   - It refuses to pull when the clone has uncommitted changes. Show the user the listed files and ask whether to commit or stash them; never discard them yourself.
-   - `--no-restart` skips restarting servers (use it if the user is in the middle of a team run and wants to restart later). `--build` rebuilds the web UI from `web/` when `public/` is not committed on that branch.
-   - **Windows** (PowerShell): `git -C "$clone" pull --ff-only`, then `powershell -ExecutionPolicy Bypass -File "$clone\scripts\update.ps1"` (`-NoRestart`, `-Build`). The clone is the parent of this skill's folder (`(Get-Item <skill-dir>).Target` when the skill is a junction).
-2. Report the old → new commit, the commit list it printed, and which servers were restarted (project and port). Restarted servers resume any turn that was cut off.
-3. If a server did not come back, read `<project>/.dispatch/server.log` and report the error.
+The bundle is made by `npm run pack` in the Drawing repo and attached to a GitHub release by hand (`gh release create <tag> dist/drawing-<ver>.tgz`).
