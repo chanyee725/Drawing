@@ -3,9 +3,10 @@
 // Inside a Dispatch session (DISPATCH_SESSION / DISPATCH_PARENT / DISPATCH_SELF set) it does nothing. In any other
 // Claude Code session, before a file edit — or a Bash command that looks like a write (issue #33) — it checks whether
 // a Drawing server runs for the project that holds the file: the project is the git top-level of the hook's cwd, its
-// port is in <project>/.dispatch/server.port (written by plugin/scripts/start.sh), and the port must be all digits and
-// answer http://127.0.0.1:<port>/api/info as a project-mode server (loopback only, short timeout). If so it adds a note to the model's context: the main session delegates implementation to a lead instead
-// of editing files itself. It repeats the note at most every REMIND_MS (30 min) per session. It never blocks the tool.
+// port is in <project>/.dispatch/server.port (written by plugin/scripts/start.sh) and must be all digits, the project's
+// <project>/pipelines/.drawing/server.lock must name that port and a live pid (the rule of ours() in start.sh), and
+// http://127.0.0.1:<port>/api/info must answer as a project-mode server (loopback only, short timeout). If so it adds
+// a note to the model's context: the main session delegates implementation to a lead instead of editing files itself. It repeats the note at most every REMIND_MS (30 min) per session. It never blocks the tool.
 // Any failure exits 0 silently. The marker holds no personal data: its name is the sanitized session id, its content
 // is empty, and its mtime is the time of the last note. Command text is never stored.
 import { existsSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -108,14 +109,24 @@ export function readPort(root) {
   return n >= 1 && n <= 65535 ? n : null;
 }
 
-// True when a project-mode Drawing server answers /api/info on 127.0.0.1:<port>.
+// True when <root>/pipelines/.drawing/server.lock names `port` and a live pid (EPERM means alive, owned by another user).
+export function lockLive(root, port) {
+  try {
+    const lock = JSON.parse(readFileSync(join(root, "pipelines", ".drawing", "server.lock"), "utf8"));
+    if (!lock || String(lock.port) !== String(port) || !Number.isInteger(lock.pid) || lock.pid <= 0) return false;
+    try { process.kill(lock.pid, 0); } catch (e) { if (e?.code !== "EPERM") return false; }
+    return true;
+  } catch { return false; }
+}
+
+// True when a project-mode Drawing server on the "pipelines" workspace answers /api/info on 127.0.0.1:<port>.
 export function probe(port, timeout = 1500) {
   return new Promise(done => {
     const req = get({ host: "127.0.0.1", port, path: "/api/info", timeout }, res => {
       let b = "";
       res.setEncoding("utf8");
       res.on("data", c => { if (b.length < 4096) b += c; });
-      res.on("end", () => { try { done(res.statusCode === 200 && JSON.parse(b)?.mode === "project"); } catch { done(false); } });
+      res.on("end", () => { try { done(res.statusCode === 200 && (i => i?.mode === "project" && i.workspace === "pipelines")(JSON.parse(b))); } catch { done(false); } });
       res.on("error", () => done(false));
     });
     req.on("error", () => done(false));
@@ -128,7 +139,7 @@ export async function findServer(target, cwd) {
   const root = projectRoot(cwd ?? target);
   if (!root || !inside(target, root)) return null;
   const port = readPort(root);
-  if (port === null || !(await probe(port))) return null;
+  if (port === null || !lockLive(root, port) || !(await probe(port))) return null;
   return { root, port };
 }
 
