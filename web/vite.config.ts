@@ -2,9 +2,10 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import { cpSync, createReadStream, existsSync, statSync } from 'node:fs';
 import { join, normalize, sep } from 'node:path';
-import { patchFontSizeSteps } from './src/canvas/sizeSteps.ts';
+import { FONT_SIZE_STEPS, patchFontSizeSteps } from './src/canvas/sizeSteps.ts';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const outDir = fileURLToPath(new URL('../public', import.meta.url));
@@ -31,16 +32,43 @@ function stripCdnFallback(code: string, id: string): string | null {
 }
 
 /** Every rewrite of Excalidraw's bundle: the font fallback and the style panel's size steps (#292). */
-function patchExcalidraw(code: string, id: string): string | null {
+function patchExcalidraw(code: string, id: string, seen: PatchSeen): string | null {
   if (!EXCALIDRAW_DIST_RE.test(id)) return null;
+  seen.excalidraw = true;
   const local = stripCdnFallback(code, id);
   const sized = patchFontSizeSteps(local ?? code);
+  if (sized !== null) seen.sizeSteps = true;
   return sized ?? local;
 }
 
+/** Whether one bundling pass met Excalidraw's code, and whether the size steps were rewritten in it. */
+type PatchSeen = { excalidraw: boolean; sizeSteps: boolean };
+const newSeen = (): PatchSeen => ({ excalidraw: false, sizeSteps: false });
+
+/**
+ * Fails the pass when Excalidraw was bundled but its size buttons were never found (a renamed test id or a
+ * moved dist path), so the stock sizes cannot silently come back.
+ */
+function assertPatched(seen: PatchSeen): void {
+  if (seen.excalidraw && !seen.sizeSteps) {
+    throw new Error('excalidraw-assets: the size buttons (fontSize-small) were not found in Excalidraw; update patchFontSizeSteps');
+  }
+}
+
+/**
+ * Changes whenever the rewrites change. It is part of the plugin's name, and Vite hashes plugin names into the
+ * key of its dependency cache (node_modules/.vite), so a dev server re-bundles Excalidraw instead of serving a
+ * copy rewritten by older code (#307).
+ */
+const PATCH_ID = createHash('sha256')
+  .update([stripCdnFallback, patchExcalidraw, patchFontSizeSteps, FALLBACK_RE, JSON.stringify(FONT_SIZE_STEPS)].map(String).join('\n'))
+  .digest('hex')
+  .slice(0, 8);
+
 function excalidrawAssets(): Plugin {
+  let seen = newSeen();
   return {
-    name: 'excalidraw-assets',
+    name: `excalidraw-assets-${PATCH_ID}`,
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
         const url = req.url?.split('?')[0] ?? '';
@@ -51,12 +79,37 @@ function excalidrawAssets(): Plugin {
         createReadStream(file).pipe(res);
       });
     },
+    buildStart() {
+      seen = newSeen();
+    },
     transform(code, id) {
-      const out = patchExcalidraw(code, id);
+      const out = patchExcalidraw(code, id, seen);
       return out === null ? null : { code: out, map: null };
+    },
+    // Build only: the dev server's own pipeline never sees the pre-bundled Excalidraw.
+    generateBundle() {
+      assertPatched(seen);
     },
     writeBundle() {
       cpSync(excalidrawFonts, join(outDir, FONT_PREFIX), { recursive: true });
+    },
+  };
+}
+
+/** The same rewrites inside the dev server's dependency optimizer, which bundles Excalidraw on its own. */
+function excalidrawAssetsDeps() {
+  let seen = newSeen();
+  return {
+    name: 'excalidraw-assets-deps',
+    buildStart() {
+      seen = newSeen();
+    },
+    transform(code: string, id: string) {
+      const out = patchExcalidraw(code, id, seen);
+      return out === null ? null : { code: out, map: null };
+    },
+    buildEnd() {
+      assertPatched(seen);
     },
   };
 }
@@ -68,17 +121,7 @@ export default defineConfig({
   // The dev server pre-bundles Excalidraw (dist/dev/) outside the plugin pipeline above, so the
   // same rewrites run inside the dependency optimizer too.
   optimizeDeps: {
-    rolldownOptions: {
-      plugins: [
-        {
-          name: 'excalidraw-assets-deps',
-          transform(code: string, id: string) {
-            const out = patchExcalidraw(code, id);
-            return out === null ? null : { code: out, map: null };
-          },
-        },
-      ],
-    },
+    rolldownOptions: { plugins: [excalidrawAssetsDeps()] },
   },
   define: { 'process.env.IS_PREACT': JSON.stringify('false') },
   build: {
