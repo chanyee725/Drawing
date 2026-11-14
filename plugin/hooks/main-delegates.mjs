@@ -119,14 +119,14 @@ export function lockLive(root, port) {
   } catch { return false; }
 }
 
-// True when a project-mode Drawing server answers /api/info on 127.0.0.1:<port>.
+// True when a project-mode Drawing server on the "pipelines" workspace answers /api/info on 127.0.0.1:<port>.
 export function probe(port, timeout = 1500) {
   return new Promise(done => {
     const req = get({ host: "127.0.0.1", port, path: "/api/info", timeout }, res => {
       let b = "";
       res.setEncoding("utf8");
       res.on("data", c => { if (b.length < 4096) b += c; });
-      res.on("end", () => { try { done(res.statusCode === 200 && JSON.parse(b)?.mode === "project"); } catch { done(false); } });
+      res.on("end", () => { try { done(res.statusCode === 200 && (i => i?.mode === "project" && i.workspace === "pipelines")(JSON.parse(b))); } catch { done(false); } });
       res.on("error", () => done(false));
     });
     req.on("error", () => done(false));

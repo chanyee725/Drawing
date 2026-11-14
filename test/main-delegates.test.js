@@ -77,7 +77,7 @@ test("invalid port file -> null, no probe", async () => {
   }
   // A valid-looking port is never probed when the file is invalid; a fake server would count the hit.
   const port = await serve();
-  const { home, proj, marks } = await setup(`${port} `.replace(" ", "x"));
+  const { home, proj, marks } = await setup(`${port}x`);
   assert.equal(await run({}, input(proj), marks, home), null);
   assert.equal(hits.get(port) ?? 0, 0);
 });
@@ -118,11 +118,16 @@ test("subprocess: hook reads the event from stdin", async () => {
   assert.equal(r.status, 0);
   assert.equal(JSON.parse(r.stdout).hookSpecificOutput.additionalContext, NOTE);
   rmSync(join(tmpdir(), `dispatch-main-${sid}`), { force: true });
-  // Stale lock -> silent exit 0.
-  const stale = await setup(undefined, { pid: 2 ** 22 + 12345, port: 1 });
-  const r2 = await feed(stale.proj, `${sid}-b`);
+  // Stale lock -> silent exit 0, once per failure cause.
+  const live = await serve();
+  const deadPid = await setup(String(live), { pid: 2 ** 22 + 12345, port: live });
+  const r2 = await feed(deadPid.proj, `${sid}-b`);
   assert.equal(r2.status, 0);
-  assert.equal(r2.stdout, "");
+  assert.equal(r2.stdout, "", "dead pid");
+  const otherPort = await setup(String(live), { pid: process.pid, port: live + 1 });
+  const r4 = await feed(otherPort.proj, `${sid}-c`);
+  assert.equal(r4.status, 0);
+  assert.equal(r4.stdout, "", "lock names another port");
   // Garbage on stdin -> silent exit 0.
   const r3 = await spawnHook("not json", env);
   assert.equal(r3.status, 0);
@@ -130,7 +135,7 @@ test("subprocess: hook reads the event from stdin", async () => {
 });
 
 test("port file names a server that is not ours or not responding -> null", async () => {
-  for (const info of [{ workspace: "x", mode: "drawing" }, "not json", [], null]) {
+  for (const info of [{ workspace: "x", mode: "drawing" }, { workspace: "other", mode: "project" }, "not json", [], null]) {
     const { home, proj, marks } = await setup(String(await serve(info)));
     assert.equal(await run({}, input(proj), marks, home), null, JSON.stringify(info));
   }
