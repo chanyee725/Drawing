@@ -69,6 +69,8 @@ export interface SceneText {
   tone: TextTone;
   /** Text sitting on a filled shape takes its contrast colour from that paint. */
   on?: Paint;
+  /** Role of the box under the text, when its fill is not the one `on` resolves to (a flat participant box). */
+  onRole?: 'column';
   /** Plain text colour (edge labels, ERD markers). */
   color?: string;
   /** Draw a background plate behind the text (edge labels). */

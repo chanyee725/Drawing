@@ -66,7 +66,8 @@ export const THEMES: Record<Theme, ThemeColors> = {
     edgeSoft: '#5b6370',
     shadow: '#2b2f36',
     // Measured on the reference: the box fill is the background, so the border alone marks the box. It reads
-    // 11.19:1 on the background (non-text contrast needs 3:1); the label is the text colour.
+    // 11.19:1 on the background (non-text contrast needs 3:1); the label is the text colour. The border is the
+    // reference's warm grey, not `strongStroke` (#c9cdd3, cool): the two differ on purpose, so keep them apart.
     sequence: { columnStroke: '#cfcecc', label: '#e7e9ec' },
   },
 };

@@ -29,8 +29,9 @@ export function fakeCliBin({ scenario, exit } = {}) {
   if (exit != null) env.FAKE_CLI_EXIT = String(exit);
   return {
     dir, log, env,
-    /** Every call the fakes got so far: [{ bin, args, cwd }]. */
-    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l)) : []),
+    /** Every call the fakes got so far: [{ bin, args, cwd }]. A fake may still be appending its line
+     *  while we read, so only lines ended by "\n" count; the unfinished tail shows up on the next call. */
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").slice(0, -1).filter(Boolean).map(l => JSON.parse(l)) : []),
     cleanup: () => rmSync(dir, { recursive: true, force: true }),
   };
 }
