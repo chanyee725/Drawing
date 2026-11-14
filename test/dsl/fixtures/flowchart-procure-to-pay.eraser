@@ -1,0 +1,29 @@
+title Procure to pay
+direction right
+
+Procure [icon: shopping-cart] {
+  Need identified [shape: oval, color: green]
+  Raise a requisition
+  Approved? [shape: diamond, color: purple]
+  On contract? [shape: diamond, color: purple]
+  Source a supplier
+  Issue the order [color: purple]
+  Declined [shape: oval, color: red]
+}
+
+Pay [icon: credit-card] {
+  Receive the goods
+  Invoice arrives [shape: oval, color: blue]
+  Match the invoice
+  Pay the supplier
+  Paid and closed [shape: oval]
+}
+
+Need identified > Raise a requisition > Approved?
+Approved? > On contract?: Yes
+Approved? > Declined: No
+On contract? > Source a supplier: No
+On contract? > Issue the order: Yes
+Source a supplier > Issue the order
+Issue the order > Receive the goods: The supplier ships
+Receive the goods > Invoice arrives > Match the invoice > Pay the supplier > Paid and closed

@@ -17,7 +17,7 @@ export type { Theme } from './theme.ts';
 export { glyphFor, iconFor } from './icons.ts';
 export type { IconSet, ResolvedIcon } from './icons.ts';
 export { composeGraph, graphBase } from './layout-graph.ts';
-export type { GraphBase } from './layout-graph.ts';
+export type { GraphBase, GraphLayoutOptions } from './layout-graph.ts';
 export { edgeKey, edgePaths, nodeRects } from './overlay.ts';
 export type { EdgePath, Rect } from './overlay.ts';
 export { BLOCK_LAYOUT_VERSION } from './block-layout.ts';
@@ -26,6 +26,8 @@ export type { BlockLayout, LayoutBasis, LayoutItem } from './block-layout.ts';
 export interface LayoutOptions {
   /** Moved-node overrides (graph types only; sequence and ERD ignore them). */
   layout?: BlockLayout;
+  /** Experimental (E65, #276): wrap top-level groups into rows. Off by default; graph types only. */
+  wrapGroups?: boolean;
 }
 
 /** Lay out a parsed diagram. Deterministic: the same AST and layout always give the same scene. */
@@ -36,7 +38,7 @@ export function layoutDiagram(diagram: Diagram, options: LayoutOptions = {}): Pr
     case 'erd':
       return layoutErd(diagram);
     default:
-      return layoutGraph(diagram, options.layout);
+      return layoutGraph(diagram, options.layout, { wrapGroups: options.wrapGroups });
   }
 }
 
@@ -49,6 +51,6 @@ export interface RenderResult {
 /** Parse (if given code), lay out and paint. Never throws on bad code: a partial diagram renders. */
 export async function renderDiagram(input: string | Diagram, options: SvgOptions & LayoutOptions & { type?: DiagramType } = {}): Promise<RenderResult> {
   const { ast, diagnostics } = typeof input === 'string' ? parse(input, options.type) : { ast: input, diagnostics: [] };
-  const scene = await layoutDiagram(ast, { layout: options.layout });
+  const scene = await layoutDiagram(ast, { layout: options.layout, wrapGroups: options.wrapGroups });
   return { svg: sceneToSvg(scene, options), scene, diagnostics };
 }

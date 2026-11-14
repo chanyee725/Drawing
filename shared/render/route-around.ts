@@ -94,6 +94,7 @@ const merge = (a: number[], b: number[]): number[] => [...new Set([...a, ...b])]
  * is fine, running on it is not), and inside `bounds`. Fewest bends first, then shortest. Undefined when no
  * route exists. It never runs along one of `lines` (the other edges' routes); crossing them is fine.
  * The margin between `bounds` and the outermost walls holds a track every ROUTE_GAP.
+ * `channels` adds grid lines to route on, where the boxes' sides offer none (an empty gap between rows).
  */
 export function routeAround(
   a: Rect,
@@ -102,6 +103,7 @@ export function routeAround(
   bands: readonly Rect[],
   bounds: Rect,
   lines: readonly Point[][] = [],
+  channels: { xs?: readonly number[]; ys?: readonly number[] } = {},
 ): Point[] | undefined {
   const walls = [...blocks, a, b].map((r) => grow(r, ROUTE_GAP));
   const from = ports(a);
@@ -112,12 +114,12 @@ export function routeAround(
   const y1 = Math.max(...walls.map((r) => r.y + r.h));
   const xs = merge(
     axis([bounds.x, bounds.x + bounds.w, ...walls.flatMap((r) => [r.x, r.x + r.w]), ...from.map((p) => p.out.x), ...to.map((p) => p.out.x)]),
-    [...lanes(bounds.x, x0), ...lanes(-(bounds.x + bounds.w), -x1).map((v) => -v)],
+    [...lanes(bounds.x, x0), ...lanes(-(bounds.x + bounds.w), -x1).map((v) => -v), ...(channels.xs ?? [])],
   ).filter((x) => x >= bounds.x && x <= bounds.x + bounds.w);
   const inBand = (x: number, y: number): boolean => bands.some((r) => x >= r.x && x <= r.x + r.w && y > r.y && y < r.y + r.h);
   const ys = merge(
     axis([bounds.y, bounds.y + bounds.h, ...walls.flatMap((r) => [r.y, r.y + r.h]), ...from.map((p) => p.out.y), ...to.map((p) => p.out.y)]),
-    [...lanes(bounds.y, y0), ...lanes(-(bounds.y + bounds.h), -y1).map((v) => -v)],
+    [...lanes(bounds.y, y0), ...lanes(-(bounds.y + bounds.h), -y1).map((v) => -v), ...(channels.ys ?? [])],
   ).filter((y) => y >= bounds.y && y <= bounds.y + bounds.h);
   const xi = new Map(xs.map((x, i) => [x, i]));
   const yi = new Map(ys.map((y, i) => [y, i]));
