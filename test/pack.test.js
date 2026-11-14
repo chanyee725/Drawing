@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -23,7 +23,7 @@ function fakeRoot({ version = '1.2.3', withPublic = true, withStart = true } = {
   for (const f of ['restart.sh', 'stop.sh']) {
     put(`plugin/skills/dispatch/scripts/${f}`, readFileSync(new URL(`../plugin/skills/dispatch/scripts/${f}`, import.meta.url), 'utf8'));
   }
-  if (withStart) put('plugin/scripts/start.sh', '#!/bin/sh\necho "$DRAW_PORT $DISPATCH_PORT $1" > "$HOME/started"\n');
+  if (withStart) put('plugin/scripts/start.sh', '#!/bin/sh\necho "$DRAW_PORT $DISPATCH_PORT $1" > "$HOME/started"; echo "$DRAWING_HOME" > "$HOME/started-home"\n');
   put('plugin/.env', 'SECRET=1');
   put('test/a.test.js');
   put('web/src/main.tsx');
@@ -104,7 +104,7 @@ test('pack: shipped plugin has valid manifests, hooks.json and skills', () => {
   }
 });
 
-test('dispatch-update: unpacks the release bundle that gh serves, into DRAWING_HOME', () => {
+test('dispatch-update: unpacks the release bundle that gh serves, into DRAWING_INSTALL_BASE', () => {
   const root = fakeRoot({ version: '3.1.4' });
   const work = mkdtempSync(join(tmpdir(), 'upd-'));
   try {
@@ -122,7 +122,7 @@ cp "${bundle}" "$dir/"
     const script = new URL('../plugin/skills/dispatch-update/scripts/update.sh', import.meta.url).pathname;
     const out = execFileSync('bash', [script], {
       encoding: 'utf8',
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_HOME: join(home, 'd') },
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_INSTALL_BASE: join(home, 'd') },
     });
     assert.match(out, /drawing-3\.1\.4/);
     assert.match(readFileSync(join(home, 'd/current/plugin/.claude-plugin/plugin.json'), 'utf8'), /"version": "3.1.4"/);
@@ -152,15 +152,23 @@ cp "${bundle}" "$dir/"
   mkdirSync(join(project, '.dispatch'), { recursive: true });
   execFileSync('git', ['init', '-q', project]);
   const script = new URL('../plugin/skills/dispatch-update/scripts/update.sh', import.meta.url).pathname;
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_HOME: join(home, 'd') };
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, HOME: home, DRAWING_INSTALL_BASE: join(home, 'd') };
   const run = (args = []) => execFileSync('bash', [script, ...args], { encoding: 'utf8', env, cwd: project, stdio: ['ignore', 'pipe', 'pipe'] });
   const cleanup = () => { rmSync(root, { recursive: true, force: true }); rmSync(work, { recursive: true, force: true }); };
   return { work, home, project, env, run, cleanup };
 }
 
+// A stand-in for the Drawing server: node running <dir>/server/index.js --project-mode <project>/pipelines.
+function fakeServer(dir, project) {
+  mkdirSync(join(dir, 'fake/server'), { recursive: true });
+  writeFileSync(join(dir, 'fake/server/index.js'), 'setInterval(() => {}, 1000);\n');
+  return spawn(process.execPath, [join(dir, 'fake/server/index.js'), '--project-mode', join(realpathSync(project), 'pipelines')], { stdio: 'ignore' });
+}
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
 test('dispatch-update: restarts only this project server, with the port passed as DRAW_PORT and DISPATCH_PORT', () => {
   const t = updateEnv();
-  const child = spawn('sleep', ['60'], { stdio: 'ignore' });
+  const child = fakeServer(t.work, t.project);
   try {
     writeFileSync(join(t.project, '.dispatch/server.pid'), String(child.pid));
     writeFileSync(join(t.project, '.dispatch/server.port'), '4411');
@@ -174,6 +182,8 @@ test('dispatch-update: restarts only this project server, with the port passed a
     assert.match(out, /run restart\.sh in each of them/);
     const started = readFileSync(join(t.home, 'started'), 'utf8').trim();
     assert.match(started, /^4411 4411 .*proj$/);
+    // DRAWING_HOME for start.sh is the unpacked Drawing checkout, not the install base.
+    assert.equal(readFileSync(join(t.home, 'started-home'), 'utf8').trim(), join(t.home, 'd/drawing-3.1.4'));
     assert.ok(!existsSync(join(other, '.dispatch')), 'registry project untouched');
   } finally {
     child.kill();
@@ -219,6 +229,36 @@ test('dispatch-update: re-downloading the same version replaces it without lefto
     const left = execFileSync('ls', ['-A', join(t.home, 'd')], { encoding: 'utf8' }).split('\n').filter(Boolean).sort();
     assert.deepEqual(left, ['current', 'drawing-3.1.4']);
   } finally {
+    t.cleanup();
+  }
+});
+
+test('dispatch-update: a pid file naming some other live process is stale: not signalled, no restart', () => {
+  const t = updateEnv();
+  const other = spawn('sleep', ['60'], { stdio: 'ignore' });
+  try {
+    writeFileSync(join(t.project, '.dispatch/server.pid'), String(other.pid));
+    writeFileSync(join(t.project, '.dispatch/server.port'), '4411');
+    assert.match(t.run(), /no running server/);
+    assert.ok(!existsSync(join(t.home, 'started')));
+    assert.ok(alive(other.pid), 'unrelated process left alone');
+  } finally {
+    other.kill();
+    t.cleanup();
+  }
+});
+
+test('dispatch-update: a node server of another workspace is not ours either', () => {
+  const t = updateEnv();
+  const otherProject = join(t.work, 'elsewhere');
+  mkdirSync(otherProject);
+  const other = fakeServer(t.work, otherProject);
+  try {
+    writeFileSync(join(t.project, '.dispatch/server.pid'), String(other.pid));
+    assert.match(t.run(), /no running server/);
+    assert.ok(alive(other.pid));
+  } finally {
+    other.kill();
     t.cleanup();
   }
 });
