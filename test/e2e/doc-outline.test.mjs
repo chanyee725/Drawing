@@ -130,7 +130,50 @@ test('outline, heading link and wikilink in a headless browser', { skip: !ON && 
   await wide.keyboard.press('Escape');
   await wide.locator('#doc-outline').waitFor({ state: 'detached' });
   assert.equal(await btn.evaluate((el) => el === document.activeElement), true);
+
+  // With the pointer away, focus inside the doc (:focus-within) keeps the button visible.
+  await wide.locator('.doc-editor p').first().click();
+  await wide.mouse.move(1, 790);
+  await wide.waitForFunction(() => getComputedStyle(document.querySelector('.doc-outline-btn')).opacity === '1');
+
+  // Esc closes the outline even when focus is in the text, and focus stays there.
+  await btn.click();
+  await wide.locator('#doc-outline').waitFor();
+  await wide.locator('.doc-editor').focus();
+  await wide.keyboard.press('Escape');
+  await wide.locator('#doc-outline').waitFor({ state: 'detached' });
+  assert.equal(await wide.evaluate(() => !!document.activeElement?.closest('.doc-editor')), true);
+
+  // A click outside the outline closes it.
+  await btn.click();
+  await wide.locator('#doc-outline').waitFor();
+  await wide.mouse.click(host.x + 10, pane.y + 200);
+  await wide.locator('#doc-outline').waitFor({ state: 'detached' });
+
+  // A short doc: the area below its content, down to the bottom of the pane, still reveals the button.
+  await wide.goto(`${BASE}/#file=other`);
+  await wide.waitForSelector('.doc-editor');
+  await wide.evaluate(() => document.activeElement?.blur());
+  await wide.mouse.move(1, 790);
+  await wide.waitForFunction(() => getComputedStyle(document.querySelector('.doc-outline-btn')).opacity === '0');
+  const shortPane = await wide.locator('.doc-pane').boundingBox();
+  const shortHost = await wide.locator('.doc-host').boundingBox();
+  const scroller = await wide.locator('.doc-host').evaluate((el) => el.parentElement.getBoundingClientRect().bottom);
+  assert.ok(shortHost.y + shortHost.height >= scroller - 1, `expected .doc-host to reach the bottom of the pane: ${JSON.stringify({ shortHost, scroller })}`);
+  await wide.mouse.move(shortPane.x + 40, scroller - 4);
+  await wide.waitForFunction(() => getComputedStyle(document.querySelector('.doc-outline-btn')).opacity === '1');
   await wide.close();
+
+  // Touch screens (hover: none) show the button without hover or focus.
+  const touchCtx = await browser.newContext({ viewport: { width: 800, height: 800 }, hasTouch: true, isMobile: true });
+  const touch = await touchCtx.newPage();
+  touch.on('pageerror', (e) => errors.push(String(e)));
+  await touch.goto(`${BASE}/#file=main`);
+  await touch.waitForSelector('.doc-editor h1');
+  assert.equal(await touch.evaluate(() => matchMedia('(hover: none)').matches), true);
+  await touch.evaluate(() => document.activeElement?.blur());
+  assert.equal(await touch.locator('.doc-outline-btn').evaluate((el) => getComputedStyle(el).opacity), '1');
+  await touchCtx.close();
 
   assert.deepEqual(errors, []);
   assert.ok(log.includes(`workspace ${ws}`));

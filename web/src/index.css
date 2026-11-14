@@ -348,6 +348,8 @@ body {
 .doc-table-bar button:hover { background: var(--accent); }
 
 /* Outline (목차) and heading links */
+/* Fill the pane (flex column in 문서-only view, block in the splitter) so a short doc's empty area still reveals the button. */
+.doc-host { flex: 1 0 auto; min-height: 100%; }
 .doc-outline-wrap { position: relative; align-self: flex-end; }
 .doc-outline-btn { color: var(--muted-foreground); opacity: 0; transition: opacity 0.15s; }
 .doc-host:hover .doc-outline-btn, .doc-host:focus-within .doc-outline-btn, .doc-outline-btn[aria-expanded="true"] { opacity: 1; }

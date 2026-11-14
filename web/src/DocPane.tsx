@@ -239,17 +239,37 @@ export const DocPane = memo(function DocPane({ document, blocks, getBlocks, getC
     ['표 지우기', () => editor.chain().focus().deleteTable().run()],
   ];
 
+  // While the outline is open, Esc anywhere (unless another control already used it) and a press outside it close it.
+  // Document-level so it works even when focus is elsewhere (Safari does not focus a button on click).
+  const outlineWrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!outlineOpen) return;
+    // `document` is this component's prop, so reach the page through window.
+    const page = window.document;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Respect Esc another control already used, except ProseMirror's: it marks every Esc in the text as handled.
+      if (e.defaultPrevented && !(e.target instanceof Node && editor?.view.dom.contains(e.target))) return;
+      // Keep window-level Esc listeners (e.g. leaving a view) from also firing.
+      e.stopPropagation();
+      const wrap = outlineWrap.current;
+      // Focus goes back to the button only if it was inside the outline; otherwise it stays where it was.
+      if (wrap?.contains(page.activeElement)) wrap.querySelector<HTMLElement>('.doc-outline-btn')?.focus();
+      setOutlineOpen(false);
+    };
+    const onDown = (e: PointerEvent) => {
+      if (!outlineWrap.current?.contains(e.target as Node)) setOutlineOpen(false);
+    };
+    page.addEventListener('keydown', onKey);
+    page.addEventListener('pointerdown', onDown);
+    return () => {
+      page.removeEventListener('keydown', onKey);
+      page.removeEventListener('pointerdown', onDown);
+    };
+  }, [outlineOpen, editor]);
+
   const outlineMenu = (
-    <div
-      className="doc-outline-wrap"
-      onKeyDown={(e) => {
-        // Esc closes the open outline and puts focus back on its button.
-        if (e.key !== 'Escape' || !outlineOpen) return;
-        e.stopPropagation();
-        setOutlineOpen(false);
-        e.currentTarget.querySelector<HTMLElement>('.doc-outline-btn')?.focus();
-      }}
-    >
+    <div ref={outlineWrap} className="doc-outline-wrap">
       <Button variant="ghost" size="icon-sm" className="doc-outline-btn" aria-label="목차" title="목차" aria-expanded={outlineOpen} aria-controls="doc-outline" onClick={() => setOutlineOpen((o) => !o)}>
         <List aria-hidden />
       </Button>
