@@ -3,7 +3,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createApp } from '../server/app.js';
@@ -33,10 +33,11 @@ function scratchRepo() {
   return { root, ws };
 }
 
-async function start() {
-  const { root, ws } = scratchRepo();
-  const bin = fakeCliBin();
-  dirs.push(bin.dir);
+/** A server on a fresh scratch repo, or with `again`, a restart on the same repo, workspace and fake CLIs. */
+async function start(again = null) {
+  const { root, ws } = again ?? scratchRepo();
+  const bin = again?.bin ?? fakeCliBin();
+  if (!again) dirs.push(bin.dir);
   const p = { installed: true, connected: true, busy: false, url: null, error: null };
   const deps = {
     limitsFile: join(root, 'limits.json'),
@@ -67,8 +68,8 @@ async function start() {
   // Connect Claude the way the UI does (the CLI reports itself logged in).
   assert.equal((await call('POST', '/api/providers/claude/login')).body.connected, true);
   const d = app.ctx.modules.dispatch;
-  const lead = (await call('POST', '/api/sessions', { items: [{ role: 'lead', task: 'plan it' }], worktree: false })).body.sessions[0];
-  await until(() => ['idle', 'done'].includes(d.hub.get(lead.id).status), 10_000);
+  const lead = again?.lead ?? (await call('POST', '/api/sessions', { items: [{ role: 'lead', task: 'plan it' }], worktree: false })).body.sessions[0];
+  if (!again) await until(() => ['idle', 'done'].includes(d.hub.get(lead.id).status), 10_000);
   return { app, call, d, lead, root, ws, bin, stop: () => app.close() };
 }
 
@@ -427,6 +428,110 @@ test('계획 다시 열기 twice keeps what the first run finished and how it me
     assert.equal(fin.steps.ui.result.commit, head);
     assert.equal(fin.steps.api.state, 'done');
   } finally {
+    await t.stop();
+  }
+});
+
+test('계획 다시 열기, then a server restart: the next 시작하기 still carries the finished steps and how they merged (E28)', { timeout: 90_000 }, async () => {
+  let t = await start();
+  try {
+    const { call, d, lead, root } = t;
+    const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', commit: head, stage: 'done' });
+    await until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api')?.mergeCheck?.ok === true, 10_000);
+    assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+    const re = await call('POST', '/api/pipeline/reopen', { path });
+    assert.equal(re.status, 200, JSON.stringify(re.body));
+
+    // Restart on the same workspace: the carry is kept on disk, not only in memory.
+    await t.stop();
+    t = await start(t);
+    const reopened = await statusOf(t.call, path);
+    assert.equal(reopened.state, 'plan');
+    const go = await t.call('POST', '/api/pipeline/start', { path, revision: reopened.draftRevision ?? reopened.revision });
+    assert.equal(go.status, 200, JSON.stringify(go.body));
+    const next = (await t.call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${go.body.runId}`)).body;
+    assert.equal(next.steps.api.state, 'done');
+    assert.equal(next.steps.api.carried, runId);
+    assert.deepEqual(next.steps.api.result, { commit: head, base: 'develop' });
+    assert.equal(next.steps.ui.state, 'pending');
+    assert.equal(t.d.store.data.pipelines[path].carry, undefined);
+  } finally {
+    await t.stop();
+  }
+});
+
+test('a carried step closed again with a new commit keeps the new commit (E28)', { timeout: 90_000 }, async () => {
+  const t = await start();
+  try {
+    const { call, d, lead, root } = t;
+    const git = (...a) => execFileSync('git', ['-C', root, ...a], { encoding: 'utf8' }).trim();
+    const { path } = await running(t);
+    const first = git('rev-parse', 'HEAD');
+    const runOf = async (id) => (await call('GET', `/api/runs/run?path=${encodeURIComponent(path)}&id=${id}`)).body;
+    const merged = (commit) => until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.commit === commit)?.mergeCheck?.ok === true, 10_000);
+    const reopenAndStart = async () => {
+      assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+      const re = await call('POST', '/api/pipeline/reopen', { path });
+      assert.equal(re.status, 200, JSON.stringify(re.body));
+      const go = await call('POST', '/api/pipeline/start', { path, revision: re.body.draftRevision ?? re.body.revision });
+      assert.equal(go.status, 200, JSON.stringify(go.body));
+      return go.body.runId;
+    };
+
+    // Run A merges api at the first commit.
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', commit: first, stage: 'done' });
+    await merged(first);
+    const b = await reopenAndStart();
+    assert.equal((await runOf(b)).steps.api.result.commit, first);
+
+    // Run B closes the carried api step again at a newer commit on develop.
+    writeFileSync(join(root, 'api.txt'), 'fix\n');
+    git('add', 'api.txt');
+    git('commit', '-qm', 'fix api');
+    const second = git('rev-parse', 'HEAD');
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API 다시', step: 'api', commit: second, stage: 'done' });
+    await merged(second);
+    const c = await reopenAndStart();
+    const runC = await runOf(c);
+    assert.equal(runC.steps.api.carried, b);
+    assert.deepEqual(runC.steps.api.result, { commit: second, base: 'develop' });
+    assert.equal(runC.steps.ui.state, 'pending');
+  } finally {
+    await t.stop();
+  }
+});
+
+test('계획 다시 열기 logs (metadata only) when the run record cannot be read, and still reopens (E28)', { timeout: 90_000 }, async () => {
+  let t = await start();
+  const logged = [];
+  const error = console.error;
+  try {
+    const { call, d, lead, root } = t;
+    const { path, runId } = await running(t);
+    const head = execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    await call('POST', '/api/tasks', { lead: lead.id, title: '서버 API', step: 'api', commit: head, stage: 'done' });
+    await until(() => d.hub.tasks.find((x) => x.lead === lead.id && x.step === 'api')?.mergeCheck?.ok === true, 10_000);
+    assert.equal((await call('POST', '/api/pipeline/stop', { path })).status, 200);
+    // Restart so the paused run is no longer in memory, then lose its record on disk.
+    await t.stop();
+    t = await start(t);
+    const files = readdirSync(t.ws, { recursive: true }).filter((f) => f.endsWith(`${runId}.json`));
+    assert.equal(files.length, 1, JSON.stringify(files));
+    rmSync(join(t.ws, files[0]));
+
+    console.error = (...a) => logged.push(a.map(String).join(' '));
+    const re = await t.call('POST', '/api/pipeline/reopen', { path });
+    console.error = error;
+    assert.equal(re.status, 200, JSON.stringify(re.body));
+    assert.equal(re.body.state, 'plan');
+    const line = logged.find((l) => l.startsWith('pipeline reopen record:'));
+    assert.ok(line, JSON.stringify(logged));
+    // Metadata only: an error code, never the plan path, run id or text.
+    assert.equal(line.includes(path) || line.includes(runId), false, line);
+  } finally {
+    console.error = error;
     await t.stop();
   }
 });
