@@ -217,3 +217,55 @@ test('new text is 13px, a saved text keeps its size, and a new label wraps insid
   assert.equal(old.version, 5, 'and its version');
   assert.deepEqual(errors, []);
 });
+
+test('the size buttons hold the 13px step: it is on for new text and can be picked again', SKIP, async (t) => {
+  const { page, saved, errors } = await open(t, 'steps', [text('old', 100, 100, 'Saved at thirty-six', 9, { fontSize: 36, height: 45 })]);
+  const button = (name) => page.locator(`label:has([data-testid="fontSize-${name}"])`);
+  const checked = () => page.$$eval('input[data-testid^="fontSize-"]', (els) => els.filter((e) => e.checked).map((e) => e.dataset.testid));
+  /** Type `str` with the text tool at a point, after picking a size button (when given). */
+  const type = async (str, x, y, size) => {
+    await page.keyboard.press('t');
+    await button('small').waitFor();
+    if (size) await button(size).click();
+    await page.mouse.click(x, y);
+    await page.waitForSelector('textarea.excalidraw-wysiwyg');
+    await page.keyboard.type(str);
+    await page.keyboard.press('Escape');
+  };
+
+  await page.mouse.click(500, 600); // keys go to the canvas
+  await page.keyboard.press('t');
+  await button('small').waitFor();
+  assert.deepEqual(await checked(), ['fontSize-small'], 'the default step is on for new text');
+  assert.equal(await button('small').getAttribute('title'), '작게');
+  // DRAW_E2E_SHOTS=<dir>: keep light and dark pictures of the style panel there.
+  if (process.env.DRAW_E2E_SHOTS) {
+    for (const scheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme: scheme });
+      await page.waitForFunction((s) => document.documentElement.dataset.theme === s, scheme);
+      await page.mouse.move(700, 450); // off the panel: no button is drawn hovered
+      await page.locator('.App-menu__left').screenshot({ path: join(process.env.DRAW_E2E_SHOTS, `size-steps-${scheme}.png`) });
+    }
+    await page.emulateMedia({ colorScheme: 'light' });
+  }
+  await page.keyboard.press('Escape');
+
+  await type('First', 500, 500);
+  await type('Bigger', 500, 600, 'large');
+  assert.deepEqual(await checked(), ['fontSize-large']);
+  await page.keyboard.press('Escape');
+  await type('Back again', 500, 700, 'small'); // no reload in between
+  assert.deepEqual(await checked(), ['fontSize-small']);
+  await page.keyboard.press('Escape');
+
+
+  const byText = (m, str) => [...m.values()].find((e) => e.type === 'text' && e.text === str);
+  const s = await saved((m) => ['First', 'Bigger', 'Back again'].every((x) => byText(m, x)));
+  assert.equal(byText(s, 'First')?.fontSize, 13);
+  assert.equal(byText(s, 'Bigger')?.fontSize, 20);
+  assert.equal(byText(s, 'Back again')?.fontSize, 13);
+  const old = s.get('old');
+  assert.equal(old.fontSize, 36, 'the saved text keeps its size, though 36 is no longer a step');
+  assert.equal(old.version, 5, 'and its version');
+  assert.deepEqual(errors, []);
+});
