@@ -307,6 +307,58 @@ test('restart.sh waits for the old server to exit before starting', async () => 
   }
 });
 
+function restartFixture(dir) {
+  const home = join(dir, 'home');
+  mkdirSync(join(home, 'plugin/scripts'), { recursive: true });
+  mkdirSync(join(home, 'plugin/skills/dispatch/scripts'), { recursive: true });
+  for (const f of ['skills/dispatch/scripts/restart.sh', 'skills/dispatch/scripts/stop.sh', 'scripts/server-check.sh']) {
+    copyFileSync(new URL('../plugin/' + f, import.meta.url), join(home, 'plugin', f));
+  }
+  writeFileSync(join(home, 'plugin/scripts/start.sh'), '#!/bin/sh\necho started > "$OUT"\n');
+  execFileSync('chmod', ['+x', join(home, 'plugin/scripts/start.sh')]);
+  return join(home, 'plugin/skills/dispatch/scripts/restart.sh');
+}
+
+test('restart.sh starts at once when server.pid points at a live pid that is not our server', async () => {
+  const { dir, project } = scratchProject();
+  const restart = restartFixture(dir);
+  const other = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  try {
+    await new Promise((r) => setTimeout(r, 200));
+    writeFileSync(join(project, '.dispatch', 'server.pid'), String(other.pid));
+    const out = join(dir, 'out');
+    const t0 = Date.now();
+    const r = spawnSync('bash', [restart, project], { env: { ...process.env, OUT: out }, encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(Date.now() - t0 < 5000, 'did not wait for the unrelated pid');
+    assert.equal(readFileSync(out, 'utf8').trim(), 'started');
+    assert.ok(alive(other.pid), 'unrelated process left alone');
+  } finally {
+    other.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('restart.sh aborts without starting when our server ignores SIGTERM', async () => {
+  const { dir, project } = scratchProject();
+  const restart = restartFixture(dir);
+  mkdirSync(join(dir, 'fake dir/server'), { recursive: true });
+  writeFileSync(join(dir, 'fake dir/server/index.js'), "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);\n");
+  const ours = spawn(process.execPath, [join(dir, 'fake dir/server/index.js'), '--project-mode', join(project, 'pipelines')], { stdio: 'ignore' });
+  try {
+    await new Promise((r) => setTimeout(r, 300));
+    writeFileSync(join(project, '.dispatch', 'server.pid'), String(ours.pid));
+    const out = join(dir, 'out');
+    const r = spawnSync('bash', [restart, project], { env: { ...process.env, OUT: out }, encoding: 'utf8' });
+    assert.equal(r.status, 1);
+    assert.match(r.stderr, /did not exit after about 10s/);
+    assert.ok(!existsSync(out), 'start.sh not called');
+  } finally {
+    ours.kill('SIGKILL');
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('start.sh writes server.pid only after the server is ready; a failed start keeps the old file', () => {
   const { dir, project } = scratchProject();
   const fakeHome = join(dir, 'home');
