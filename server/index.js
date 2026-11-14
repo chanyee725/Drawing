@@ -58,7 +58,7 @@ app.server.on('error', async (err) => {
 });
 app.server.listen(port, HOST, () => {
   lock?.setPort(port).catch((err) => console.error(`Could not update the workspace lock (${err.code ?? err.name})`));
-  console.log(`Drawing: http://${HOST}:${port}/  (workspace ${opts.workspaceDir})`);
+  console.log(`Drawing: http://${HOST}:${port}/  (workspace ${opts.workspaceDir}${opts.projectMode ? ', project mode' : ''})`);
 });
 
 for (const sig of ['SIGINT', 'SIGTERM']) {

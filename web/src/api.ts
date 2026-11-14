@@ -89,7 +89,7 @@ async function call<T>(method: string, url: string, body?: unknown, keepalive = 
 const q = (p: string) => `?path=${encodeURIComponent(p)}`;
 
 export const api = {
-  info: () => call<{ workspace: string }>('GET', '/api/info'),
+  info: () => call<{ workspace: string; mode?: 'drawing' | 'project' }>('GET', '/api/info'),
   tree: () => call<{ tree: TreeNode[] }>('GET', '/api/tree').then((r) => r.tree),
   projects: () => call<ProjectsView>('GET', '/api/workspace/projects'),
   dispatch: () => call<DispatchStatus>('GET', '/api/dispatch'),
