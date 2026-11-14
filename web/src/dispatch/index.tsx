@@ -11,6 +11,7 @@ import { hashOf, viewOf, type View } from './lib/usage.ts';
 import { SessionSheet } from './SessionSheet';
 import { SessionsPage } from './SessionsPage';
 import { SessionTimeline } from './SessionTimeline';
+import { TaskBoardButton } from './TaskBoard';
 import { UsagePage } from './UsagePage';
 import { connect, useDispatch } from './store';
 
@@ -102,7 +103,7 @@ export default function DispatchApp() {
         ) : view === 'timeline' ? (
           <SessionTimeline onOpen={setOpen} />
         ) : (
-          <SessionsPage onOpen={setOpen} onUsage={() => go('usage')} />
+          <SessionsPage onOpen={setOpen} onUsage={() => go('usage')} actions={<TaskBoardButton />} />
         )}
       </main>
       {sheet}
