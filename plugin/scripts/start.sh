@@ -3,8 +3,8 @@
 #   start.sh <project>
 # Workspace = <project>/pipelines (created when missing). The port is kept in
 # <project>/.dispatch/server.port (its pid in server.pid, which stop.sh reads; both written only once
-# the server is ready, a failed start leaves the old files alone; reusing a server rewrites server.pid from the lock); a server that already
-# answers there is reused only when <project>/pipelines/.drawing/server.lock names it (live pid, same
+# the server is ready, a failed start leaves the old files alone; reusing a server rewrites server.pid
+# from the lock); a server that already answers there is reused only when <project>/pipelines/.drawing/server.lock names it (live pid, same
 # port), so another project's server on a recycled port is never mistaken for ours. Port order: remembered live server, else $DRAW_PORT, else $DISPATCH_PORT (team.sh and
 # restart.sh pass it; handed to the server as DRAW_PORT). No ~/.dispatch/servers registry is written, else a free port. Prints nothing but the URL on success.
 # The server binds 127.0.0.1 only. Prints the URL on stdout; nothing else is written outside the project.
@@ -42,7 +42,7 @@ ours() {
     try { process.kill(lock.pid, 0); } catch (e) { if (e.code !== "EPERM") process.exit(1); }
     const req = http.get({ host: "127.0.0.1", port: Number(port), path: "/api/info", timeout: 1500 }, (res) => {
       let b = ""; res.on("data", (c) => (b += c));
-      res.on("end", () => { try { const i = JSON.parse(b); if (i.mode === "project" && i.workspace === "pipelines") { if (!want) console.log(lock.pid); process.exit(0); } process.exit(1); } catch { process.exit(1); } });
+      res.on("end", () => { try { const i = JSON.parse(b); if (i.mode === "project" && i.workspace === "pipelines") { if (!want) { process.stdout.write(lock.pid + "\n", () => process.exit(0)); return; } process.exit(0); } process.exit(1); } catch { process.exit(1); } });
     });
     req.on("error", () => process.exit(1)); req.on("timeout", () => req.destroy());
   ' "$1" "$lockfile" "${2:-}"
