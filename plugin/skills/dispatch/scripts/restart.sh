@@ -3,6 +3,8 @@
 # are resumed automatically, and transcripts survive in .dispatch/transcripts.
 set -euo pipefail
 here="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=../../../scripts/server-check.sh
+source "$(dirname "$(dirname "$(dirname "$here")")")/scripts/server-check.sh"
 start="$(dirname "$(dirname "$(dirname "$here")")")/scripts/start.sh"
 [ -f "$start" ] || { echo "missing $start; server not stopped" >&2; exit 1; }
 # start.sh reads DISPATCH_PORT or DRAW_PORT: pass either one on as both.
@@ -11,6 +13,17 @@ if [ -n "$port" ]; then
   [[ "$port" =~ ^[0-9]+$ ]] || { echo "bad port: $port" >&2; exit 1; }
   export DRAW_PORT="$port" DISPATCH_PORT="$port"
 fi
+proj="$(git -C "${1:-$PWD}" rev-parse --show-toplevel 2>/dev/null || (cd "${1:-$PWD}" && pwd -P))"
+old=""
+[ ! -f "$proj/.dispatch/server.pid" ] || old="$(tr -dc '0-9' < "$proj/.dispatch/server.pid" 2>/dev/null || true)"
+# Only wait for a pid that is our server; a recycled pid is stale and stop.sh ignores it too.
+{ [ -z "$old" ] || is_our_server "$old" "$proj/pipelines"; } || old=""
 "$here/stop.sh" "${1:-$PWD}"
-sleep 1
+# Wait (about 10s; each poll also costs a ps call) for the old server to exit so start.sh never finds it still answering.
+if [ -n "$old" ]; then
+  # A zombie (exited, not yet reaped by its parent) counts as gone.
+  running() { kill -0 "$old" 2>/dev/null && [[ "$(ps -o stat= -p "$old" 2>/dev/null || true)" != Z* ]]; }
+  for _ in $(seq 1 100); do running || break; sleep 0.1; done
+  if running; then echo "old server (pid $old) did not exit after about 10s; not starting a new one" >&2; exit 1; fi
+fi
 "$start" "${1:-$PWD}"

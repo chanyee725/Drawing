@@ -3,23 +3,8 @@
 # process is node running a Drawing server/index.js for <project>/pipelines; otherwise it is stale.
 set -euo pipefail
 
-# Succeeds only when pid $1 is node running a Drawing server/index.js in project mode on workspace $2
-# (what start.sh launches). Reads /proc/<pid>/cmdline, falls back to `ps -o command=`; nothing is eval'd.
-is_our_server() {
-  local pid=$1 workspace=$2 cmd first
-  [[ "$pid" =~ ^[0-9]+$ ]] && [ "$pid" -gt 0 ] || return 1
-  kill -0 "$pid" 2>/dev/null || return 1
-  if [ -r "/proc/$pid/cmdline" ]; then
-    cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
-  else
-    cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
-  fi
-  cmd=${cmd%"${cmd##*[![:space:]]}"}
-  [ -n "$cmd" ] || return 1
-  first=${cmd%% *}
-  case "${first##*/}" in node|nodejs) ;; *) return 1 ;; esac
-  [[ "$cmd" == *"/server/index.js --project-mode $workspace" ]]
-}
+# shellcheck source=../../../scripts/server-check.sh
+source "$(dirname "$(dirname "$(dirname "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")")")")/scripts/server-check.sh"
 
 target="$(cd "${1:-$PWD}" && pwd -P)"
 project="$(git -C "$target" rev-parse --show-toplevel 2>/dev/null || echo "$target")"
