@@ -140,8 +140,10 @@ test('사용량, 타임라인 and 상시 화면 show a fake session', { skip: !O
     // Forced colors drop the bar backgrounds; a system-colour border keeps each mark visible.
     await page.emulateMedia({ forcedColors: 'active' });
     for (const mark of [row.locator('[data-span] > span').first(), legend]) {
-      const b = await mark.evaluate((e) => { const c = getComputedStyle(e); return { style: c.borderLeftStyle, width: parseFloat(c.borderLeftWidth) }; });
+      const b = await mark.evaluate((e) => { const c = getComputedStyle(e); return { style: c.borderLeftStyle, width: parseFloat(c.borderLeftWidth), color: c.borderLeftColor }; });
       assert.ok(b.style !== 'none' && b.width > 0, `mark has no border in forced colors: ${JSON.stringify(b)}`);
+      // Preflight already makes the style solid, so also check that a system colour (not transparent) is set.
+      assert.ok(!/^(transparent|rgba\(0, 0, 0, 0\))$/.test(b.color), `mark border is transparent in forced colors: ${JSON.stringify(b)}`);
     }
     if (SHOTS) await page.screenshot({ path: join(SHOTS, 'e29-timeline-forced.png') });
     await page.emulateMedia({ forcedColors: 'none' });
