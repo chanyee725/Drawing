@@ -204,3 +204,61 @@ test('start.sh refuses a folder that is not a git project top', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('project mode: editor URLs 302 to /dispatch, assets and /dispatch are served; drawing mode serves the editor', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e30-redir-'));
+  writeFileSync(join(dir, 'index.html'), '<p>spa</p>');
+  try {
+    for (const projectMode of [true, false]) {
+      const app = await createApp({ workspaceDir: dir, projectMode }, { moduleList: [], publicDir: dir + '/' });
+      await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+      const base = `http://127.0.0.1:${app.server.address().port}`;
+      try {
+        for (const p of ['/', '/index.html', '/some/editor/route']) {
+          const r = await fetch(base + p, { redirect: 'manual' });
+          if (projectMode) {
+            assert.equal(r.status, 302, p);
+            assert.equal(r.headers.get('location'), '/dispatch');
+          } else assert.equal(r.status, 200, p);
+        }
+        for (const p of ['/dispatch', '/dispatch/usage']) assert.equal((await fetch(base + p, { redirect: 'manual' })).status, 200, p);
+        assert.equal((await fetch(base + '/api/info')).status, 200);
+        assert.notEqual((await fetch(base + '/missing.js', { redirect: 'manual' })).status, 302);
+      } finally {
+        await app.close();
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('project mode: editor document writes answer 403; pipeline and plan routes stay open', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'drawing-e30-block-'));
+  const ok = { method: 'POST', handler: (_q, res) => res.end('{}') };
+  const mods = [{ name: 't', setup: async () => ({ routes: [
+    ...['PUT', 'POST', 'DELETE'].map((method) => ({ ...ok, method, path: '/api/file' })),
+    ...['POST', 'DELETE'].map((method) => ({ ...ok, method, path: '/api/folder' })),
+    ...['/api/move', '/api/trash/restore', '/api/history', '/api/workspace/pr-tracking', '/api/pipeline/start'].map((path) => ({ ...ok, path })),
+    { ...ok, method: 'PATCH', path: '/api/file/plan' },
+  ] }) }];
+  try {
+    for (const projectMode of [true, false]) {
+      const app = await createApp({ workspaceDir: dir, projectMode }, { moduleList: mods });
+      await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
+      const base = `http://127.0.0.1:${app.server.address().port}`;
+      const call = async (method, path, headers = { 'x-drawing': '1' }) => (await fetch(base + path, { method, headers })).status;
+      try {
+        for (const [m, p] of [['PUT', '/api/file'], ['POST', '/api/file'], ['DELETE', '/api/file'], ['POST', '/api/folder'], ['DELETE', '/api/folder'], ['POST', '/api/move'], ['POST', '/api/trash/restore'], ['POST', '/api/history'], ['POST', '/api/workspace/pr-tracking']])
+          assert.equal(await call(m, p), projectMode ? 403 : 200, `${m} ${p}`);
+        assert.equal(await call('POST', '/api/pipeline/start'), 200);
+        assert.equal(await call('PATCH', '/api/file/plan'), 200);
+        assert.equal(await call('POST', '/api/move', {}), 403); // header rule still applies
+      } finally {
+        await app.close();
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
