@@ -1,6 +1,8 @@
 // 타임라인 view of the 세션 board (E29): one row per session in role lanes, the last two hours across, each stretch
 // drawn by state. Shape tells states apart without colour: active states fill the row, stuck is hatched, resting is
 // a low solid bar (no fade, so it keeps 3:1 against the track), done a thin faded line, a failure a red tick. History is state and time only (GET /api/timeline).
+// Forced-colors mode drops author backgrounds and gradients, so every mark also gets a system-colour border there
+// (stuck dashed, failures in Highlight); the shapes still tell states apart.
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '../lib/utils';
 import { roleColor } from '../run/overlayModel';
@@ -21,6 +23,10 @@ const SHAPE: Record<SessionState, { h: string; hatch?: boolean; fade?: boolean }
   resting: { h: 'h-2/5' },
   done: { h: 'h-0.5', fade: true },
 };
+/** Border marks that stand in for the background fill in forced-colors mode (Windows high contrast). */
+const forcedMark = (state: SessionState) =>
+  cn('forced-colors:border forced-colors:border-[CanvasText]', SHAPE[state].hatch && 'forced-colors:border-dashed');
+const FORCED_FAIL = 'forced-colors:border-l-[3px] forced-colors:border-[Highlight]';
 const LEGEND: SessionState[] = ['working', 'waiting', 'stuck', 'failed', 'resting', 'done'];
 
 const hhmm = (t: number) => new Date(t).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
@@ -39,7 +45,7 @@ function barStyle(state: SessionState) {
 function Swatch({ state }: { state: SessionState }) {
   return (
     <span aria-hidden className="flex h-3 w-4 shrink-0 items-center">
-      <span className={cn('w-full rounded-[2px]', SHAPE[state].h)} style={barStyle(state)} />
+      <span className={cn('w-full rounded-[2px]', SHAPE[state].h, forcedMark(state))} style={barStyle(state)} />
     </span>
   );
 }
@@ -67,11 +73,11 @@ function Row({ s, history, now, windowMs, onOpen }: { s: Session; history: Entry
         {spans.map(p => (
           <span key={p.from} data-span={p.state} title={`${STATE[known(p.state)].label} · ${hhmm(p.from)}–${hhmm(p.to)} (${mins(p.to - p.from)})`}
             className="absolute inset-y-0 flex min-w-0.5 items-center" style={{ left: x(p.from), width: w(p.from, p.to) }}>
-            <span className={cn('w-full', SHAPE[known(p.state)].h)} style={barStyle(known(p.state))} />
+            <span className={cn('w-full', SHAPE[known(p.state)].h, forcedMark(known(p.state)))} style={barStyle(known(p.state))} />
           </span>
         ))}
         {fails.map(t => (
-          <span key={t} title={`실패 · ${hhmm(t)}`} className="absolute inset-y-0 w-[3px] -translate-x-1/2 bg-destructive ring-1 ring-card" style={{ left: x(t) }} />
+          <span key={t} title={`실패 · ${hhmm(t)}`} data-fail className={cn('absolute inset-y-0 w-[3px] -translate-x-1/2 bg-destructive ring-1 ring-card', FORCED_FAIL)} style={{ left: x(t) }} />
         ))}
       </span>
     </button>
@@ -129,7 +135,7 @@ export function SessionTimeline({ onOpen }: { onOpen: (id: string) => void }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">최근 2시간</span>
         {LEGEND.map(st => <span key={st} className="inline-flex items-center gap-1.5"><Swatch state={st} />{STATE[st].label}</span>)}
-        <span className="inline-flex items-center gap-1.5"><span aria-hidden data-legend="failed" className="inline-block h-3 w-[3px] bg-destructive" />실패한 순간</span>
+        <span className="inline-flex items-center gap-1.5"><span aria-hidden data-legend="failed" className={cn('inline-block h-3 w-[3px] bg-destructive', FORCED_FAIL)} />실패한 순간</span>
       </div>
       <div className="flex flex-col gap-5">
         {lanes.map(role => {
