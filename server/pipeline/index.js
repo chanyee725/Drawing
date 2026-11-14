@@ -119,10 +119,15 @@ export async function setup(ctx) {
         let step = links[s.id];
         if (!step) {
           // A paused run a server restart dropped from memory: which steps it carried over is on disk. Read that
-          // first and look again, so a link is never saved to a carried step meanwhile.
+          // first and look again, so a link is never saved to a carried step meanwhile. Stop here rather than try
+          // the next plan, or the session could end up linked to both. Look again with the session as it is then,
+          // so an event that came in meanwhile is not rolled back.
           if (e.runId && recorder.isCarried(e.runId, '') === null) {
-            void recorder.readCarried(path, e.runId).then((ok) => ok && follow(s));
-            continue;
+            void recorder.readCarried(path, e.runId).then((ok) => {
+              const now = ok && hub.get(s.id);
+              if (now) follow(hub.publicSession(now));
+            });
+            return;
           }
           // Only tasks of this run: open ones, or ones closed after its 시작하기. A task an earlier run closed (a step
           // 계획 다시 열기 carried over) must not pull the session that did it into this run, or new work it gets
