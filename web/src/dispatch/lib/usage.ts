@@ -154,7 +154,7 @@ export function createUsageRefetcher<T>(
   let changedInFlight = false;
   let live = true;
   // A throwing page callback must not leave the refetcher stuck in flight or surface as an unhandled rejection.
-  const call = (fn: () => void) => { try { fn(); } catch { /* the page's own problem; scheduling goes on */ } };
+  const call = (fn: () => void) => { try { fn(); } catch (e) { console.error(e); /* the page's own problem; scheduling goes on */ } };
   const disarm = () => { if (timer != null) timers.clearTimeout(timer); timer = null; };
   const arm = () => {
     disarm();
@@ -205,7 +205,7 @@ export function createUsageRefetcher<T>(
       return true;
     },
     start() { live = true; },
-    // The request that is out keeps its deadline, so a remount (start again) is never stuck behind it.
+    // The request that is out keeps its deadline, so a strict-mode stop/start on this same instance is never stuck behind it.
     stop() { live = false; disarm(); },
     get clock() { return c; },
   };
